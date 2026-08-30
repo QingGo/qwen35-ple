@@ -728,6 +728,50 @@ python scripts/run_qwen35_ablation.py --mode a1 --steps 10 --lr 1e-5
 - 先评估“只利用 PLE feature”是否能给 Qwen3.5-0.8B 带来增量。
 - 如果 adapter 有效，再考虑真实推理路径和 Store-P 视图优化。
 
+## 2026-08-30：第十一轮增量（冻结 PLE e_t 薄 adapter 初测）
+
+### 1. 目标
+
+在真实 PLE 知识探针通过后，进一步验证：
+“把真实 e_t 注入冻结 Qwen3.5-0.8B 的某个 transformer 层并只训练 adapter，是否能降低 LM loss / 提升模型？”
+
+### 2. 实现
+
+- 新增 `scripts/run_ple_adapter.py`：
+  - 加载预计算真实 `e_t`
+  - 冻结全部 backbone
+  - 在指定层注入一个小的 MLP adapter
+  - 只训练 adapter
+  - 支持 `real` 与 `control`（shuffled e_t）对照
+- 使用 `data/ple-adapter-features`：
+  - 200 行 fineweb 子集
+  - 4593 tokens
+  - 真实 FP8 预计算
+
+### 3. 结果（负结果/需改进）
+
+20 步、seq_len=64、lr=1e-4：
+
+| 模式 | held-out loss before | after | delta |
+|---|---:|---:|---:|
+| real | 5.283 | 6.183 | +0.900 |
+| control | 5.283 | 5.571 | +0.288 |
+
+- 当前 naive 注入（layer 1 + 直接加 MLP(e_t)）没有带来 LM 增益，反而比 shuffled control 更差。
+- 可能原因：
+  - 注入位置太早，干扰了 pretrained 内部表示；
+  - 缺少 gating/normalization；
+  - 训练步数/学习率不合适；
+  - LM next-token 任务并不是 PLE 知识的最佳评测方式。
+- 这并不否定 PLE 知识探针的正向信号；它说明“直接把 e_t 加到 hidden”不是正确嫁接方式。
+
+### 4. 下一步候选
+
+- 尝试在更深的层注入，或在层输出之后加 adapter。
+- 加 gating / LayerNorm / 小 scale 初始化。
+- 改用分类/知识任务而不是 LM loss。
+- 或者退回 engram-peft 的 PLE gating 结构，用真实表 live 读取做训练。
+
 ### 7. 关键提交记录
 
 | 仓库 | commit | 说明 |

@@ -774,12 +774,23 @@ gate 初始化为 0.01，其余条件相同：
 - 真实 PLE e_t 比 shuffled control 多降约 **0.103** held-out loss。
 - 这仍然是小规模初步信号，不是最终结论，但比 naive 注入更值得继续优化。
 
+#### 3.3 扩大到 20k tokens / 40 步后（信号消失）
+
+| 模式 | held-out loss before | after | delta |
+|---|---:|---:|---:|
+| real | 4.428 | 3.849 | -0.579 |
+| control | 4.428 | 3.807 | **-0.621** |
+
+- 在更大的语料和更多 step 下，真实 PLE 没有比 shuffled control 更优，control 甚至略好 0.042。
+- 结论：当前 gated linear adapter 在 LM next-token 任务上**没有稳定可复现的 PLE 增益**。
+- 知识探针的正信号属于“特征可分性”，不等于“直接注入能提升小模型 LM”。
+
 ### 4. 下一步候选
 
-- 尝试更深的层注入。
-- 增加 LayerNorm / 多 head 融合。
-- 增大语料和 step。
-- 如果稳定正向，再进入真实 PLE 推理路径。
+- 尝试更深的层注入 / LayerNorm / 多 head 融合，看是否有稳定增益。
+- 改用知识分类任务而不是 LM next-token。
+- 改用 engram-peft 的 PLE gating 结构 + 真实表 live 读取。
+- 如果以上仍无稳定增益，则把“PLE 可提升小模型”标记为未证实，停止大规模投入。
 
 ### 7. 关键提交记录
 

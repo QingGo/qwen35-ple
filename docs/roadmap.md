@@ -150,8 +150,8 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - ✅ 训练冒烟已通：`scripts/run_cpt_smoke.py --ple` 可反向更新 PLE 层。
 - ✅ 已跑第一轮极小 A0/A1（Qwen3.5-0.8B + 10 步 + 小语料），结果 A1 ≈ A0，无可见增益。
 - ✅ 真实 PLE 知识探针通过：线性分类 acc=72.7% vs random=16.7%，说明 `e_t` 含语义信号。
-- ✅ 冻结 PLE `e_t` 薄 adapter 初测：gated 版本 real delta -0.404 vs control -0.301，真实特征略优。
-- ⏳ 需要扩大语料/步数/更优注入层，确认是否稳定正增益。
+- ✅ 冻结 PLE `e_t` 薄 adapter 初测：小规模 gated 略优，但 20k tokens/40 步后 real -0.579 vs control -0.621，无稳定增益。
+- ⏳ 需尝试更优注入/分类任务/engram-peft gating，否则将“PLE 提升小模型”标记为未证实。
 - 输出知识 recall、长上下文、基础 reasoning 报告（当前为迷你 probe）。
 
 **Gate：** 报告 + go/no-go；A1 不优于 A0 则停止放大。当前第一轮证据不足以下结论，但未观察到增益。

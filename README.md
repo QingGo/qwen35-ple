@@ -68,8 +68,86 @@ tests/            一致性冒烟测试（golden 对拍）
 - [x] YAML 配置加载与契约校验（`src/qwen35_ple/config.py`）
 - [x] engram-peft 按契约 C2 新增字段 + `QwenPleHashMapping` + 跨仓 golden
 - [x] M0 磁盘版 MultiHeadEmbedding quick 自检
-- [x] A0/A1 评测对比入口
-- [ ] M1 完整 PLE-lite 前向 golden（`refs/qwen4_exp_modeling.py`）
-- [ ] M0 e2e（需完整 engram-peft/peft 环境）
-- [ ] CPT 消融（设计文档 M2）
-- [ ] 100 tok/s 推理闭环（设计文档 M4，见 LLM-CompileForge/docs/qwen35-0.8b-100toks.md）
+- [x] Qwen3.5-0.8B + engram-peft PLE-lite CPU e2e
+- [x] 官方 `refs/qwen4_exp_modeling.py` 快照 + 4096 forward golden
+- [x] 真实 PLE FP8 `e_t` 预计算（EngramDB Store + PleDiskGather）
+- [x] 真实 PLE 知识探针（线性分类 72.7% vs 16.7%）
+- [x] XMemTransfer 风格 reader 完整实验矩阵
+- [ ] CP/后训练正式消融与 100 tok/s 推理闭环
+
+## 实验方法与当前结论（2026-08-30）
+
+### 1. 真实 PLE 特征预计算
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/precompute_real_ple_features.py \
+  --rows-dir "/Volumes/My Passport/qwen38-rows" \
+  --tokenizer data/models/Qwen3.5-0.8B \
+  --corpus data/padapter-corpus.txt \
+  --output data/ple-features
+```
+
+输出：
+
+```text
+tokens.npy
+keys.npy
+e_t.npy
+meta.json
+```
+
+核心代码：`src/qwen35_ple/real_ple.py`。
+
+### 2. PLE 知识探针
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/run_ple_knowledge_probe.py \
+  --rows-dir "/Volumes/My Passport/qwen38-rows" \
+  --tokenizer data/models/Qwen3.5-0.8B
+```
+
+结果：
+
+```text
+test accuracy = 72.7%
+random baseline = 16.7%
+```
+
+结论：真实 PLE `e_t` 含语义类别信息。
+
+### 3. Reader 实验矩阵
+
+支持：
+
+```text
+--layer 1 / 8
+--branches 1 / 4
+--short-conv
+--mode real / control
+```
+
+一键跑矩阵：
+
+```bash
+bash scripts/run_full_matrix.sh
+```
+
+结果（held-out loss，baseline=4.428）：
+
+| layer | branches | short_conv | real after | control after |
+|---:|---:|---:|---:|---:|
+| 1 | 1 | 无 | 5.046 | 5.921 |
+| 1 | 4 | 无 | 5.437 | 6.328 |
+| 1 | 4 | 有 | 5.196 | 5.993 |
+| 8 | 1 | 无 | **4.851** | 5.434 |
+| 8 | 4 | 无 | 5.112 | 5.664 |
+| 8 | 4 | 有 | 5.047 | 5.389 |
+
+结论：
+
+- 所有组合中真实 PLE 都优于 shuffled control。
+- 但最佳 real 仍高于 no-reader baseline。
+- 当前最佳为 `layer=8, branches=1, short_conv=off`。
+- 下一步应降低初始扰动、延长训练、换知识评测，或直接使用官方 Qwen PLE gating 结构。

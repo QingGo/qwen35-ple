@@ -601,5 +601,6 @@
 | qwen35-ple | `022ddee` | A0/A1 评测执行器 + CPT 训练冒烟 + CI |
 | qwen35-ple | `875a4e8` | YAML 暴露 `prime_sizes` / `use_sparse_embeddings` |
 | qwen35-ple | `1f235f4` | 契约 C2.2 补充开发字段 `prime_sizes` |
+| qwen35-ple | `d32107d` | 修复 CI ruff + 固定官方 Qwen PLE 引用/4096 forward golden |
 | engram-peft | `5fc90d2` | C2 字段 + PLE_QWEN_V1 哈希映射 + 跨仓 golden |
 | engram-peft | `272166a` | 可选 `prime_sizes` 支持（只增字段，合成表开发用） |

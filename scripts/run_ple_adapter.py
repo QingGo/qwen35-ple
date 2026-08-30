@@ -5,8 +5,8 @@ This is the next step after the real-PLE knowledge probe.  The experiment:
 
 * Loads a precomputed real ``e_t`` feature file (``data/ple-adapter-features``).
 * Freezes all Qwen3.5 backbone parameters.
-* Inserts one tiny trainable adapter into an early transformer layer:
-      hidden = hidden + MLP(e_t)
+* Inserts an Engram-style target-side reader after a deep transformer layer:
+      hidden = hidden + gate * W_V(e_t)
 * Trains only the adapter on the next-token LM task.
 * Compares real e_t against a shuffled e_t control to test whether the
   *content* of PLE features helps, not just the extra parameters.
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 from pathlib import Path
@@ -82,24 +83,45 @@ def _load_model(model_path: str):
     return tokenizer, model
 
 
-class PleAdapter(torch.nn.Module):
-    """Small gated MLP that maps e_t to a hidden-state delta.
+class RMSNorm(torch.nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = torch.nn.Parameter(torch.ones(dim))
 
-    The scalar gate starts at zero so the adapter begins as an identity and
-    can grow only if the gradient signal justifies it.
+    def forward(self, x):
+        rms = x.pow(2).mean(-1, keepdim=True).add(self.eps).sqrt()
+        return (x / rms) * self.weight
+
+
+class EngramReader(torch.nn.Module):
+    """Engram-style target-side reader.
+
+    Follows XMemTransfer's main design:
+
+      k = W_K(e_t)
+      v = W_V(e_t)
+      gate = sigmoid( (RMSNorm(h) . RMSNorm(k)) / sqrt(d_model) + gate_bias )
+      contribution = gate * v
     """
 
-    def __init__(self, hidden_size: int) -> None:
+    def __init__(self, d_model: int, d_mem: int = 2560, gate_bias_init: float = -2.0):
         super().__init__()
-        self.fc1 = torch.nn.Linear(2560, hidden_size)
-        self.act = torch.nn.GELU()
-        self.fc2 = torch.nn.Linear(hidden_size, hidden_size)
-        self.gate = torch.nn.Parameter(torch.tensor(0.01))
-        torch.nn.init.zeros_(self.fc2.weight)
-        torch.nn.init.zeros_(self.fc2.bias)
+        self.d_model = d_model
+        self.w_k = torch.nn.Linear(d_mem, d_model, bias=False)
+        self.w_v = torch.nn.Linear(d_mem, d_model, bias=False)
+        self.norm_h = RMSNorm(d_model)
+        self.norm_k = RMSNorm(d_model)
+        self.gate_bias = torch.nn.Parameter(torch.tensor(gate_bias_init))
+        torch.nn.init.normal_(self.w_k.weight, mean=0.0, std=0.02)
+        torch.nn.init.normal_(self.w_v.weight, mean=0.0, std=0.02)
 
-    def forward(self, e_t):
-        return self.gate * self.fc2(self.act(self.fc1(e_t)))
+    def forward(self, h, e_t):
+        k = self.w_k(e_t)
+        v = self.w_v(e_t)
+        gate_logit = (self.norm_h(h) * self.norm_k(k)).sum(-1) / math.sqrt(self.d_model)
+        gate = torch.sigmoid(gate_logit + self.gate_bias)
+        return gate.unsqueeze(-1) * v
 
 
 def _train(
@@ -162,8 +184,8 @@ def main() -> int:
     parser.add_argument("--mode", choices=["real", "control"], default="real")
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument("--seq-len", type=int, default=64)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--layer", type=int, default=1)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--layer", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", default="outputs/ple-adapter.json")
     args = parser.parse_args()
@@ -181,18 +203,24 @@ def main() -> int:
     for p in model.parameters():
         p.requires_grad_(False)
 
-    adapter = PleAdapter(model.config.hidden_size)
+    adapter = EngramReader(model.config.hidden_size)
     layer = model.model.layers[args.layer]
 
-    def pre_hook(module, args):
-        hidden = args[0]
+    def post_hook(module, input, output):
+        if isinstance(output, tuple):
+            hidden = output[0]
+        else:
+            hidden = output
         current = getattr(model, "_current_ple_e_t", None)
         if current is not None and current.shape[1] == hidden.shape[1]:
-            delta = adapter(current)
-            return (hidden + delta,) + args[1:]
-        return args
+            contribution = adapter(hidden, current)
+            new_hidden = hidden + contribution
+            if isinstance(output, tuple):
+                return (new_hidden,) + output[1:]
+            return new_hidden
+        return output
 
-    handle = layer.register_forward_pre_hook(pre_hook)
+    handle = layer.register_forward_hook(post_hook)
 
     print(f"[adapter] mode={args.mode} tokens={len(tokens)} layer={args.layer}")
     before_loss = _held_out_loss(model, tokens, e_t, args.seq_len)

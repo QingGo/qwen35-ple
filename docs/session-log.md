@@ -792,6 +792,55 @@ gate 初始化为 0.01，其余条件相同：
 - 改用 engram-peft 的 PLE gating 结构 + 真实表 live 读取。
 - 如果以上仍无稳定增益，则把“PLE 可提升小模型”标记为未证实，停止大规模投入。
 
+## 2026-08-30：第十二轮增量（XMemTransfer 风格 Engram Reader 对照）
+
+### 1. 修改
+
+- `run_ple_adapter.py` 从“简单 gated MLP”改为：
+  ```text
+  W_K + W_V + RMSNorm(h/k) + sigmoid gate + gate_bias=-2
+  ```
+- 注入方式：
+  ```text
+  layer 8（24层 // 3）
+  register_forward_hook（post-forward）
+  ```
+- 训练：
+  ```text
+  40 步
+  seq_len = 128
+  lr = 1e-4
+  backbone 冻结
+  ```
+
+### 2. 结果
+
+| 设置 | held-out before | held-out after | delta |
+|---|---:|---:|---:|
+| no-reader baseline | 4.428 | - | - |
+| real PLE reader | 5.534 | 4.841 | -0.693 |
+| shuffled control reader | 6.634 | 5.858 | -0.776 |
+
+### 3. 解读
+
+- real 的 after loss 显著低于 control：
+  ```text
+  4.841 vs 5.858
+  ```
+- 说明 Engram-style reader 下，**真实 PLE 确实比 shuffled 更有用**。
+- 但两者都还没有回到 no-reader baseline：
+  ```text
+  baseline 4.428
+  real after 4.841
+  control after 5.858
+  ```
+- 结论：方向正确，但当前 reader 初始化/训练量还不足以超过无记忆 baseline。
+- 下一步候选：
+  - 更小初始贡献（更负 gate_bias 或 W_V 缩小）
+  - 更长训练 / 更多语料
+  - 多 branch reader
+  - 或者测试部分解冻 backbone
+
 ### 7. 关键提交记录
 
 | 仓库 | commit | 说明 |

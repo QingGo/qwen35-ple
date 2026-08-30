@@ -36,6 +36,7 @@
 - [x] M0 合成表磁盘注入完整 forward/generate 闭环（`scripts/run_m0_smoke.py --synthetic-e2e`）
 - [x] M1 hc=1 PLE-lite 前向 golden（与 Qwen PLE 参考数学 4096 token 对拍）
 - [x] A0/A1 评测对比入口（`scripts/run_eval.py` + `eval/protocol.py`）
+- [x] 最小知识召回评测执行器（`scripts/run_ablation_eval.py`）
 - [x] CI：lint + 基础单元测试（`.github/workflows/ci.yml`）
 - [x] qwen35-ple 已推送到 GitHub（`451b046` / `cbf640c` / `aad9bec` / `f86fd0f` / `91a032f`）
 - [x] engram-peft 已推送到 GitHub（`5fc90d2` + `272166a`）
@@ -76,7 +77,8 @@
 
 ### 3.5 评测与决策机制
 
-- 已有 A0/A1 JSON 对比协议与报告入口，但还没有真实评测执行器。
+- 已有 A0/A1 JSON 对比协议、报告入口和最小知识召回执行器（`run_ablation_eval.py`）。
+- 仍缺长上下文与基础 reasoning 的正式评测执行器。
 - 没有“A1 负增益即止损”的正式门禁。
 
 ### 3.6 工程过程

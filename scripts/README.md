@@ -14,6 +14,7 @@
 | `table_assets.py`（src 内） | 查找 EngramDB CLI、读取/校验视图 manifest 的 Python 编排层 |
 | `generate_official_ple_snapshot.py` | 从固定官方 `refs/qwen4_exp_modeling.py` AST 抽取 PLE 参考快照，支持 `--check` |
 | `generate_official_ple_forward_golden.py` | 用官方 PLE 快照生成 4096 token 前向 golden（`tests/golden/`） |
+| `run_qwen35_e2e.py` | Qwen3.5-0.8B + engram-peft PLE-lite 的 CPU forward/generate e2e（模型放 `data/`，已 gitignore） |
 
 ## 预期脚本（与设计文档里程碑对应）
 

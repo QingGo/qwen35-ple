@@ -591,6 +591,57 @@
 
 ---
 
+## 2026-08-30：第八轮增量（Qwen3.5-0.8B 到手 + 兼容运行）
+
+### 1. 本阶段目标
+
+1. 获取 Qwen3.5-0.8B 作为真实小模型底座。
+2. 让它在当前 Intel Mac + torch 2.2 环境下可被 transformers 加载。
+3. 跑通 Qwen3.5-0.8B + engram-peft PLE-lite 的端到端 forward/generate。
+
+### 2. 尝试过程
+
+| 步骤 | 内容 | 结果 |
+|---|---|---|
+| 1 | 确认本机无 Qwen3.5-0.8B | ✅ 使用 ModelScope 下载 |
+| 2 | 尝试下载到移动硬盘 | ❌ 当前 shell 对 `/Volumes/My Passport` 无写权限 |
+| 3 | 改下载到 `data/models/Qwen3.5-0.8B`（已 gitignore） | ✅ 1.63B 权重 + tokenizer 全部完成 |
+| 4 | 尝试用当前 transformers 4.57 加载 | ❌ 不识 `qwen3_5` |
+| 5 | 安装 transformers 5.3 到 `/tmp/tf53` | ✅ 识别 Qwen3.5 |
+| 6 | 处理 torch 2.2 兼容缺口 | ✅ patch `uint16/32/64`、`get_default_device`、`is_autocast_enabled(device_type)` |
+| 7 | 绕过 engram-peft 完整 `__init__`（避免 TRL/datasets） | ✅ 用 dummy package 只加载 model/config 子模块 |
+| 8 | 新建 `scripts/run_qwen35_e2e.py` | ✅ CPU forward/generate 通过，输出有限值 |
+
+### 3. 踩坑
+
+- ModelScope 默认缓存锁在 `~/.cache/modelscope/hub/.lock`，本环境不可写；用 `MODELSCOPE_CACHE=/tmp/mscache` 解决。
+- 移动硬盘目录在本 shell 里出现 `Operation not permitted`，无法作为下载目标；本地 `data/` 已由 `.gitignore` 保护。
+- transformers 5.3 要求 torch>=2.4；本机 Intel Mac 只能装 torch 2.2.2，因此做了一层最小兼容 shim。
+- engram-peft 完整 `__init__` 会引 TRL/datasets；当前只加载实际需要的 `config/model/...` 子模块。
+
+### 4. 已完成
+
+- Qwen3.5-0.8B model + tokenizer 已下载到 `data/models/Qwen3.5-0.8B`，未提交。
+- `scripts/run_qwen35_e2e.py` 已可跑：
+  - 加载 Qwen3.5-0.8B
+  - 包装 `engine=qwen_ple` + `PLE_QWEN_V1` + 小素数合成表
+  - forward 有限、generate 产出文本
+- 当前 CPU 上短文本 forward 约 0.4s，2 token generate 约 0.8s（非基准，仅 smoke）。
+
+### 5. 新问题
+
+- 该兼容方案依赖 `/tmp/tf53` 和 `/tmp/extra`，尚未固化到项目环境。
+- 真实 PLE FP8/Store-I 仍未能接入；当前 e2e 用内存合成表。
+- A0/A1 真实小规模消融仍未开始。
+
+### 6. 下一步
+
+- 用 Qwen3.5-0.8B + 小语料跑 A0 vs A1 消融。
+- 若需要真实 PLE 表，则补 FP8 行读取/反量化并接入 Store-I。
+- 固化可复现开发环境（或写环境准备脚本）。
+
+---
+
 ### 7. 关键提交记录
 
 | 仓库 | commit | 说明 |

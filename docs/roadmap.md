@@ -34,6 +34,7 @@
 - [x] engram-peft C2 字段 + `QwenPleHashMapping` + 跨仓 golden
 - [x] M0 quick 磁盘版 MultiHeadEmbedding 自检
 - [x] M0 合成表磁盘注入完整 forward/generate 闭环（`scripts/run_m0_smoke.py --synthetic-e2e`）
+- [x] Qwen3.5-0.8B + engram-peft PLE-lite CPU e2e（`scripts/run_qwen35_e2e.py`，合成内存表）
 - [x] M1 hc=1 PLE-lite 前向 golden（与 Qwen PLE 参考数学 4096 token 对拍）
 - [x] Qwen 官方 `refs/qwen4_exp_modeling.py` 快照 + SHA-256 manifest 固定
 - [x] 官方 PLE 前向 4096 token golden fixture（`tests/golden/official_ple_forward_4096.*`）

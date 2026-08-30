@@ -119,7 +119,7 @@ def synthetic_e2e_check(model_name: str, steps: int = 2) -> None:
 
     import numpy as np
     from engram_peft import EngramConfig, get_engram_model
-    from engram_peft.hashing import NgramHashMapping
+    from engram_peft.hashing import create_hash_mapping
     from engramdb.integrations import install_disk_multi_head_embedding
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -127,19 +127,28 @@ def synthetic_e2e_check(model_name: str, steps: int = 2) -> None:
     model = AutoModelForCausalLM.from_pretrained(model_name, dtype=torch.float32)
 
     ngram_sizes = [2, 3]
-    n_head_per_ngram = 4
-    per_head = 8
-    embedding_dim = len(ngram_sizes) * n_head_per_ngram * per_head
+    n_head_per_ngram = 8
+    per_head = 10
+    embedding_dim = len(ngram_sizes) * n_head_per_ngram * per_head  # 160
     target_layer = 1
+    prime_sizes = [
+        17, 19, 23, 29, 31, 37, 41, 43,
+        47, 53, 59, 61, 67, 71, 73, 79,
+    ]
 
-    # Use the deepseek NgramHashMapping for the synthetic path: it derives small
-    # primes from engram_vocab_size_per_ngram, so the disk table stays tiny.
-    mapping = NgramHashMapping(
+    # Use the real PLE_QWEN_V1 hash semantics with tiny synthetic primes so the
+    # disk table stays small while still exercising the production rowid path.
+    mapping = create_hash_mapping(
         compressed_vocab_size=model.config.vocab_size,
         engram_vocab_size_per_ngram=[64, 64],
         ngram_sizes=ngram_sizes,
         n_head_per_ngram=n_head_per_ngram,
         layer_ids=[target_layer],
+        pad_id=tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 2,
+        seed=0,
+        engine="qwen_ple",
+        table_spec="PLE_QWEN_V1",
+        prime_sizes=prime_sizes,
     )
     flat_primes = [
         p for group in mapping.prime_tables[target_layer] for p in group
@@ -166,8 +175,8 @@ def synthetic_e2e_check(model_name: str, steps: int = 2) -> None:
         compressed_vocab_size=model.config.vocab_size,
         pad_id=tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 2,
         tokenizer_name_or_path=model_name,
-        engine="deepseek",
-        table_spec=None,
+        engine="qwen_ple",
+        table_spec="PLE_QWEN_V1",
         table_source="engramdb:store",
         enable_tokenizer_compression=False,
         hc_mult=1,
@@ -175,6 +184,7 @@ def synthetic_e2e_check(model_name: str, steps: int = 2) -> None:
         conv_dilation=2,
         gating_zero_init=True,
         conv_zero_init=True,
+        prime_sizes=prime_sizes,
     )
 
     engram_model = get_engram_model(model, config, tokenizer, train_mode="engram_only")

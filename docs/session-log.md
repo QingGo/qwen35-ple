@@ -1326,3 +1326,36 @@ LLM-CompileForge 提供产品化推理路径
   - 用 live Store 直接训练（不再依赖预计算数组）；
   - 官方 PLE 权重作为初始化/源空间 reader 的对照；
   - WSL/GPU 实机验证。
+
+## 2026-08-31：WSL/GPU Phase 0 正式三线结果 + live gate
+
+### 环境
+
+- WSL2 Ubuntu on Windows + NVIDIA GTX 1070
+- torch 2.6.0+cu124 / transformers 5.16.1 / engram-peft dc74c85
+- 46k token 旧预计算特征（从 Mac 拷贝）
+
+### 结果
+
+- Simple Reader（10 步 × 3 seeds）：
+  - no-reader 3.794245
+  - real 3.794319
+  - control 3.794269
+- QwenEngramReader + zero-init（10 步 × 3 seeds）：
+  - no-reader 3.794245
+  - real 3.794197
+  - control 3.794188
+
+### 结论
+
+- Phase 0 协议在 WSL 上正式跑通：三线 + 3 seeds。
+- 当前差异在 1e-4 量级，无可检测 PLE 增益。
+- 这不是科学否定：46k token / 10 步 / 旧预计算 / 未接 live Store。
+- Live `DiskPleNGramEmbedding` 与当前 `fetch_e_t` 路径已实测 max_abs_diff=0。
+
+### 下一步
+
+- 把真实 PLE 行表挂载/复制到 WSL/GPU 可访问位置。
+- 用 live Store 路径训练。
+- 准备 1M–5M token 语料。
+- 跑 Phase 2 正式消融。

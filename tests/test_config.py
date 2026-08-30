@@ -70,6 +70,59 @@ def test_rejects_missing_view_for_view_source(tmp_path):
     with pytest.raises(ValueError):
         load_config(cfg_path)
 
+
+def test_load_synthetic_prime_sizes(tmp_path):
+    cfg_path = tmp_path / "synthetic.yaml"
+    cfg_path.write_text(
+        yaml.safe_dump(
+            {
+                "project": "synthetic",
+                "base_model": "tiny",
+                "tokenizer": "tiny",
+                "engine": {"engine": "qwen_ple", "table_spec": "PLE_QWEN_V1"},
+                "engram": {
+                    "embedding_dim": 160,
+                    "prime_sizes": [
+                        17, 19, 23, 29, 31, 37, 41, 43,
+                        47, 53, 59, 61, 67, 71, 73, 79,
+                    ],
+                    "use_sparse_embeddings": False,
+                },
+                "training": {},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(cfg_path)
+    assert cfg.engram.embedding_dim == 160
+    assert cfg.engram.prime_sizes == [
+        17, 19, 23, 29, 31, 37, 41, 43,
+        47, 53, 59, 61, 67, 71, 73, 79,
+    ]
+    assert cfg.engram.use_sparse_embeddings is False
+
+
+def test_rejects_bad_prime_sizes(tmp_path):
+    cfg_path = tmp_path / "bad-prime.yaml"
+    cfg_path.write_text(
+        yaml.safe_dump(
+            {
+                "project": "synthetic",
+                "base_model": "tiny",
+                "tokenizer": "tiny",
+                "engine": {"engine": "qwen_ple", "table_spec": "PLE_QWEN_V1"},
+                "engram": {"prime_sizes": [17, 19]},
+                "training": {},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        load_config(cfg_path)
+
 def test_repo_sample_config_is_loadable():
     sample = Path(__file__).resolve().parents[1] / "configs" / "qwen35-08b-ple.yaml"
     cfg = load_config(sample)

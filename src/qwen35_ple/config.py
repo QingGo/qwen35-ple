@@ -57,6 +57,8 @@ class EngramConfig:
     conv_kernel_size: int = 4
     conv_dilation: int = 3
     engram_dtype: str = "bfloat16"
+    prime_sizes: list[int] | None = None
+    use_sparse_embeddings: bool = True
     extra: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
@@ -64,7 +66,10 @@ class EngramConfig:
             raise ValueError("current PLE_QWEN_V1 orchestration expects ngram_sizes=[2,3]")
         if self.n_head_per_ngram != 8:
             raise ValueError("PLE_QWEN_V1 expects n_head_per_ngram=8")
-        if self.embedding_dim != 2560:
+        if self.prime_sizes is not None:
+            if len(self.prime_sizes) != 16:
+                raise ValueError("prime_sizes must contain 16 head prime sizes")
+        elif self.embedding_dim != 2560:
             raise ValueError("PLE_QWEN_V1 e_t width is 16*160=2560")
         if not self.target_layers:
             raise ValueError("target_layers must not be empty")
@@ -155,10 +160,19 @@ def load_config(path: str | Path) -> Qwen35PleConfig:
             conv_kernel_size=int(engram_raw.get("conv_kernel_size", 4)),
             conv_dilation=int(engram_raw.get("conv_dilation", 3)),
             engram_dtype=str(engram_raw.get("engram_dtype", "bfloat16")),
+            prime_sizes=(
+                [int(x) for x in engram_raw["prime_sizes"]]
+                if engram_raw.get("prime_sizes") is not None
+                else None
+            ),
+            use_sparse_embeddings=bool(
+                engram_raw.get("use_sparse_embeddings", True)
+            ),
             extra={k: v for k, v in engram_raw.items() if k not in {
                 "ngram_sizes", "n_head_per_ngram", "embedding_dim",
                 "engram_vocab_size_per_ngram", "target_layers", "hc_mult",
                 "conv_kernel_size", "conv_dilation", "engram_dtype",
+                "prime_sizes", "use_sparse_embeddings",
             }},
         ),
         training=TrainingConfig(

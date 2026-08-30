@@ -1,0 +1,41 @@
+# qwen35-08b-ple 训练配置样例（初值，非可运行配置）
+#
+# 字段名遵循 engram-peft.EngramConfig（契约 C2）；`engine` / `table_spec` /
+# `table_source` 为契约 v1 新增字段（设计态，待 engram-peft 实现）。
+# 数值为文档化初值，最终以消融矩阵（docs/qwen35-ple-design.md §6）为准。
+
+project: qwen35-08b-ple
+base_model: Qwen/Qwen3.5-0.8B-Base
+tokenizer: Qwen/Qwen3.5-0.8B-Base
+
+# ── 契约 C2：引擎与表 ──────────────────────────────────────────────
+engine:
+  engine: qwen_ple            # 'deepseek'（论文对齐，默认，不变）| 'qwen_ple'（新增）
+  table_spec: PLE_QWEN_V1     # 契约 C1 行语义注册表 id
+  table_source: engramdb:view # 'memory' | 'engramdb:store' | 'engramdb:view'
+  # 视图/行表资产路径（由 scripts/build_table_assets.sh 产出）:
+  #   view_path: data/views/qwen-ple.view.bin
+  #   keys_path: data/views/qwen-ple.view.keys.txt
+
+# ── 记忆层（对应 Qwen4ExpTextPLELayer 的 hc=1 变体）─────────────────
+engram:
+  ngram_sizes: [2, 3]             # Flash-Next 口径: 2-gram + 3-gram
+  n_head_per_ngram: 8             # 8 × 2 = 16 头
+  embedding_dim: 2560             # 16 × 160（e_t 总维）
+  engram_vocab_size_per_ngram: [20000096, 20000096]  # Qwen 口径（消融时以 golden 核验）
+  target_layers: [1]              # 零基层号；参考 Flash-Next ple_layer_ids=[2]（1-based）
+  hc_mult: 1                      # Qwen3.5 无 hyper-connection → PLE-lite 变体
+  conv_kernel_size: 4
+  conv_dilation: 3                # = max_ngram_size
+  engram_dtype: bfloat16
+  # 消融项（见设计 §6）:
+  #   target_layers: [1, 10]      # A3 多层注入
+  #   table_adapt_mode: none      # A2 备选: 'lora_hot'（仅热行低秩适应，需新增 engine 能力）
+
+# ── 训练阶段 ───────────────────────────────────────────────────────
+training:
+  train_mode: engram_only     # S0 适应 / S1 CPT
+  # S2 后训练经 engram-peft 的 trl 集成切换阶段与模式
+  backbone_freeze_steps: 1000 # S0「适配器先行」步数（消融 A1）
+  learning_rate_multiplier: 5.0
+  seed: 0

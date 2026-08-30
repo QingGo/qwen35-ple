@@ -1,0 +1,8 @@
+"""qwen35-ple: Qwen3.5 主干 + Flash-Next PLE 记忆表的嫁接实验编排。
+
+与兄弟仓库的交互遵循 `docs/integration-contract.md`（v1，冻结）。
+"""
+
+from __future__ import annotations
+
+__version__ = "0.1.0"

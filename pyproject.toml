@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "qwen35-ple"
+version = "0.1.0"
+description = "Qwen3.5 backbone + Qwen3.8-Flash-Next PLE memory table: CPT & post-training, CPU 100 tok/s inference"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "qwen35-ple authors" }]
+dependencies = [
+    "engram-peft>=1.2.6",
+    "engramdb-python>=0.2.0",
+    "modelscope>=1.32",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qwen35_ple"]
+
+# 兄弟仓库以 path 覆盖（契约 C2/C1 的本地开发形态）
+[tool.uv.sources]
+engram-peft = { path = "../engram-peft" }
+engramdb-python = { path = "../EngramDB/python" }

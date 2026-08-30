@@ -23,11 +23,30 @@ import os
 from pathlib import Path
 
 DEFAULT_BENCHMARK = [
-    {"prompt": "What is the capital of France?", "answer": "Paris"},
-    {"prompt": "What is the largest planet in the Solar System?", "answer": "Jupiter"},
-    {"prompt": "Who wrote 'Romeo and Juliet'?", "answer": "Shakespeare"},
-    {"prompt": "What is the chemical symbol for gold?", "answer": "Au"},
-    {"prompt": "How many continents are there on Earth?", "answer": "Seven"},
+    {"category": "knowledge", "prompt": "What is the capital of France?", "answer": "Paris"},
+    {"category": "knowledge", "prompt": "What is the largest planet in the Solar System?", "answer": "Jupiter"},
+    {"category": "knowledge", "prompt": "Who wrote 'Romeo and Juliet'?", "answer": "Shakespeare"},
+    {"category": "knowledge", "prompt": "What is the chemical symbol for gold?", "answer": "Au"},
+    {"category": "knowledge", "prompt": "How many continents are there on Earth?", "answer": "Seven"},
+    {
+        "category": "long_context",
+        "prompt": (
+            "Context: Alice has three apples. Bob gives her two more apples. "
+            "Then Alice eats one apple. Question: How many apples does Alice have now?"
+        ),
+        "answer": "four",
+    },
+    {
+        "category": "long_context",
+        "prompt": (
+            "Context: The library is on the third floor. The cafeteria is on the "
+            "ground floor. The classroom is two floors above the cafeteria. "
+            "Question: Which floor is the classroom on?"
+        ),
+        "answer": "second",
+    },
+    {"category": "reasoning", "prompt": "What is 12 + 15?", "answer": "27"},
+    {"category": "reasoning", "prompt": "What is 7 * 6?", "answer": "42"},
 ]
 
 
@@ -41,6 +60,7 @@ def load_prompts(path: str | Path | None) -> list[dict[str, str]]:
     for item in data:
         out.append(
             {
+                "category": str(item.get("category", "knowledge")),
                 "prompt": str(item["prompt"]),
                 "answer": str(item["answer"]),
             }
@@ -69,10 +89,18 @@ def evaluate_model(
         tokenizer.pad_token_id = eos_id
 
     examples: list[dict[str, object]] = []
-    correct = 0
+    metric_names = {
+        "knowledge": "knowledge_recall",
+        "long_context": "long_context_score",
+        "reasoning": "reasoning_score",
+    }
+    counts: dict[str, int] = {}
+    correct_counts: dict[str, int] = {}
+
     for item in prompts:
         prompt = item["prompt"]
         answer = item["answer"]
+        category = item.get("category", "knowledge")
         inputs = tokenizer(prompt, return_tensors="pt")
         input_ids = inputs["input_ids"]
         attention_mask = inputs.get("attention_mask")
@@ -87,9 +115,11 @@ def evaluate_model(
         continuation = generated[0][input_ids.shape[-1] :]
         text = tokenizer.decode(continuation, skip_special_tokens=True)
         hit = answer.lower() in text.lower()
-        correct += int(hit)
+        counts[category] = counts.get(category, 0) + 1
+        correct_counts[category] = correct_counts.get(category, 0) + int(hit)
         examples.append(
             {
+                "category": category,
                 "prompt": prompt,
                 "answer": answer,
                 "generated": text,
@@ -97,14 +127,18 @@ def evaluate_model(
             }
         )
 
+    metrics: dict[str, float] = {}
+    for category in sorted(counts):
+        name = metric_names.get(category, f"{category}_score")
+        metrics[name] = correct_counts[category] / counts[category]
     n = len(prompts)
     return {
         "model": model_name,
-        "metrics": {"knowledge_recall": correct / n if n else 0.0},
+        "metrics": metrics,
         "metadata": {
             "n_questions": n,
             "max_new_tokens": max_new_tokens,
-            "benchmark": "qwen35-ple-mini-knowledge-v1",
+            "benchmark": "qwen35-ple-mini-ablation-v1",
             "examples": examples,
         },
     }

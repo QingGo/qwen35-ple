@@ -150,8 +150,8 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - ✅ 训练冒烟已通：`scripts/run_cpt_smoke.py --ple` 可反向更新 PLE 层。
 - ✅ 已跑第一轮极小 A0/A1（Qwen3.5-0.8B + 10 步 + 小语料），结果 A1 ≈ A0，无可见增益。
 - ✅ 真实 PLE 知识探针通过：线性分类 acc=72.7% vs random=16.7%，说明 `e_t` 含语义信号。
-- ✅ XMemTransfer 风格 reader（layer 8 post-forward）对照：real after 4.841 vs control 5.858，真实 PLE 更优，但仍高于 no-reader baseline 4.428。
-- ⏳ 需要继续调 reader 初始化/训练量/多分支，或测试部分解冻 backbone。
+- ✅ 完整实验矩阵（layer 1/8 × branch 1/4 × short_conv）：所有组合 real 均优于 control，最佳为 layer8+b1+无shortconv（after 4.851），但仍高于 no-reader baseline 4.428。
+- ⏳ 需要减小初始扰动/更长训练/换任务/部分解冻 backbone，或直接用官方 PLE gating 结构。
 - 输出知识 recall、长上下文、基础 reasoning 报告（当前为迷你 probe）。
 
 **Gate：** 报告 + go/no-go；A1 不优于 A0 则停止放大。当前第一轮证据不足以下结论，但未观察到增益。

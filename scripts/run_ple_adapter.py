@@ -28,6 +28,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 
 def _install_torch_compat() -> None:
@@ -94,34 +95,94 @@ class RMSNorm(torch.nn.Module):
         return (x / rms) * self.weight
 
 
+class ShortConv(torch.nn.Module):
+    """Depthwise causal short conv used by DeepSeek Engram / Qwen PLE."""
+
+    def __init__(self, hidden_size: int, kernel_size: int = 2, dilation: int = 2):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.kernel_size = kernel_size
+        self.dilation = dilation
+        self.norm = RMSNorm(hidden_size)
+        self.conv = torch.nn.Conv1d(
+            hidden_size,
+            hidden_size,
+            kernel_size=kernel_size,
+            groups=hidden_size,
+            dilation=dilation,
+            bias=False,
+        )
+        torch.nn.init.zeros_(self.conv.weight)
+
+    def forward(self, x):
+        normed = self.norm(x)
+        conv_in = normed.transpose(1, 2)
+        pad_len = (self.kernel_size - 1) * self.dilation
+        conv_in = F.pad(conv_in, (pad_len, 0))
+        out = F.silu(self.conv(conv_in)).transpose(1, 2)
+        return out + x
+
+
 class EngramReader(torch.nn.Module):
-    """Engram-style target-side reader.
+    """Engram-style target-side reader with optional multi-branch keys.
 
     Follows XMemTransfer's main design:
 
-      k = W_K(e_t)
-      v = W_V(e_t)
-      gate = sigmoid( (RMSNorm(h) . RMSNorm(k)) / sqrt(d_model) + gate_bias )
-      contribution = gate * v
+      shared v = W_V(e_t)
+      branch i: k_i = W_K_i(e_t)
+                gate_i = sigmoid( (RMSNorm(h) . RMSNorm(k_i)) / sqrt(d_model) + gate_bias_i )
+      output = mean_i( gate_i * v )
     """
 
-    def __init__(self, d_model: int, d_mem: int = 2560, gate_bias_init: float = -2.0):
+    def __init__(
+        self,
+        d_model: int,
+        d_mem: int = 2560,
+        gate_bias_init: float = -2.0,
+        num_branches: int = 1,
+    ):
         super().__init__()
         self.d_model = d_model
-        self.w_k = torch.nn.Linear(d_mem, d_model, bias=False)
+        self.num_branches = num_branches
         self.w_v = torch.nn.Linear(d_mem, d_model, bias=False)
+        if num_branches == 1:
+            self.w_k = torch.nn.Linear(d_mem, d_model, bias=False)
+            self.norm_k = RMSNorm(d_model)
+        else:
+            self.w_k = torch.nn.ModuleList(
+                [torch.nn.Linear(d_mem, d_model, bias=False) for _ in range(num_branches)]
+            )
+            self.norm_k = torch.nn.ModuleList(
+                [RMSNorm(d_model) for _ in range(num_branches)]
+            )
         self.norm_h = RMSNorm(d_model)
-        self.norm_k = RMSNorm(d_model)
-        self.gate_bias = torch.nn.Parameter(torch.tensor(gate_bias_init))
-        torch.nn.init.normal_(self.w_k.weight, mean=0.0, std=0.02)
+        self.gate_bias = torch.nn.Parameter(
+            torch.full((num_branches,), gate_bias_init)
+        )
         torch.nn.init.normal_(self.w_v.weight, mean=0.0, std=0.02)
+        if num_branches == 1:
+            torch.nn.init.normal_(self.w_k.weight, mean=0.0, std=0.02)
+        else:
+            for proj in self.w_k:
+                torch.nn.init.normal_(proj.weight, mean=0.0, std=0.02)
 
     def forward(self, h, e_t):
-        k = self.w_k(e_t)
         v = self.w_v(e_t)
-        gate_logit = (self.norm_h(h) * self.norm_k(k)).sum(-1) / math.sqrt(self.d_model)
-        gate = torch.sigmoid(gate_logit + self.gate_bias)
-        return gate.unsqueeze(-1) * v
+        norm_h = self.norm_h(h)
+        if self.num_branches == 1:
+            k = self.w_k(e_t)
+            gate_logit = (norm_h * self.norm_k(k)).sum(-1) / math.sqrt(self.d_model)
+            gate = torch.sigmoid(gate_logit + self.gate_bias[0])
+            return gate.unsqueeze(-1) * v
+        contributions = []
+        for branch_idx, (proj_k, norm_k) in enumerate(
+            zip(self.w_k, self.norm_k)
+        ):
+            k = proj_k(e_t)
+            gate_logit = (norm_h * norm_k(k)).sum(-1) / math.sqrt(self.d_model)
+            gate = torch.sigmoid(gate_logit + self.gate_bias[branch_idx])
+            contributions.append(gate.unsqueeze(-1) * v)
+        return torch.stack(contributions, dim=0).mean(dim=0)
 
 
 def _train(
@@ -186,6 +247,8 @@ def main() -> int:
     parser.add_argument("--seq-len", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--layer", type=int, default=8)
+    parser.add_argument("--branches", type=int, default=1)
+    parser.add_argument("--short-conv", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", default="outputs/ple-adapter.json")
     args = parser.parse_args()
@@ -203,7 +266,11 @@ def main() -> int:
     for p in model.parameters():
         p.requires_grad_(False)
 
-    adapter = EngramReader(model.config.hidden_size)
+    reader = EngramReader(
+        model.config.hidden_size,
+        num_branches=args.branches,
+    )
+    short_conv = ShortConv(model.config.hidden_size) if args.short_conv else None
     layer = model.model.layers[args.layer]
 
     def post_hook(module, input, output):
@@ -213,7 +280,9 @@ def main() -> int:
             hidden = output
         current = getattr(model, "_current_ple_e_t", None)
         if current is not None and current.shape[1] == hidden.shape[1]:
-            contribution = adapter(hidden, current)
+            contribution = reader(hidden, current)
+            if short_conv is not None:
+                contribution = short_conv(contribution)
             new_hidden = hidden + contribution
             if isinstance(output, tuple):
                 return (new_hidden,) + output[1:]
@@ -226,7 +295,7 @@ def main() -> int:
     before_loss = _held_out_loss(model, tokens, e_t, args.seq_len)
     losses = _train(
         model,
-        adapter,
+        torch.nn.ModuleList([reader] + ([short_conv] if short_conv is not None else [])),
         tokens,
         e_t,
         steps=args.steps,
@@ -245,6 +314,8 @@ def main() -> int:
         "steps": args.steps,
         "seq_len": args.seq_len,
         "lr": args.lr,
+        "branches": args.branches,
+        "short_conv": bool(args.short_conv),
         "seed": args.seed,
         "train_losses": losses,
         "held_out_loss_before": before_loss,

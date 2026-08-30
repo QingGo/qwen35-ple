@@ -841,6 +841,45 @@ gate 初始化为 0.01，其余条件相同：
   - 多 branch reader
   - 或者测试部分解冻 backbone
 
+## 2026-08-30：第十三轮增量（完整实验矩阵）
+
+### 1. 实验设置
+
+- 统一：20k tokens / 40 步 / seq_len=128 / lr=1e-4 / backbone 冻结
+- 变量：
+  - layer = 1 / 8
+  - branches = 1 / 4
+  - short_conv = 无 / 有
+- 每组跑 real 与 shuffled control。
+
+### 2. 结果（held-out loss）
+
+| layer | branches | short_conv | real after | control after | real-control 差 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 1 | 无 | 5.046 | 5.921 | **-0.875** |
+| 1 | 4 | 无 | 5.437 | 6.328 | -0.891 |
+| 1 | 4 | 有 | 5.196 | 5.993 | -0.797 |
+| 8 | 1 | 无 | **4.851** | 5.434 | -0.583 |
+| 8 | 4 | 无 | 5.112 | 5.664 | -0.552 |
+| 8 | 4 | 有 | 5.047 | 5.389 | -0.342 |
+
+No-reader baseline：`4.428`。
+
+### 3. 解读
+
+- **真实 PLE 在所有组合下都优于 shuffled control**，说明 PLE 内容确实提供额外信息。
+- 但所有 real 的 after loss 仍高于 no-reader baseline `4.428`。
+- 最佳 real 组合：
+  ```text
+  layer 8 + 1 branch + 无 short conv
+  after = 4.851
+  ```
+- 当前阶段 adding branches / short_conv 没有带来额外收益，甚至略差。
+- 说明问题不在“是否有多分支”，而在于：
+  - reader 初始扰动仍然太大；
+  - 或 LM next-token 不是最能体现 PLE 价值的任务；
+  - 或需要更长的训练/更小学习率/更好的 reader 对齐。
+
 ### 7. 关键提交记录
 
 | 仓库 | commit | 说明 |

@@ -18,7 +18,8 @@
 | `run_qwen35_ablation.py` | Qwen3.5-0.8B A0/A1 极小消融：同语料同 step 数，记录 held-out loss + 迷你知识/推理 probe |
 | `precompute_real_ple_features.py` | 用真实 FP8 PLE 表 + EngramDB Store 预计算 `e_t` 特征 |
 | `run_ple_knowledge_probe.py` | 真实 PLE `e_t` 线性知识探针：语义类别可分性 |
-| `run_ple_adapter.py` | 冻结 Qwen3.5 + 预计算 `e_t` 薄 adapter 训练，`real` / `control` 对照 |
+| `run_ple_adapter.py` | 冻结 Qwen3.5 + 预计算 `e_t` 的 Engram-style reader，支持 layer/branches/short_conv |
+| `run_full_matrix.sh` | 完整实验矩阵批处理：layer × branches × short_conv × real/control |
 
 ## 预期脚本（与设计文档里程碑对应）
 

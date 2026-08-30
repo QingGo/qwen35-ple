@@ -11,6 +11,7 @@ EngramDB's Python bindings (``Store`` / ``PleDiskGather``).
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 
@@ -18,6 +19,8 @@ import numpy as np
 import torch
 
 from qwen35_ple.ple_hash import real_spec
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_ple_weight_scale(
@@ -38,8 +41,8 @@ def resolve_ple_weight_scale(
             from engramdb import load_ple_weight_scale
 
             return float(load_ple_weight_scale(str(model_dir)))
-        except Exception:
-            pass
+        except (ImportError, OSError, KeyError, ValueError, RuntimeError, TypeError) as exc:
+            logger.debug("failed to load PLE weight_scale from %s: %s", model_dir, exc)
     return 0.0002
 
 
@@ -89,7 +92,8 @@ def rowids_from_tokens(tokens: np.ndarray) -> np.ndarray:
 
         rows = rowids_for_seq(tokens.tolist())
         return np.asarray(rows, dtype=np.int64)
-    except Exception:
+    except (ImportError, OSError, KeyError, ValueError, RuntimeError, TypeError, NotImplementedError) as exc:
+        logger.debug("EngramDB rowids unavailable, using local PleSpec: %s", exc)
         spec = real_spec()
         rows = spec.rowids_for_seq(tokens.tolist())
         return np.asarray(rows, dtype=np.int64)

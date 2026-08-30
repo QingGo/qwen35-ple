@@ -1134,3 +1134,165 @@ No-reader baseline：`4.428`。
 | qwen35-ple | `d32107d` | 修复 CI ruff + 固定官方 Qwen PLE 引用/4096 forward golden |
 | engram-peft | `5fc90d2` | C2 字段 + PLE_QWEN_V1 哈希映射 + 跨仓 golden |
 | engram-peft | `272166a` | 可选 `prime_sizes` 支持（只增字段，合成表开发用） |
+
+## 2026-08-30：第十七轮系统复盘（终极目标 / 本轮技术债 / 借鉴 / 开发计划）
+
+### 1. 终极目标（保持不变，再次确认）
+
+**一句话：用最小可复现实验证明“冻结的 Qwen3.8-Flash-Next PLE 能否通过正确的 target-side reader 让更小模型获得稳定、可复现的增益”；如果成立，再交付 0.8B CPU 100 tok/s 推理闭环。**
+
+四条验收轴：
+
+| 轴 | 目标 |
+|---|---|
+| 科学 | A1（真实 PLE + reader）相对 A0（无记忆）和 shuffled control，在 ≥3 seed 下有稳定可复现增益 |
+| 工程 | 四仓库按契约 v1 形成可复现闭环；预计算/live/推理数值一致 |
+| 产品 | 小模型 + 真实 PLE 在 CPU 达到 100 tok/s，PLE 尾差 ≤2% |
+| 过程 | 正负结果都记录；门禁清晰；环境可重建 |
+
+**当前最大约束没有变：不要先冲 4B/50B、不要先做 SFT/RL、不要先把推理性能压满。先证伪“嫁接是否成立”。**
+
+---
+
+### 2. 本轮 session 做了什么
+
+1. 多轮网络调研：
+   - XMemTransfer：5M target-side tokens 开始有竞争力，20M 基本饱和；
+   - XMemTransfer reader：target-side reader、multi-branch、dual-layer、real/control/ffn_only 消融；
+   - 官方 Qwen PLE / DeepSeek Engram：`key_proj → hc_count*hidden`、`value_proj → hidden`、
+     官方 gate 非线性、ShortConv、hidden expand/sum；
+   - Memory Grafting：离线冻结 latent memory + 精确 n-gram + hash fallback + 轻量 projection/gating；
+   - Prometheus Mind：冻结模型可能忽略注入信号，需要 stage-wise / 部分解冻；
+   - PWC：WikiText-103 PPL 8.5 / #2、TriviaQA dual-layer 72.5 等公开证据。
+2. 检查 EngramDB v0.2.8 新能力，并完成适配：
+   - `engramdb.rowids_for_seq` 接入并验证与本地 PleSpec 一致；
+   - `discover_ple` / `load_ple_weight_scale` 接入；
+   - 修复 **真实 FP8 e_t 没有乘 weight_scale** 的数值问题；
+   - 新增 `run_engramdb_v028_smoke.py`，实测通过；
+   - 预计算/探针/adapter 支持 `--model-dir / --scale`。
+3. 修复 CI：`ruff RUF046` 已清理，`ruff check src tests` 通过。
+4. 新增文档：
+   - `docs/research-2026-08-30-next-experiments.md`
+   - `docs/engramdb-v0.2.8-adaptations.md`
+
+---
+
+### 3. 本轮发现的技术债（按优先级）
+
+| # | 技术债 | 为什么是债 | 影响 |
+|---|---|---|---|
+| 1 | **训练量差 100 倍以上** | XMemTransfer 5M token 才开始“有竞争力”；我们只有 46k token | 当前负/弱正结果不能下结论 |
+| 2 | **reader 仍未对齐官方** | 我们用的是简化 raw sigmoid + 简化 ShortConv；官方是 hc_count=4 + 特殊 gate + ShortConv | 可能没有用对记忆读取方式 |
+| 3 | **预计算 e_t 不可规模化** | 5M token × 2560 dim × 4B ≈ 50GB+ 特征文件 | 必须转 live Store 读取或 Store-P |
+| 4 | **评测协议不严谨** | 无真正 train/val 分割、无多 seed、无知识 QA | 数字不可直接用于 go/no-go |
+| 5 | **backbone 策略未测试** | 只测冻结；Prometheus Mind 提示冻结模型可能忽略信号 | 可能漏掉正确耦合方式 |
+| 6 | **环境不可复现** | 依赖 `/tmp/tf53`、手工 torch shim、conda 手工 PYTHONPATH | 外部/远程无法重复 |
+| 7 | **资产 provenance 不足** | 语料来源/checksum、视图 keys 映射、表路径未固化 | 重跑难、审计难 |
+| 8 | **Store-P 视图还没利用** | 已有 48GB 全量视图，但没有 keys/index 映射 | 低延迟/训练流优势未兑现 |
+| 9 | **数字一致性防线不足** | 本轮才发现 e_t 未乘 scale；之前没有“我们的 e_t == EngramDB DiskPleNGramEmbedding”自动校验 | 实验数值路径有漂移风险 |
+| 10 | **CPU decode 基准缺失** | 还没有 baseline/PLE A/B tok/s | 产品目标未验证 |
+
+---
+
+### 4. 之前实验结果应谨慎解读
+
+- 知识探针 72.7% vs 16.7%；
+- 所有 reader 组合 real > shuffled；
+- 但最佳 real 仍高于 no-reader baseline。
+
+这些结果仍然说明“真实 PLE 内容不是噪声”，但不能说明“嫁接能带来净增益”。
+尤其是本轮发现 e_t 缩放问题后，之前数字在“线性可吸收缩放”的意义上仍可参考，
+但后续应以“乘了 weight_scale + 官方 reader + 足够训练量”的新实验为准。
+
+---
+
+### 5. 可借鉴且不冲突的项目
+
+| 来源 | 借什么 | 明确不拿 | 为什么可以并行 |
+|---|---|---|---|
+| XMemTransfer | target-side reader、multi-branch/dual-layer、5M/20M 训练预算、real/control/ffn_only 消融、多 seed | 不拿它的记忆表/模型 | 我们只借“嫁接实验方法” |
+| Qwen 官方 / Flash-Next | PLE 精确语义、`weight_scale`、官方 key/value/norm/conv、hc_count、ShortConv | 不重训 51B 表、不照搬 4 流主干 | 官方结构是事实标准 |
+| DeepSeek Engram / engram-peft | `ContextAwareGating + ShortConv`、PEFT/TRL、LoRA/冻结基建 | 不引入第二套存储 | 它就是我们模型侧的蓝本 |
+| Memory Grafting | 离线冻结记忆、精确 n-gram + hash fallback、轻量 projection/gating、规模化训练 | 不放弃 PLE 表 | 证明“冻结记忆移植”是合理路线 |
+| Prometheus Mind | 冻结模型会忽略信号、stage-wise training、深层/多层注入 | 不复制其记忆提取 | 指导 backbone 策略 |
+| EngramDB | Store-I/Store-P、磁盘 embedding、C ABI、manifest、bit-exact、预取 | 不改其存储核心 | 数据面直接复用 |
+| vLLM / SGLang | 磁盘 PLE offload、预取、H2D、CPU/GPU serving 模式 | 现在不引入完整 serving | 为推理闭环保留参考 |
+| PWC / 标准评测 | WikiText-103、TriviaQA、NQ、BoolQ、OpenBookQA、SciQ、RTE 等口径 | 不追榜单 | 用标准任务做科学判定 |
+| RAG/FAST 等 | 外部知识/检索评测思路 | 不把 PLE 改成 RAG | 只借评测口径 |
+
+**分层关系**：
+
+```text
+EngramDB         提供存储/IO/位级一致
+engram-peft      提供模型侧 gating/训练/TRL
+Qwen/DeepSeek    提供算法事实标准
+XMemTransfer/MG  提供实验设计与规模证据
+Prometheus Mind  提供冻结模型耦合教训
+PWC/QA 评测       提供判定标准
+LLM-CompileForge 提供产品化推理路径
+```
+
+互不冲突：存储、模型、实验方法、评测、推理各自一层。
+
+---
+
+### 6. 第十七轮修订版开发计划（按门禁）
+
+#### Phase 0：实验基座（1–2 天，先做）
+- [ ] 正式 train/val 分割，val 绝不进训练
+- [ ] 3-seed 评测 harness，自动生成 real/control/no-reader 三线
+- [ ] 固化环境脚本或 WSL/GPU 通道
+- [ ] 建立最小 QA 评测：TriviaQA / NQ / BoolQ 子集
+- [ ] `precomputed e_t == live Store 读取` 自动校验（含 weight_scale）
+
+**Gate**：一条命令可跑固定分割 + 三线 + 3 seed；环境可重建。
+
+#### Phase 1：忠实 reader + live 路径（2–4 天）
+- [ ] 用 engram-peft 的 `ContextAwareGating + ShortConv`，或加载官方 PLE key/value/norm/conv 构造源空间 reader
+- [ ] 接 `DiskPleNGramEmbedding` / `install_real_qwen_ple_embedding`，不再依赖 50GB 预计算文件
+- [ ] 测 `hc_mult ∈ {1,4}`、zero-init、注入层、dual-layer
+- [ ] 先跑 46k token smoke 验证协议，再进大训练
+
+**Gate**：live 与预计算数值一致；真实 PLE 在 smoke 下仍至少不劣于 control。
+
+#### Phase 2：训练量扩大（最关键科学变量）
+- [ ] 1M token pilot
+- [ ] 5M token 可比实验
+- [ ] 记录 PPL + 知识 QA
+- [ ] 若本机太慢，按用户已批准走 SSH/WSL/GPU
+
+**Gate**：≥3 seeds 下 real 稳定超过 shuffled，且至少在 PPL 或 QA 之一超过 no-reader baseline。
+
+#### Phase 3：Backbone 策略矩阵（如果 Phase 2 有正信号）
+- [ ] frozen only
+- [ ] reader + LoRA
+- [ ] reader + 最后 N 层解冻
+- [ ] reader + 全量小 LR CPT
+
+**Gate**：找到稳定最优配置。
+
+#### Phase 4：产品化（仅科学正增益后）
+- [ ] SFT/RL
+- [ ] MTP
+- [ ] EngramDB live 推理 + CPU decode A/B
+- [ ] 100 tok/s、PLE 尾差 ≤2%
+
+**Gate**：产品验收 + 科学证据同时闭环。
+
+---
+
+### 7. Go / No-Go 明确规则
+
+| 决策 | 条件 |
+|---|---|
+| **Go** | 在 5M token、官方/忠实 reader、正确评测、≥3 seeds 下，real 稳定优于 shuffled，且至少在一项正式指标超过 no-reader baseline |
+| **No-Go** | 达到上述条件仍无稳定正增益，则记录完整负结果，停止放大，不进入 SFT/RL/产品化 |
+
+---
+
+### 8. 本轮提交
+
+| commit | 说明 |
+|---|---|
+| `a2b5cb4` | 第十六轮调研：下一步实验方向 |
+| `e727cc5` | EngramDB v0.2.8 适配：rowid/discover/scale + 修复 e_t 缩放 + CI ruff |

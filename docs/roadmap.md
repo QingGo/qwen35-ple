@@ -170,3 +170,35 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 1. **先最小纵切，再规模化。** 每一环节没有可复现命令和 gate 就不进入下一阶段。
 2. **跨仓改动只走契约。** 只增字段/符号，旧行为冻结，避免四仓互相踩脚。
 3. **决策留下证据。** 无论正负结果都写入 roadmap/session log，附可复现命令。
+
+---
+
+## 7. 2026-08-30 第十七轮战略更新
+
+> 详细复盘见 `docs/session-log.md` 第十七轮；本轮只记录战略层增量。
+
+### 7.1 当前最重要的判断
+
+- 我们已经有“真实 PLE 内容包含语义信号”的初步证据（知识探针 + real>control）。
+- 但还**没有**“嫁接能带来净增益”的证据。
+- 当前最可能的原因：
+  1. 训练量只有 46k token，而 XMemTransfer 需要 5M–20M；
+  2. reader 仍未对齐官方 hc_count=4 + ShortConv + 官方 gate；
+  3. 评测任务/协议不够严格。
+- 因此战略重心仍然是 **先科学证伪，再产品放大**，不提前进入 SFT/RL/100 tok/s。
+
+### 7.2 新增已解决问题
+
+- [x] EngramDB v0.2.8 接入：`rowids_for_seq` / `discover_ple` / `load_ple_weight_scale`
+- [x] 修复 e_t 未乘 `weight_scale` 的数值缺陷
+- [x] 清理 ruff RUF046，CI lint 恢复
+- [x] 新增 EngramDB v0.2.8 消费冒烟脚本
+
+### 7.3 下一阶段只做三件事
+
+1. **Phase 0**：正式 held-out + 多 seed + 最小 QA 评测 + 环境固化。
+2. **Phase 1**：忠实 reader（官方/engram-peft gating + live Store 读取）。
+3. **Phase 2**：把训练量推到 1M → 5M token，用正式指标做 Go/No-Go。
+
+若 Phase 2 仍无稳定正增益：记录负结果，停止放大。
+若 Phase 2 有正增益：才进入 backbone 策略矩阵和产品化。

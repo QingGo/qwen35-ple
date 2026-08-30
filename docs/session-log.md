@@ -880,6 +880,108 @@ No-reader baseline：`4.428`。
   - 或 LM next-token 不是最能体现 PLE 价值的任务；
   - 或需要更长的训练/更小学习率/更好的 reader 对齐。
 
+## 2026-08-30：第十四轮系统复盘（终极目标 / 技术债 / 借鉴 / 计划）
+
+### 1. 终极目标（修正版）
+
+**一句话：用最小可复现实验证明“冻结的 Qwen3.8-Flash-Next PLE 能否通过正确的 target-side reader 让更小模型获得稳定增益”；若证明成立，再交付 CPU 100 tok/s 的工程闭环。**
+
+拆成四条轴：
+
+| 轴 | 目标 |
+|---|---|
+| 科学 | A1（真实 PLE + reader）相对 A0（无记忆）和 shuffled control 有稳定可复现增益 |
+| 工程 | 四仓库契约不变，预计算/训练/推理都通过 EngramDB 数据面闭环 |
+| 产品 | 小模型 + 真实 PLE 表在 CPU 达到 100 tok/s，PLE 开销 ≤2% |
+| 过程 | 正负结果都记录，go/no-go 门禁清晰，环境可重建 |
+
+### 2. 本轮 session 发现的技术债
+
+1. **Reader 仍不是“官方消费方式”**
+   - 我们还没完整复刻 Qwen PLE 原生 `hc_count=4 + W_K/W_V + ShortConv` 结构。
+   - XMemTransfer 的成功更多来自 dual-layer + four-branch reader，我们还没对齐。
+
+2. **初始扰动过大**
+   - `gate_bias=-2` + 随机 `W_V` 会让训练起点显著偏离 no-reader baseline。
+   - 需要测试更负 gate_bias、更小初始化、warmup。
+
+3. **评测任务可能不对**
+   - PLE 知识探针是正的，但 LM next-token 没有体现。
+   - 需要增加知识 QA / downstream 评测，不能只看 PPL。
+
+4. **训练预算太小**
+   - 20k tokens / 40 步远小于 XMemTransfer 等工作的规模。
+   - 需要用更大语料、更长训练、真正 held-out 分割。
+
+5. **“held-out”不严谨**
+   - `run_ple_adapter.py` 的验证窗口可能被随机训练采样到。
+   - 需要固定训练/验证分割，确保验证集绝不参与训练。
+
+6. **没有测试 backbone 解冻**
+   - 只测了冻结 backbone。
+   - 需要测部分解冻 / LoRA / 全量微调。
+
+7. **没有 live table 路径**
+   - 当前全靠预计算 e_t。
+   - 需要验证 EngramDB 真实表读取的 train/inference 一致性。
+
+8. **开发环境不可重建**
+   - 依赖 `/tmp/tf53`、`/tmp/extra`、手工 torch shim。
+   - 需要正式 env 脚本或 WSL 环境，避免临时拼装。
+
+9. **缺少正式评测集和资产 manifest**
+   - 没有固定语料、固定 eval、provenance。
+
+10. **推理性能未验证**
+   - 还没有真实 PLE + 小模型 CPU decode 基准。
+
+### 3. 可借鉴且不冲突的成果
+
+| 来源 | 借什么 | 明确不拿 | 为什么没冲突 |
+|---|---|---|---|
+| XMemTransfer | target-side reader、dual-layer/four-branch、冻结记忆迁移协议、real/control/ffn_only 消融 | 不替换我们的 PLE 表 | 我们正在做同类实验，可直接复用其方法 |
+| Qwen 官方 | PLE 原生 gating/hc_count/ShortConv/注入层 | 不重训 PLE | 官方结构是我们必须对齐的事实标准 |
+| DeepSeek Engram | W_K/W_V/RMSNorm/gate/ShortConv/multi-branch 设计 | 不引入第二套存储 | 其结构正是我们 reader 的蓝本 |
+| Prometheus Mind | 冻结模型会忽略注入信号；stage-wise training；深层注入 | 不复制其 memory extraction | 提供“为什么简单 adapter 失败”的机理 |
+| Memory Grafting | 离线构造冻结 latent memory、精确 n-gram + hash fallback、轻量 projection/gating | 不放弃 PLE | 可补充“用大模型 hidden state 作记忆”的对照 |
+| EngramDB | Store-I/Store-P/PleDiskGather/PageReader/预取/视图 | 不改其存储核心 | 数据面直接复用 |
+| PWC 排名 | 标准评测、对比方法 | 不照搬 MoE 压缩/架构创新 | 只用于确定 benchmark 和方向 |
+| RAG/FAST 等 | 评测口径、外部知识评估思路 | 不把 PLE 改成 RAG | 不冲突，互不替代 |
+
+### 4. 后续开发计划（按门禁排序）
+
+#### Phase 0：环境与评测基座
+- 固化可重建环境（脚本或 WSL）
+- 固定正式 held-out 分割
+- 建立 PPL + 知识 QA 双评测
+
+**Gate：** 任意实验可在干净环境复现。
+
+#### Phase 1：复刻官方/XMemTransfer reader
+- 实现完整 Qwen PLE gating（4 branch + ShortConv）
+- 测试 `layer=1/8`，`gate_bias=-2/-5/-8`
+- 提高训练 budget（100k-1M tokens，100+ 步）
+
+**Gate：** 真实 PLE 稳定优于 shuffled control，且至少接近 no-reader baseline。
+
+#### Phase 2：Backbone 策略
+- 冻结 vs 部分解冻 vs LoRA vs 全量
+- 找到 PLE 与 backbone 的最佳耦合方式
+
+**Gate：** 找到能稳定超过 baseline 的配置。
+
+#### Phase 3：EngramDB live 闭环
+- 实时 Store/Store-P 读取，验证与预计算 e_t 一致
+- 跑 CPU decode 基准
+
+**Gate：** 训练/推理一致，性能可接受。
+
+#### Phase 4：产品化
+- 如果正增益成立再做 SFT/RL、MTP、100 tok/s
+- 如果不成，保留负结果并停止放大
+
+**Gate：** 产品验收 + 科学证据闭环。
+
 ### 7. 关键提交记录
 
 | 仓库 | commit | 说明 |

@@ -248,12 +248,29 @@
 
 ---
 
+### 6.6 第五轮增量（继续开发）
+
+- **A0/A1 评测执行器**
+  - `scripts/run_ablation_eval.py`：最小知识/长上下文/推理评测，输出 EvalResult JSON。
+  - 验证：tiny random 上可运行并生成三类 0 分基线。
+- **M2 CPT 训练冒烟**
+  - `scripts/run_cpt_smoke.py`：A0 基线直接训练 backbone，A1 用合成 PLE 层只训练 PLE。
+  - 验证：A1 可反向传播、loss 下降，AdamW 需 `use_sparse_embeddings=False`。
+- **CI**
+  - `.github/workflows/ci.yml`：lint + 基础单元测试。
+- **推送**
+  - qwen35-ple 已推至 `origin/main`，最新 `022ddee`。
+  - engram-peft 已推 `272166a`（可选 `prime_sizes`）。
+
+---
+
 ### 7. 关键提交记录
 
 | 仓库 | commit | 说明 |
 |---|---|---|
 | qwen35-ple | `451b046` | 基础编排、golden、M0 smoke、eval protocol |
 | qwen35-ple | `cbf640c` | 合成表 M0 磁盘注入 forward/generate 闭环 |
-| qwen35-ple | （待提交） | M1 hc=1 前向 golden + 文档更新 |
+| qwen35-ple | `aad9bec` | M1 hc=1 PLE-lite 前向 golden + 文档 |
+| qwen35-ple | `022ddee` | A0/A1 评测执行器 + CPT 训练冒烟 + CI |
 | engram-peft | `5fc90d2` | C2 字段 + PLE_QWEN_V1 哈希映射 + 跨仓 golden |
 | engram-peft | `272166a` | 可选 `prime_sizes` 支持（只增字段，合成表开发用） |

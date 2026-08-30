@@ -1359,3 +1359,55 @@ LLM-CompileForge 提供产品化推理路径
 - 用 live Store 路径训练。
 - 准备 1M–5M token 语料。
 - 跑 Phase 2 正式消融。
+
+## 2026-08-31：第十九轮系统复盘（WSL 基座 / 技术债 / 开发计划）
+
+### 1. 终极目标（不变）
+
+用最小可复现实验证明“冻结 PLE 能否通过正确 target-side reader 让更小模型获得稳定可复现增益”；
+若成立再交付 0.8B CPU 100 tok/s 推理闭环；若不成立留下可审计负结果。
+
+### 2. 本轮完成
+
+- WSL/GPU 环境搭建完成：
+  - WSL2 + GTX 1070
+  - torch 2.6+cu124 / transformers 5.16 / engram-peft / engramdb
+  - Qwen3.5-0.8B 模型下载完成
+- Phase 0 正式三线 + 3 seeds 已在 WSL 跑完：
+  - Simple Reader：baseline/real/control ≈ 3.7942
+  - QwenEngramReader + zero-init：三者同样 ≈ 3.7942
+  - 差异均为 1e-4 量级，当前无可检测 PLE 增益
+- live vs 预计算一致性通过：max_abs_diff=0.0
+- 开始把真实 qwen38-rows 48GB 复制到 WSL，当前进行中
+
+### 3. 本轮技术债
+
+1. 真实 PLE 行表尚未完全到 WSL，live 训练仍受阻。
+2. Phase 0 仍用旧预计算特征，不是 live 路径。
+3. Phase 0 未跑 QA，只有 PPL。
+4. live DiskPleNGramEmbedding 仅做了一致性验证，未接入训练循环。
+5. 缺少 1M/5M token 语料与 provenance。
+6. 传输完成后需要校验 128 shard / 大小 / Store 可读性。
+7. 尚未用 GPU/CUDA tensor 跑训练（当前 CPU 路径）。
+8. QA 仍是 log-likelihood，不是 exact-match 生成式评测。
+
+### 4. 下一阶段计划
+
+- 立即：等待 qwen38-rows 复制完成，校验 shard 完整性。
+- Phase 2a：在 WSL 用 live Store + QwenEngramReader 跑 1M token pilot，三线 + 3 seeds + PPL/QA。
+- Phase 2b：跑 5M token 可比实验，做正式 Go/No-Go。
+- Phase 3：正增益后才进入 backbone 矩阵、SFT/RL、CPU 100 tok/s。
+
+### 5. 借鉴矩阵（保持不变，互不冲突）
+
+| 项目 | 借什么 | 不拿什么 |
+|---|---|---|
+| XMemTransfer | 5M/20M 训练预算、target-side reader、多分支/双层 | 不拿它的表/模型 |
+| Qwen/Flash-Next | 官方 PLE 结构、weight_scale、key/value/norm/conv、hc_count、ShortConv | 不重训 51B 表 |
+| DeepSeek Engram / engram-peft | ContextAwareGating + ShortConv + PEFT/TRL | 不引入第二套存储 |
+| Memory Grafting | 离线冻结记忆、精确 n-gram、轻量 projection/gating | 不放弃 PLE |
+| Prometheus Mind | 冻结模型可能忽略信号，需 stage-wise/部分解冻 | 不复制记忆提取 |
+| EngramDB | Store-I/Store-P、DiskPleNGramEmbedding、C ABI、bit-exact | 不修改存储核心 |
+| vLLM/SGLang | 磁盘 PLE offload、预取、serving | 现在不引入 serving |
+| PWC/标准评测 | WikiText-103、TriviaQA、NQ、BoolQ、OpenBookQA 等口径 | 不追榜单 |
+

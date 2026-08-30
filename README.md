@@ -68,7 +68,15 @@ python scripts/run_m0_smoke.py --e2e \
   --ple-model-dir /path/to/qwen38-ple
 ```
 
+轻量版（不需要完整 engram-peft 的 TRL/datasets 依赖）：
 
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/run_real_fp8_e2e.py \
+  --model /path/to/Qwen3.5-0.8B \
+  --store-dir /path/to/qwen38-rows \
+  --ple-model-dir /path/to/qwen38-ple
+```
 
 ## 与兄弟仓库的交互契约（摘要）
 

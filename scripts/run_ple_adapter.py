@@ -30,6 +30,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from qwen35_ple.real_ple import resolve_ple_weight_scale
+
 
 def _install_torch_compat() -> None:
     for name, alias in [
@@ -251,12 +253,40 @@ def main() -> int:
     parser.add_argument("--short-conv", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", default="outputs/ple-adapter.json")
+    parser.add_argument(
+        "--model-dir",
+        default="/Volumes/My Passport/qwen38-ple",
+        help="Qwen3.8-Flash-Next checkpoint dir (reads FP8 weight_scale)",
+    )
+    parser.add_argument(
+        "--scale",
+        type=float,
+        default=None,
+        help="explicit FP8 weight_scale; overrides discovery",
+    )
     args = parser.parse_args()
 
     _install_torch_compat()
 
-    tokens = np.load(Path(args.features) / "tokens.npy")
-    e_t = np.load(Path(args.features) / "e_t.npy")
+    feature_dir = Path(args.features)
+    tokens = np.load(feature_dir / "tokens.npy")
+    e_t = np.load(feature_dir / "e_t.npy")
+    meta_path = feature_dir / "meta.json"
+    applied_scale = 1.0
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if "weight_scale" in meta:
+            applied_scale = float(meta["weight_scale"])
+        else:
+            applied_scale = resolve_ple_weight_scale(
+                model_dir=args.model_dir, scale=args.scale
+            )
+            e_t = e_t * applied_scale
+    elif args.scale is not None or args.model_dir:
+        applied_scale = resolve_ple_weight_scale(
+            model_dir=args.model_dir, scale=args.scale
+        )
+        e_t = e_t * applied_scale
 
     if args.mode == "control":
         rng = np.random.default_rng(args.seed)
@@ -317,6 +347,7 @@ def main() -> int:
         "branches": args.branches,
         "short_conv": bool(args.short_conv),
         "seed": args.seed,
+        "weight_scale": applied_scale,
         "train_losses": losses,
         "held_out_loss_before": before_loss,
         "held_out_loss_after": after_loss,

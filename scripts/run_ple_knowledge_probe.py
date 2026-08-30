@@ -25,6 +25,7 @@ import numpy as np
 
 from qwen35_ple.real_ple import (
     fetch_e_t,
+    resolve_ple_weight_scale,
     rowids_from_tokens,
     tokenize_texts_with_offsets,
 )
@@ -128,6 +129,17 @@ def main() -> int:
     )
     parser.add_argument("--output", default="outputs/ple-probe.json")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--model-dir",
+        default="/Volumes/My Passport/qwen38-ple",
+        help="Qwen3.8-Flash-Next checkpoint dir (reads FP8 weight_scale)",
+    )
+    parser.add_argument(
+        "--scale",
+        type=float,
+        default=None,
+        help="explicit FP8 weight_scale; overrides discovery",
+    )
     args = parser.parse_args()
 
     texts: list[str] = []
@@ -145,7 +157,8 @@ def main() -> int:
     rowids = rowids_from_tokens(tokens)
     print("[probe] fetching real FP8 e_t ...")
     t0 = time.time()
-    e_t = fetch_e_t(args.rows_dir, rowids)
+    scale = resolve_ple_weight_scale(model_dir=args.model_dir, scale=args.scale)
+    e_t = fetch_e_t(args.rows_dir, rowids, scale=scale)
     print(f"[probe] fetched e_t shape={e_t.shape} in {time.time() - t0:.2f}s")
 
     feats = _segment_features(e_t, offsets)
@@ -178,7 +191,7 @@ def main() -> int:
     result = {
         "categories": categories,
         "num_segments": n,
-        "num_tokens": int(len(tokens)),
+        "num_tokens": len(tokens),
         "feature_dim": int(x.shape[1]),
         "train_accuracy": train_acc,
         "test_accuracy": test_acc,
@@ -189,6 +202,7 @@ def main() -> int:
             "tokenizer": args.tokenizer,
             "e_t_mean": float(e_t.mean()),
             "e_t_std": float(e_t.std()),
+            "weight_scale": scale,
             "finite": bool(np.isfinite(e_t).all()),
         },
     }

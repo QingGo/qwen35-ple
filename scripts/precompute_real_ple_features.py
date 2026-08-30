@@ -29,6 +29,7 @@ import numpy as np
 import torch
 
 from qwen35_ple.ple_hash import real_spec
+from qwen35_ple.real_ple import resolve_ple_weight_scale
 
 DEFAULT_TEXT = (
     "The capital of France is Paris. "
@@ -61,7 +62,7 @@ def _rowids_from_tokens(tokens: np.ndarray) -> tuple[np.ndarray, list[list[int]]
     return arr, rows
 
 
-def _fetch_fp8(rows_dir: str, flat_rowids: np.ndarray) -> np.ndarray:
+def _fetch_fp8(rows_dir: str, flat_rowids: np.ndarray, scale: float = 1.0) -> np.ndarray:
     import engramdb
     from engramdb.vllm import PleDiskGather
 
@@ -75,7 +76,7 @@ def _fetch_fp8(rows_dir: str, flat_rowids: np.ndarray) -> np.ndarray:
         gather = PleDiskGather(store, row_bytes=160)
         raw = gather.fetch(flat_rowids.tolist())
         arr = torch.frombuffer(bytearray(raw), dtype=torch.float8_e4m3fn)
-        return arr.float().numpy()
+        return (arr.float().numpy() * scale)
     finally:
         store.close()
 
@@ -99,6 +100,17 @@ def main() -> int:
     parser.add_argument(
         "--output", default="data/ple-features", help="output directory"
     )
+    parser.add_argument(
+        "--model-dir",
+        default="/Volumes/My Passport/qwen38-ple",
+        help="Qwen3.8-Flash-Next checkpoint dir (used to read FP8 weight_scale)",
+    )
+    parser.add_argument(
+        "--scale",
+        type=float,
+        default=None,
+        help="explicit FP8 weight_scale; overrides discovery",
+    )
     args = parser.parse_args()
 
     if args.corpus:
@@ -121,9 +133,12 @@ def main() -> int:
     flat = rowids.reshape(-1)
     print(f"[precompute] rowids={flat.shape[0]}")
 
+    scale = resolve_ple_weight_scale(model_dir=args.model_dir, scale=args.scale)
+    print(f"[precompute] weight_scale={scale:.10g}")
+
     print("[precompute] fetching real FP8 rows from EngramDB ...")
     t0 = time.time()
-    fp8_vectors = _fetch_fp8(args.rows_dir, flat)
+    fp8_vectors = _fetch_fp8(args.rows_dir, flat, scale=scale)
     elapsed = time.time() - t0
     print(f"[precompute] fetch+dequant {elapsed:.2f}s")
 
@@ -143,13 +158,14 @@ def main() -> int:
     meta = {
         "rows_dir": args.rows_dir,
         "tokenizer": args.tokenizer,
-        "num_tokens": int(len(tokens)),
+        "num_tokens": len(tokens),
         "e_t_dim": 2560,
         "heads": 16,
         "head_dim": 160,
         "dtype": "float32",
         "fetch_seconds": float(elapsed),
         "corpus_segments": len(texts),
+        "weight_scale": scale,
     }
     (out_dir / "meta.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False) + "\n",

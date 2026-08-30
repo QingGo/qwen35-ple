@@ -34,6 +34,8 @@
 - [x] engram-peft C2 字段 + `QwenPleHashMapping` + 跨仓 golden
 - [x] M0 quick 磁盘版 MultiHeadEmbedding 自检
 - [x] A0/A1 评测对比入口（`scripts/run_eval.py` + `eval/protocol.py`）
+- [x] qwen35-ple 已推送到 GitHub（`451b046`）
+- [x] engram-peft 已推送到 GitHub（`5fc90d2`）
 - [ ] M0 e2e（TinyLlama/Qwen + 完整 engram-peft 环境）
 - [ ] CPT 消融（A0/A1）
 - [ ] 100 tok/s 推理闭环
@@ -75,6 +77,8 @@
 
 - 还没有 CI workflow；有 session log 与跨仓 golden 测试。
 - 兄弟仓库已有成熟“门禁 + 文档同步”习惯，本仓需要对齐。
+- 本 session 暴露了跨仓 git 权限问题：某些环境下不能直接写 engram-peft `.git`，
+  需要用可写镜像 + rebase 完成提交；后续应把跨仓变更流程标准化为 patch/镜像流程。
 
 ---
 
@@ -114,10 +118,10 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 
 ### Phase 2：M1 实现 `engine="qwen_ple"`
 
-- engram-peft 只增 `engine` / `table_spec` / `table_source` 字段。
-- 实现 Qwen 原生日志映射（`PLE_QWEN_V1`）与 PLE-lite `hc=1` 层。
-- 与 `refs/qwen4_exp_modeling.py` 做 4096 token 位级对拍。
-- 保持 `engine="deepseek"` 全量回归。
+- engram-peft 只增 `engine` / `table_spec` / `table_source` 字段（✅ 已完成并推送）。
+- 实现 Qwen 原生日志映射（`PLE_QWEN_V1`）与 PLE-lite `hc=1` 层（✅ 哈希映射已完成）。
+- 与 `refs/qwen4_exp_modeling.py` 做 4096 token 位级对拍（⏳ 待完成）。
+- 保持 `engine="deepseek"` 全量回归（⏳ 待完整环境验证）。
 
 **Gate：** 位级一致；DeepSeek 路径不回归。
 

@@ -180,6 +180,7 @@ def test_to_engram_config_bridges_store_fields(tmp_path):
     assert ecfg.table_width == 160
     assert ecfg.table_scale == 0.0002
     assert ecfg.table_cache_size == 2048
+    assert ecfg.table_dtype == "float32"  # default when YAML omits dtype
     assert ecfg.hidden_size == 2560
     assert ecfg.engine == "qwen_ple"
 

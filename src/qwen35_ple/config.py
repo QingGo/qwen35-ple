@@ -36,6 +36,7 @@ class EngineConfig:
     shards: int | None = None
     rows_per_shard: int | None = None
     width: int | None = None
+    dtype: str = "float32"
     scale: float | None = None
     cache_size: int = 4096
 
@@ -164,6 +165,7 @@ class Qwen35PleConfig:
             "table_shards": self.engine.shards,
             "table_rows_per_shard": self.engine.rows_per_shard,
             "table_width": self.engine.width,
+            "table_dtype": self.engine.dtype,
             "table_scale": self.engine.scale,
             "table_cache_size": self.engine.cache_size,
         }
@@ -221,6 +223,7 @@ def load_config(path: str | Path) -> Qwen35PleConfig:
                 if engine_raw.get("width") is not None
                 else None
             ),
+            dtype=str(engine_raw.get("dtype", "float32")),
             scale=(
                 float(engine_raw["scale"])
                 if engine_raw.get("scale") is not None

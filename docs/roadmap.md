@@ -33,10 +33,12 @@
 - [x] YAML 配置加载与契约校验（`src/qwen35_ple/config.py`）
 - [x] engram-peft C2 字段 + `QwenPleHashMapping` + 跨仓 golden
 - [x] M0 quick 磁盘版 MultiHeadEmbedding 自检
+- [x] M0 合成表磁盘注入完整 forward/generate 闭环（`scripts/run_m0_smoke.py --synthetic-e2e`）
+- [x] M1 hc=1 PLE-lite 前向 golden（与 Qwen PLE 参考数学 4096 token 对拍）
 - [x] A0/A1 评测对比入口（`scripts/run_eval.py` + `eval/protocol.py`）
-- [x] qwen35-ple 已推送到 GitHub（`451b046`）
+- [x] qwen35-ple 已推送到 GitHub（`451b046` / `cbf640c`）
 - [x] engram-peft 已推送到 GitHub（`5fc90d2`）
-- [ ] M0 e2e（TinyLlama/Qwen + 完整 engram-peft 环境）
+- [ ] M0 真表 e2e（TinyLlama/Qwen + 完整 engram-peft + 50GB PLE 表环境）
 - [ ] CPT 消融（A0/A1）
 - [ ] 100 tok/s 推理闭环
 
@@ -47,19 +49,22 @@
 ### 3.1 契约与实现的剩余缺口
 
 - C2 的 `engine` / `table_spec` / `table_source` 已进入 `EngramConfig`，`QwenPleHashMapping` 已落地。
-- 仍缺：完整 PLE-lite 前向与 `refs/qwen4_exp_modeling.py` 的逐位/数值对拍。
+- M1 已补 `hc=1` PLE-lite 前向 golden（合成 prime_sizes + Qwen PLE 参考数学），
+  下一步仍需要把该 golden 固定到 `refs/qwen4_exp_modeling.py` 的独立引用/快照，避免漂移。
 - `table_source="engramdb:view"` 的推理侧读取尚未在 engram-peft 中接通。
 
 ### 3.2 缺少 golden/位级一致性防线
 
 - 已建立本仓 golden + engram-peft 跨仓 golden（`tests/test_cross_repo_hash_golden.py`）。
-- 待补：与 `refs/qwen4_exp_modeling.py` 的官方前向对拍。
+- 已建立 4096 token 的 PLE-lite 前向 golden（`tests/test_ple_forward_golden.py`）。
+- 待补：与 `refs/qwen4_exp_modeling.py` 官方代码的直接可加载快照固定。
 - `refs/qwen4_exp_modeling.py` 目前仍存放在 EngramDB，需要固定跨仓引用或拷贝以避免漂移。
 
 ### 3.3 缺少完整可运行闭环
 
-- 已有 M0 quick 磁盘自检，但完整模型 e2e 需要安装 peft/transformers 依赖后运行
-  `scripts/run_m0_smoke.py --e2e`。
+- 已有 M0 quick 磁盘自检。
+- 已有合成表 `--synthetic-e2e` 完整 forward/generate 闭环：引擎、磁盘注入、无 NaN 均验证。
+- 真表 e2e 仍需要 50GB PLE 表与 FP8 行解码/磁盘读取路径。
 - 配置样例仍主要在“初值/编排”层面，不是完整训练入口。
 
 ### 3.4 资产与可重建性
@@ -112,15 +117,17 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 
 - 用 EngramDB 真表/合成表构建 Store-P 视图。
 - 接入 `engramdb.integrations`，跑 TinyLlama 或 Qwen3.5-0.8B 磁盘注入前向/生成。
-- 验证 `view verify` 位级一致、e_t 形状、无 NaN。
+- ✅ 合成表路径已闭环：`scripts/run_m0_smoke.py --synthetic-e2e` 一条命令可跑，forward/generate 无 NaN。
+- ⏳ 真表路径仍待 50GB 表 + FP8 行读取。
 
-**Gate：** 一条命令可复现；e2e 可跑。
+**Gate：** 一条命令可复现；e2e 可跑（合成表已过，真表待跑）。
 
 ### Phase 2：M1 实现 `engine="qwen_ple"`
 
 - engram-peft 只增 `engine` / `table_spec` / `table_source` 字段（✅ 已完成并推送）。
 - 实现 Qwen 原生日志映射（`PLE_QWEN_V1`）与 PLE-lite `hc=1` 层（✅ 哈希映射已完成）。
-- 与 `refs/qwen4_exp_modeling.py` 做 4096 token 位级对拍（⏳ 待完成）。
+- ✅ 与 Qwen PLE 参考数学做 4096 token 数值对拍（`tests/test_ple_forward_golden.py`）。
+- ⏳ 与 `refs/qwen4_exp_modeling.py` 官方代码的快照直连/固定。
 - 保持 `engine="deepseek"` 全量回归（⏳ 待完整环境验证）。
 
 **Gate：** 位级一致；DeepSeek 路径不回归。

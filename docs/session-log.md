@@ -218,9 +218,40 @@
 
 ---
 
+### 6.5 第四轮增量（继续开发）
+
+- **M0 合成表磁盘注入闭环**
+  - 新增 `scripts/run_m0_smoke.py --synthetic-e2e`。
+  - 用 `hf-internal-testing/tiny-random-LlamaForCausalLM` + 小型 EngramDB Store-I
+    跑通完整 engram-peft forward/generate。
+  - 验证 logits 有限、生成能扩展。
+  - 增加 `--steps`、离线 HF 环境变量、旧 torch RMSNorm 兼容 shim。
+  - 运行验证：
+    ```text
+    [M0] synthetic e2e forward/generate OK (240 rows, 32 B/row)
+    ```
+- **M1 hc=1 PLE-lite 前向 golden**
+  - 新增 `src/qwen35_ple/ple_reference.py`：复刻 Qwen `Qwen4ExpTextPLELayer` 的
+    value/key/gate/RMSNorm/dilated depthwise-conv 数学。
+  - 新增 `tests/test_ple_forward_golden.py`：
+    - 4096 token 序列，覆盖 EOS 分段；
+    - engram-peft `EngramLayer(engine='qwen_ple', hc_mult=1)` 与参考实现数值一致。
+  - 运行验证：`13 passed`。
+- **engram-peft 增量**
+  - `EngramConfig` 新增可选 `prime_sizes`，`create_hash_mapping` 支持合成表小素数。
+  - 保持契约“只增字段”，真实部署不传该字段时行为不变。
+- **当前推送状态**
+  - qwen35-ple：`cbf640c feat: add synthetic M0 disk-injection e2e`
+  - engram-peft：待推送 `prime_sizes` 增强提交。
+
+---
+
 ### 7. 关键提交记录
 
 | 仓库 | commit | 说明 |
 |---|---|---|
 | qwen35-ple | `451b046` | 基础编排、golden、M0 smoke、eval protocol |
+| qwen35-ple | `cbf640c` | 合成表 M0 磁盘注入 forward/generate 闭环 |
+| qwen35-ple | （待提交） | M1 hc=1 前向 golden + 文档更新 |
 | engram-peft | `5fc90d2` | C2 字段 + PLE_QWEN_V1 哈希映射 + 跨仓 golden |
+| engram-peft | （待推送） | 可选 `prime_sizes` 支持（只增字段） |

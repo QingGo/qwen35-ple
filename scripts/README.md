@@ -1,7 +1,18 @@
-# 本文档是脚本目录的占位说明；脚本进入前请先更新本文件与设计文档 §7。
-#
-# 预期脚本（与设计文档里程碑对应）：
-#  - `build_table_assets.sh`   重建/校验 Store-I 行表与 Store-P 视图（engramdb view）
-#  - `prepare_corpus.py`        语料构建（复用 EngramDB scripts/corpus_build.py 产物）
-#  - `run_cpt.py / run_sft.py`  训练入口（包装 engram-peft CLI）
-#  - `run_eval.py`              知识/长上下文/推理评测
+# 脚本目录说明
+
+脚本进入前请同步更新本文件与 `docs/qwen35-ple-design.md` / `docs/roadmap.md`。
+
+## 已有脚本
+
+| 脚本 | 作用 |
+|---|---|
+| `build_table_assets.sh` | 调用 EngramDB CLI 构建/校验 Store-P 视图，并检查 manifest 字段 |
+| `run_m0_smoke.py` | M0 冒烟：磁盘版 MultiHeadEmbedding 自检 + 可选 TinyLlama/Qwen e2e |
+| `run_eval.py` | A0/A1 评测结果 JSON 对比报告入口 |
+| `table_assets.py`（src 内） | 查找 EngramDB CLI、读取/校验视图 manifest 的 Python 编排层 |
+
+## 预期脚本（与设计文档里程碑对应）
+
+- `prepare_corpus.py`        语料构建（复用 EngramDB scripts/corpus_build.py 产物）
+- `run_cpt.py / run_sft.py`  训练入口（包装 engram-peft CLI）
+- 真实评测执行器            （产出 A0/A1 JSON，供 `run_eval.py` 对比）

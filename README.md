@@ -21,6 +21,8 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 |---|---|
 | [docs/qwen35-ple-design.md](docs/qwen35-ple-design.md) | 项目设计：嫁接方案、CPT/后训练、消融矩阵、里程碑 |
 | [docs/integration-contract.md](docs/integration-contract.md) | **四仓库交互契约 v1**（存储/模型/推理/数据四条契约，冻结原则） |
+| [docs/roadmap.md](docs/roadmap.md) | 战略路线图：终极目标、技术债、借鉴矩阵、阶段计划 |
+| [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## 与兄弟仓库的交互契约（摘要）
 
@@ -60,6 +62,14 @@ tests/            一致性冒烟测试（golden 对拍）
 
 - [x] 仓库初始化（2026-08-30）
 - [x] 设计文档 + 四仓库契约 v1（冻结）
-- [ ] PLE 引擎移植（契约 C2 的 `engine="qwen_ple"`，设计文档 M1）
+- [x] 战略路线图（`docs/roadmap.md`）
+- [x] `PLE_QWEN_V1` 纯 Python golden 参考与测试
+- [x] Store-P 视图构建/校验脚本骨架
+- [x] YAML 配置加载与契约校验（`src/qwen35_ple/config.py`）
+- [x] engram-peft 按契约 C2 新增字段 + `QwenPleHashMapping` + 跨仓 golden
+- [x] M0 磁盘版 MultiHeadEmbedding quick 自检
+- [x] A0/A1 评测对比入口
+- [ ] M1 完整 PLE-lite 前向 golden（`refs/qwen4_exp_modeling.py`）
+- [ ] M0 e2e（需完整 engram-peft/peft 环境）
 - [ ] CPT 消融（设计文档 M2）
 - [ ] 100 tok/s 推理闭环（设计文档 M4，见 LLM-CompileForge/docs/qwen35-0.8b-100toks.md）

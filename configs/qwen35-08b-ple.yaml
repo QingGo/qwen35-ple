@@ -14,15 +14,15 @@ engine:
   table_spec: PLE_QWEN_V1     # 契约 C1 行语义注册表 id
   table_source: engramdb:view # 'memory' | 'engramdb:store' | 'engramdb:view'
   # 视图/行表资产路径（由 scripts/build_table_assets.sh 产出）:
-  #   view_path: data/views/qwen-ple.view.bin
-  #   keys_path: data/views/qwen-ple.view.keys.txt
+  view_path: data/views/qwen-ple.view.bin
+  keys_path: data/views/qwen-ple.view.keys.txt
 
 # ── 记忆层（对应 Qwen4ExpTextPLELayer 的 hc=1 变体）─────────────────
 engram:
   ngram_sizes: [2, 3]             # Flash-Next 口径: 2-gram + 3-gram
   n_head_per_ngram: 8             # 8 × 2 = 16 头
   embedding_dim: 2560             # 16 × 160（e_t 总维）
-  engram_vocab_size_per_ngram: [20000096, 20000096]  # Qwen 口径（消融时以 golden 核验）
+  engram_vocab_size_per_ngram: [160000000, 160000000]  # 每个 n-gram 的 8 头总桶数（≈8×20M），golden 核验
   target_layers: [1]              # 零基层号；参考 Flash-Next ple_layer_ids=[2]（1-based）
   hc_mult: 1                      # Qwen3.5 无 hyper-connection → PLE-lite 变体
   conv_kernel_size: 4

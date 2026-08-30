@@ -41,7 +41,8 @@
 - [x] A0/A1 评测对比入口（`scripts/run_eval.py` + `eval/protocol.py`）
 - [x] 最小知识召回/长上下文/推理评测执行器（`scripts/run_ablation_eval.py`）
 - [x] M2 CPT 训练冒烟（`scripts/run_cpt_smoke.py`）：A0/A1 均可反向训练
-- [x] Qwen3.5-0.8B A0/A1 极小消融脚本（`scripts/run_qwen35_ablation.py`）：1-step pipeline 已跑通
+- [x] Qwen3.5-0.8B A0/A1 极小消融脚本（`scripts/run_qwen35_ablation.py`）：10 步 pipeline 已跑通
+- [x] 第一轮极小 A0/A1 结果：A1 ≈ A0，未见增益（负结果已记录，不视为最终结论）
 - [x] CI：lint + 基础单元测试（`.github/workflows/ci.yml`），已修复本轮 ruff 失败
 - [x] qwen35-ple 已推送到 GitHub（`451b046` / `cbf640c` / `aad9bec` / `f86fd0f` / `91a032f`）
 - [x] engram-peft 已推送到 GitHub（`5fc90d2` + `272166a`）
@@ -146,10 +147,11 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 
 - 实现 config/data/train/eval 编排。
 - ✅ 训练冒烟已通：`scripts/run_cpt_smoke.py --ple` 可反向更新 PLE 层。
-- ⏳ 先跑 A0 vs A1（0.2-1B tokens 量级）。
-- 输出知识 recall、长上下文、基础 reasoning 报告。
+- ✅ 已跑第一轮极小 A0/A1（Qwen3.5-0.8B + 10 步 + 小语料），结果 A1 ≈ A0，无可见增益。
+- ⏳ 需要真实/更大 PLE 表或更充分训练后再做正式 go/no-go。
+- 输出知识 recall、长上下文、基础 reasoning 报告（当前为迷你 probe）。
 
-**Gate：** 报告 + go/no-go；A1 不优于 A0 则停止放大。
+**Gate：** 报告 + go/no-go；A1 不优于 A0 则停止放大。当前第一轮证据不足以下结论，但未观察到增益。
 
 ### Phase 4：后训练 + 推理闭环
 

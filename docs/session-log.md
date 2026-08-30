@@ -669,6 +669,30 @@
 - 如果继续在 Intel Mac 上跑：用小语料 + `lr=1e-5`、更多 step，跑 10-50 步。
 - 如果太慢：按你建议切到 Windows + WSL，把环境准备脚本移植过去。
 
+### 4. 10 步 Mini Ablation 实际结果（2026-08-30）
+
+命令：
+
+```bash
+python scripts/run_qwen35_ablation.py --mode a0 --steps 10 --lr 1e-5
+python scripts/run_qwen35_ablation.py --mode a1 --steps 10 --lr 1e-5
+```
+
+结果：
+
+| 指标 | A0 | A1 |
+|---|---|---|
+| 最后 train loss | 0.7363 | 0.7363 |
+| held-out loss delta | +0.3655 | +0.3648 |
+| 迷你 eval 正确数（before → after） | 1/3 → 2/3 | 1/3 → 2/3 |
+| after 回答质量 | 与 A0 几乎相同 | 与 A0 几乎相同 |
+
+**结论（负结果记录）：**
+
+- 在当前“小素数随机合成 PLE 表 + 10 步 + 极小语料”条件下，A1 没有观察到对 A0 的稳定增益。
+- 这个结果不能证明 PLE 无效，只能说明当前合成表/训练预算不足以产生可检测的嫁接收益。
+- 不要把该结果当作“PLA 失败”的最终科学结论；下一步应使用更大/真实 PLE 表或更充分训练再做判断。
+
 ### 7. 关键提交记录
 
 | 仓库 | commit | 说明 |

@@ -127,6 +127,7 @@ EngramDB ──► qwen35-ple（消费方）
 | `engine` | `str = "deepseek"` | `"deepseek"`（论文对齐路径，行为不变）\| `"qwen_ple"`（PLE-lite，hc=1 等变体） |
 | `table_spec` | `str \| None = None` | `"PLE_QWEN_V1"` / `"ENG_DEEPSEEK_V1"`；None = engine 默认 |
 | `table_source` | `str = "memory"` | `"memory"` \| `"engramdb:store"` \| `"engramdb:view"` |
+| `prime_sizes` | `list[int] \| None = None` | 仅开发/合成表用；提供 16 头素数可绕过真实 320M 行表；生产置 None |
 
 约束：`engine="qwen_ple"` 时（`table_spec="PLE_QWEN_V1"`）的语义由 C1 定义；
 `engine="deepseek"` 的所有行为与现有版本**完全一致**（回归保障）。
@@ -202,4 +203,4 @@ EngramDB ──► qwen35-ple（消费方）
 
 | 版本 | 日期 | 内容 |
 |---|---|---|
-| v1 | 2026-08-30 | 初始冻结。**已存在即契约**：C1.1 行语义、C1.2 视图/manifest/keys、C1.3 C ABI 全表、C1.4 Python API、C2.1 config/签名/train_mode、C3.1 现有 sfa_abi.proto。**本次新增（+）**：`PLE_QWEN_V1` 注册、keys 交付要求、`engramdb_rowids_for_seq`/`engramdb_abi_version`、C2.2 三字段、C3.1 `SfaWeightSource`/`external_ref`/dtype 7、C3.3 职责边界与 e_t 一致性。 |
+| v1 | 2026-08-30 | 初始冻结。**已存在即契约**：C1.1 行语义、C1.2 视图/manifest/keys、C1.3 C ABI 全表、C1.4 Python API、C2.1 config/签名/train_mode、C3.1 现有 sfa_abi.proto。**本次新增（+）**：`PLE_QWEN_V1` 注册、keys 交付要求、`engramdb_rowids_for_seq`/`engramdb_abi_version`、C2.2 三字段、C2.2 开发字段 `prime_sizes`、C3.1 `SfaWeightSource`/`external_ref`/dtype 7、C3.3 职责边界与 e_t 一致性。 |

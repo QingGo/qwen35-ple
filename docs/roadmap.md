@@ -37,7 +37,7 @@
 - [x] M1 hc=1 PLE-lite 前向 golden（与 Qwen PLE 参考数学 4096 token 对拍）
 - [x] A0/A1 评测对比入口（`scripts/run_eval.py` + `eval/protocol.py`）
 - [x] qwen35-ple 已推送到 GitHub（`451b046` / `cbf640c`）
-- [x] engram-peft 已推送到 GitHub（`5fc90d2`）
+- [x] engram-peft 已推送到 GitHub（`5fc90d2` + `272166a`）
 - [ ] M0 真表 e2e（TinyLlama/Qwen + 完整 engram-peft + 50GB PLE 表环境）
 - [ ] CPT 消融（A0/A1）
 - [ ] 100 tok/s 推理闭环

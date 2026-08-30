@@ -242,7 +242,8 @@
   - 保持契约“只增字段”，真实部署不传该字段时行为不变。
 - **当前推送状态**
   - qwen35-ple：`cbf640c feat: add synthetic M0 disk-injection e2e`
-  - engram-peft：待推送 `prime_sizes` 增强提交。
+  - qwen35-ple：`aad9bec feat: add M1 hc=1 PLE-lite forward golden and docs`
+  - engram-peft：`272166a feat: add optional prime_sizes for synthetic PLE_QWEN_V1 tables`
 
 ---
 
@@ -254,4 +255,4 @@
 | qwen35-ple | `cbf640c` | 合成表 M0 磁盘注入 forward/generate 闭环 |
 | qwen35-ple | （待提交） | M1 hc=1 前向 golden + 文档更新 |
 | engram-peft | `5fc90d2` | C2 字段 + PLE_QWEN_V1 哈希映射 + 跨仓 golden |
-| engram-peft | （待推送） | 可选 `prime_sizes` 支持（只增字段） |
+| engram-peft | `272166a` | 可选 `prime_sizes` 支持（只增字段，合成表开发用） |

@@ -24,6 +24,52 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/roadmap.md](docs/roadmap.md) | 战略路线图：终极目标、技术债、借鉴矩阵、阶段计划 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
+## EngramDB 配置即用（自动注入）
+
+`table_source="engramdb:store"` 现在由 engram-peft 自动消费：在 `EngramConfig` 中配置
+
+```python
+config = EngramConfig(
+    ...,
+    engine="qwen_ple",
+    table_spec="PLE_QWEN_V1",
+    table_source="engramdb:store",
+    table_store_path="/path/to/rows",
+    table_model_dir="/path/to/Qwen3.8-Flash-Next",
+    table_dtype="float8_e4m3fn",
+)
+model = get_engram_model(base_model, config, tokenizer)
+```
+
+无需手动调用 `install_disk_multi_head_embedding` / `install_real_qwen_ple_embedding`。
+
+从 qwen35-ple YAML 配置可以直接转换：
+
+```python
+from qwen35_ple.config import load_config
+
+cfg = load_config("configs/your.yaml")
+engram_cfg = cfg.to_engram_config(
+    hidden_size=model.config.hidden_size,
+    compressed_vocab_size=model.config.vocab_size,
+    pad_id=tokenizer.pad_token_id,
+    tokenizer_name_or_path="...",
+)
+model = get_engram_model(base_model, engram_cfg, tokenizer)
+```
+
+真实 FP8 Store-I e2e：
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/run_m0_smoke.py --e2e \
+  --model /path/to/Qwen3.5-0.8B \
+  --store-dir /path/to/qwen38-rows \
+  --ple-model-dir /path/to/qwen38-ple
+```
+
+
+
 ## 与兄弟仓库的交互契约（摘要）
 
 - **存储契约 C1**（EngramDB → 使用方）：行语义 `PLE_QWEN_V1`（16 头/160 维/320M 行）、

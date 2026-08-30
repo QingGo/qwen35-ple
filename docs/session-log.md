@@ -982,6 +982,145 @@ No-reader baseline：`4.428`。
 
 **Gate：** 产品验收 + 科学证据闭环。
 
+## 2026-08-30：第十五轮完整汇总（本轮所有内容收口）
+
+### 1. 本轮目标
+
+1. 获取真实 Qwen3.5-0.8B 权重并接入项目。
+2. 用真实 Qwen3.8-Flash-Next PLE FP8 表做离线预计算。
+3. 验证真实 PLE `e_t` 是否包含可用的语义/知识信号。
+4. 实现并测试多种 target-side reader，判断“冻结 PLE 能否给更小模型带来增益”。
+5. 调研同类工作（XMemTransfer、Prometheus Mind、Memory Grafting、PWC 排名）。
+6. 把方法、结果、结论、计划整理到文档。
+
+### 2. 本轮计划
+
+- [x] ModelScope 下载 Qwen3.5-0.8B
+- [x] 外部盘软链接 + `.gitignore`
+- [x] 真实 FP8 PLE e_t 预计算
+- [x] PLE 知识探针
+- [x] XMemTransfer 风格 reader
+- [x] layer × branches × short_conv 完整矩阵
+- [x] PWC / 论文调研
+- [x] 文档整理
+
+### 3. 完成的内容
+
+#### 资产
+- `data/models/Qwen3.5-0.8B` -> 外部盘，gitignore。
+- 真实 PLE 行表可直接通过 EngramDB 读取。
+
+#### 代码/脚本
+- `src/qwen35_ple/real_ple.py`
+  - 真实 FP8 读取
+  - PleDiskGather 批量去重
+  - F8_E4M3 -> float32 dequant
+  - `e_t [T, 2560]` 组装
+- `scripts/precompute_real_ple_features.py`
+- `scripts/run_ple_knowledge_probe.py`
+- `scripts/run_ple_adapter.py`
+  - EngramReader（W_K / W_V / RMSNorm / sigmoid gate / gate_bias）
+  - 支持 layer / branches / short_conv
+- `scripts/run_full_matrix.sh`
+- `scripts/run_qwen35_e2e.py`
+- `scripts/run_qwen35_ablation.py`
+- 官方 refs 快照/checksum
+- CI lint 修复
+
+#### 结果
+- PLE 知识探针：
+  ```text
+  test accuracy = 72.7%
+  random baseline = 16.7%
+  ```
+- Reader 完整矩阵：
+  - 所有组合真实 PLE 均优于 shuffled control。
+  - 最佳 real：`layer=8, branches=1, short_conv=off, after=4.851`。
+  - no-reader baseline：`4.428`。
+- 外部证据：
+  - XMemTransfer 在 WikiText-103 上 PPL=8.5，排名 #2。
+  - TriviaQA dual-layer reader Accuracy=72.5。
+
+### 4. 做的尝试
+
+1. 用 ModelScope 下载 Qwen3.5-0.8B。
+2. 当前 shell 无法写外盘，改本地再人工迁移/软链。
+3. 用 transformers 5.3 + torch 2.2 兼容 shim 加载 Qwen3.5。
+4. 用 engram-peft dummy package 绕过完整 `__init__`。
+5. 用真实表 Store + PleDiskGather 预计算。
+6. 用线性探针验证 PLE 语义可分性。
+7. 逐步实验：
+   - naive MLP adapter
+   - gated MLP adapter
+   - XMemTransfer 风格单分支 reader
+   - 多分支 reader
+   - short_conv
+   - layer 1 / 8
+   - real / control
+
+### 5. 踩过的坑
+
+1. ModelScope 默认锁不可写 → `MODELSCOPE_CACHE=/tmp/mscache`。
+2. 外部盘 `Operation not permitted` → 本地下载后人工迁移。
+3. 当前 transformers 4.57 不认识 `qwen3_5` → 安装 transformers 5.3。
+4. transformers 5.3 要求 torch>=2.4，但 Intel Mac 只有 torch 2.2 → 手工 shim。
+5. engram-peft 完整包导入需要 TRL/datasets/peft → dummy package 加载子模块。
+6. naive MLP 注入加不进 hidden → 改 gated/Engram reader。
+7. gate_bias=-2 初始扰动太大 → 需要后续调更负 / 更小初始化。
+8. LM next-token 没有体现 PLE 价值 → 需要换知识评测。
+9. 验证窗口不严谨 → 后续要正式 held-out split。
+10. 长命令/heredoc 超时 → 用文件编辑工具/后台脚本。
+
+### 6. 未完成 / 技术债
+
+- 未使用完整官方 Qwen PLE `hc_count=4 + ShortConv` 结构。
+- 未测试 `gate_bias=-5/-8`、更小初始化、warmup。
+- 未使用更大语料和更长训练。
+- 未测试部分解冻 backbone / LoRA / 全量。
+- 未实现真正 held-out 分割。
+- 未接入实时 Store / Store-P live 路径。
+- 未跑正式知识 QA 评测（NQ / TriviaQA / BoolQ 等）。
+- 环境仍未固化，依赖 `/tmp`。
+- 没有资产 manifest / provenance。
+- 没有 CPU decode 性能基准。
+- 没有把 `run_full_matrix.sh` 纳入 CI。
+
+### 7. 未来计划（门禁制）
+
+#### Phase 0
+- 固化环境
+- 正式 held-out
+- PPL + 知识 QA 评测基线
+
+#### Phase 1
+- 完整复刻 Qwen/XMemTransfer reader
+- 调 gate_bias / 初始化 / warmup
+- 扩大数据与训练
+- 判断真实 PLE 是否稳定超过 control 且接近 baseline
+
+#### Phase 2
+- backbone 冻结/部分解冻/LoRA/全量矩阵
+
+#### Phase 3
+- EngramDB live 读取闭环
+- 预计算 vs live 一致性
+- CPU decode 基准
+
+#### Phase 4
+- 只有正增益成立后才做 SFT/RL、MTP、100 tok/s。
+
+### 8. 关键提交记录（本轮新增）
+
+在下方关键提交表中已包含：
+- `9204ddf` 真实 PLE e_t 预计算 + 知识探针
+- `6df4312` frozen PLE e_t adapter 初测
+- `feb4cb6` gated adapter 小规模结果
+- `625a04d` 20k adapter 无稳定增益记录
+- `695306f` XMemTransfer 风格 reader layer-8
+- `ea2c806` 完整 reader 矩阵
+- `c75e2ec` README 方法/结论更新
+- `cc117eb` 第十四轮系统复盘
+
 ### 7. 关键提交记录
 
 | 仓库 | commit | 说明 |

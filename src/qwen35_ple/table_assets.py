@@ -37,7 +37,7 @@ class ViewManifest:
     source: str
 
     @classmethod
-    def from_file(cls, manifest_path: str | Path) -> "ViewManifest":
+    def from_file(cls, manifest_path: str | Path) -> ViewManifest:
         path = Path(manifest_path)
         data = json.loads(path.read_text(encoding="utf-8"))
         return cls(

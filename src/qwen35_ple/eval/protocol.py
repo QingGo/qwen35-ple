@@ -21,7 +21,7 @@ class EvalResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_json(cls, path: str | Path) -> "EvalResult":
+    def from_json(cls, path: str | Path) -> EvalResult:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         return cls(
             model=str(data.get("model", Path(path).stem)),

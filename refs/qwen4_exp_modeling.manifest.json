@@ -1,0 +1,9 @@
+{
+  "file": "qwen4_exp_modeling.py",
+  "sha256": "91e9b1e9c74efe373cd989fe1974a8fa305f4aad43628dbcbd03dac20437814f",
+  "source_repo": "QingGo/EngramDB",
+  "source_path": "refs/qwen4_exp_modeling.py",
+  "source_commit": "13aaa3773bcb7fba2c820277d7ca9d9af3aa0c89",
+  "license": "Apache-2.0",
+  "note": "Reference-only snapshot, not a runtime dependency."
+}

@@ -34,6 +34,7 @@ def _install_rmsnorm_compat() -> None:
 def _load_engram_peft():
     try:
         import typing
+
         import typing_extensions
         if not hasattr(typing, "override"):
             typing.override = typing_extensions.override
@@ -41,7 +42,8 @@ def _load_engram_peft():
         from engram_peft import EngramConfig
         from engram_peft.hashing import create_hash_mapping
         from engram_peft.layer import EngramLayer
-    except Exception as exc:  # pragma: no cover - optional deps
+    except Exception as exc:  # noqa: BLE001 - optional deps
+        # pragma: no cover
         pytest.skip(f"engram-peft/torch runtime not available: {exc}")
     return torch, EngramConfig, EngramLayer, create_hash_mapping
 
@@ -91,9 +93,9 @@ def _make_layer(torch, EngramConfig, EngramLayer, create_hash_mapping, seq_len):
 
 
 def _run_comparison(seq_len: int) -> None:
-    _install_rmsnorm_compat()
     torch, EngramConfig, EngramLayer, create_hash_mapping = _load_engram_peft()
-    config, mapping, layer = _make_layer(
+    _install_rmsnorm_compat()
+    config, _, layer = _make_layer(
         torch, EngramConfig, EngramLayer, create_hash_mapping, seq_len
     )
 

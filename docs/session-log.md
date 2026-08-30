@@ -476,6 +476,121 @@
 
 ---
 
+## 2026-08-30：第七轮增量（CI 修复 + 官方引用固定）
+
+### 1. 本阶段目标
+
+1. 修复当前 CI 失败（ruff 规则报错）。
+2. 完成 Phase A 的关键证据基线：
+   - 固定 Qwen 官方 `refs/qwen4_exp_modeling.py` 快照与 checksum；
+   - 生成官方 4096 token PLE 前向 golden fixture。
+3. 把本轮尝试、坑、完成项、新问题、计划补进文档。
+
+### 2. 尝试过程
+
+| 步骤 | 内容 | 结果 |
+|---|---|---|
+| 1 | 查看 CI 失败输出 | ❌ ruff 7 个错误：`UP037` / `RUF059` / `BLE001` / `I001` |
+| 2 | 修复既有 lint 问题 | ✅ `ruff check src tests` 通过 |
+| 3 | 从 EngramDB 拷贝 `refs/qwen4_exp_modeling.py` 到本仓 | ✅ 131,597 B，SHA-256 固定 |
+| 4 | 设计官方文件固定方式 | ⚠️ 完整文件是 transformers 生成模块，不能直接独立 import |
+| 5 | 用 AST 抽取 PLE 相关类/函数，生成 `official_ple_snapshot.py` | ✅ 可独立 torch-only 运行 |
+| 6 | 生成官方 4096 token 前向 golden | ✅ `tests/golden/official_ple_forward_4096.npz/.meta.json` |
+| 7 | 增加校验测试 | ✅ checksum / snapshot 新鲜度 / golden 结构 / 重环境 forward |
+| 8 | 跑轻量 pytest | ✅ 16 passed, 3 skipped（重依赖测试跳过） |
+
+### 3. 踩过的坑与解决办法
+
+#### 3.1 CI 静态检查失败
+
+- 本次失败来自此前进度中引入的 lint 问题：
+  - `UP037`：有 `from __future__ import annotations` 时不再需要字符串类型注解；
+  - `RUF059`：未使用的解包变量；
+  - `BLE001`：裸 `except Exception`；
+  - `I001`：import 块排序。
+- 解决：逐一清理，保持轻量 CI 可运行。
+
+#### 3.2 官方文件不能直接 import
+
+- `refs/qwen4_exp_modeling.py` 是 transformers 自动生成的完整 modeling 文件，
+  内部有大量 `from ... import` 相对导入和装饰器，不能作为本仓独立模块加载。
+- 解决：使用 AST 只抽取 PLE 前向必需的定义：
+  `Qwen4ExpTextRMSNorm`、`Qwen4ExpTextNGramEmbedding`、
+  `Qwen4ExpTextPLELayer`、乘子/素数辅助函数和 padding 工具函数。
+- 生成物 `src/qwen35_ple/official_ple_snapshot.py` 是 torch-only 冻结副本；
+  原文件仍通过 SHA-256 manifest 锁定，防止上游漂移。
+
+#### 3.3 torch 2.2 缺少 `nn.Buffer`
+
+- 官方代码使用 `nn.Buffer`，但本机 torch 2.2 没有。
+- 解决：在生成的快照模块里加入最小兼容 shim（`nn.Buffer` 作为不可训练 `Parameter`），
+  仅用于参考前向，不属于生产实现。
+
+#### 3.4 本机完整 engram-peft 环境仍不可用
+
+- qwen3-tts 有 torch/transformers，但缺少 peft/trl/datasets/pyarrow 等；
+- uv 缓存中的一部分包是 Linux wheel（如 `pyarrow`），在 macOS 上无法加载；
+- 因此新增的重依赖 forward 测试在轻量环境自动 skip，真实验证需要后续完整环境或 CI 重任务。
+
+#### 3.5 长命令/heredoc 再次超时
+
+- 继续沿用文件编辑工具写长文件，避免 bash 长 heredoc 导致 shell 重置。
+
+### 4. 已完成
+
+- **CI 修复**
+  - 修复 `src/qwen35_ple/eval/protocol.py`、`ple_reference.py`、`table_assets.py`、
+    `tests/test_ple_forward_golden.py` 中的 ruff 问题。
+  - `ruff check src tests` 通过。
+- **官方引用固定**
+  - `refs/qwen4_exp_modeling.py`：从 EngramDB 拷贝。
+  - `refs/qwen4_exp_modeling.manifest.json`：SHA-256、来源仓库/commit。
+  - `refs/README.md`：快照说明与再生成方法。
+- **官方 PLE 快照**
+  - `scripts/generate_official_ple_snapshot.py`：AST 抽取/校验。
+  - `src/qwen35_ple/official_ple_snapshot.py`：生成的 torch-only 官方 PLE 参考。
+- **官方 4096 golden**
+  - `scripts/generate_official_ple_forward_golden.py`：生成器。
+  - `tests/golden/official_ple_forward_4096.npz` / `.meta.json`：
+    输入、hidden、官方 PLE 输出、expected、官方权重。
+- **测试**
+  - `tests/test_official_ple_reference.py`：
+    - refs checksum 校验；
+    - snapshot 是否最新；
+    - golden 结构与有限值；
+    - 重环境：engram-peft 与官方 golden 数值对拍（无依赖时 skip）。
+- **验证**
+  - 轻量环境：`16 passed, 3 skipped`。
+  - `ruff check src tests`：通过。
+
+### 5. 新发现的问题 / 技术债
+
+1. **“官方直接加载”仍是近似**
+   - 当前固定的是官方文件的 AST 抽取快照，不是完整 transformers 模块运行。
+   - 好处：无 transformers 重依赖、可离线；代价：如果上游 PLE 代码结构变化，
+     AST 抽取器需要同步更新，且不覆盖上游非 PLE 上下文。
+2. **重依赖 CI 缺失**
+   - 新增官方 forward 对拍测试在轻量 CI 中会 skip。
+   - 仍需一个完整环境 job（torch + engram-peft + 可选重依赖）跑 M1/M0/golden。
+3. **开发环境仍未固化**
+   - 本机仍靠 qwen3-tts + uv 缓存拼装；uv 缓存里的 Linux wheel 在 macOS 不可用。
+   - 下一步应整理为可重建的 venv/conda lock 或明确“重路径在 Linux CI/容器跑”。
+4. **Phase B/C/D 未推进**
+   - 真表 FP8、Store-P、真实 A0/A1 消融仍是主要未解项。
+
+### 6. 计划要完成的部分
+
+- [x] 修复 CI ruff 失败
+- [x] 固定 `refs/qwen4_exp_modeling.py` 快照 + checksum
+- [x] 生成官方 4096 token PLE 前向 golden fixture
+- [ ] 在完整环境/重 CI 中跑通官方 forward 对拍（当前轻量环境 skip）
+- [ ] 固化可重建开发环境或明确重路径容器化
+- [ ] Phase B：M0 真表/FP8 纵切
+- [ ] Phase C：M1 官方黄金全量闭环（含 DeepSeek 回归）
+- [ ] Phase D：真实 A0/A1 小规模消融并出 go/no-go
+
+---
+
 ### 7. 关键提交记录
 
 | 仓库 | commit | 说明 |

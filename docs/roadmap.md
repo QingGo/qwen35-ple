@@ -35,10 +35,12 @@
 - [x] M0 quick 磁盘版 MultiHeadEmbedding 自检
 - [x] M0 合成表磁盘注入完整 forward/generate 闭环（`scripts/run_m0_smoke.py --synthetic-e2e`）
 - [x] M1 hc=1 PLE-lite 前向 golden（与 Qwen PLE 参考数学 4096 token 对拍）
+- [x] Qwen 官方 `refs/qwen4_exp_modeling.py` 快照 + SHA-256 manifest 固定
+- [x] 官方 PLE 前向 4096 token golden fixture（`tests/golden/official_ple_forward_4096.*`）
 - [x] A0/A1 评测对比入口（`scripts/run_eval.py` + `eval/protocol.py`）
 - [x] 最小知识召回/长上下文/推理评测执行器（`scripts/run_ablation_eval.py`）
 - [x] M2 CPT 训练冒烟（`scripts/run_cpt_smoke.py`）：A0/A1 均可反向训练
-- [x] CI：lint + 基础单元测试（`.github/workflows/ci.yml`）
+- [x] CI：lint + 基础单元测试（`.github/workflows/ci.yml`），已修复本轮 ruff 失败
 - [x] qwen35-ple 已推送到 GitHub（`451b046` / `cbf640c` / `aad9bec` / `f86fd0f` / `91a032f`）
 - [x] engram-peft 已推送到 GitHub（`5fc90d2` + `272166a`）
 - [ ] M0 真表 e2e（TinyLlama/Qwen + 完整 engram-peft + 50GB PLE 表环境）
@@ -52,16 +54,17 @@
 ### 3.1 契约与实现的剩余缺口
 
 - C2 的 `engine` / `table_spec` / `table_source` 已进入 `EngramConfig`，`QwenPleHashMapping` 已落地。
-- M1 已补 `hc=1` PLE-lite 前向 golden（合成 prime_sizes + Qwen PLE 参考数学），
-  下一步仍需要把该 golden 固定到 `refs/qwen4_exp_modeling.py` 的独立引用/快照，避免漂移。
+- M1 已有本地 PLE-lite 前向参考，并且已把 Qwen 官方文件作为快照固定到
+  `refs/qwen4_exp_modeling.py`（含 SHA-256 manifest），避免上游漂移。
 - `table_source="engramdb:view"` 的推理侧读取尚未在 engram-peft 中接通。
 
 ### 3.2 缺少 golden/位级一致性防线
 
 - 已建立本仓 golden + engram-peft 跨仓 golden（`tests/test_cross_repo_hash_golden.py`）。
 - 已建立 4096 token 的 PLE-lite 前向 golden（`tests/test_ple_forward_golden.py`）。
-- 待补：与 `refs/qwen4_exp_modeling.py` 官方代码的直接可加载快照固定。
-- `refs/qwen4_exp_modeling.py` 目前仍存放在 EngramDB，需要固定跨仓引用或拷贝以避免漂移。
+- 已增加官方 PLE 前向 golden：`tests/golden/official_ple_forward_4096.*`，
+  由 `src/qwen35_ple/official_ple_snapshot.py`（冻结的官方代码 AST 抽取）生成。
+- `refs/qwen4_exp_modeling.py` 已从 EngramDB 拷贝并固定 checksum；本仓可离线复现。
 
 ### 3.3 缺少完整可运行闭环
 
@@ -113,7 +116,8 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - 纯 Python golden 参考与测试（✅ 已落地）
 - Store-P 构建脚本骨架（✅ 已落地）
 - CI / README / 文档同步（进行中）
-- 固定 `refs/qwen4_exp_modeling.py` 引用
+- 固定 `refs/qwen4_exp_modeling.py` 引用（✅ 已落地：快照 + SHA-256 manifest）
+- 官方 4096 token 前向 golden（✅ 已落地：`tests/golden/official_ple_forward_4096.*`）
 
 **Gate：** `make check` 绿；golden 测试可复现。
 
@@ -131,7 +135,7 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - engram-peft 只增 `engine` / `table_spec` / `table_source` 字段（✅ 已完成并推送）。
 - 实现 Qwen 原生日志映射（`PLE_QWEN_V1`）与 PLE-lite `hc=1` 层（✅ 哈希映射已完成）。
 - ✅ 与 Qwen PLE 参考数学做 4096 token 数值对拍（`tests/test_ple_forward_golden.py`）。
-- ⏳ 与 `refs/qwen4_exp_modeling.py` 官方代码的快照直连/固定。
+- ✅ 已固定 `refs/qwen4_exp_modeling.py` 官方快照并生成 4096 token 官方前向 golden。
 - 保持 `engine="deepseek"` 全量回归（⏳ 待完整环境验证）。
 
 **Gate：** 位级一致；DeepSeek 路径不回归。

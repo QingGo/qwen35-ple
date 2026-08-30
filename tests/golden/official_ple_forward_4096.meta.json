@@ -1,0 +1,40 @@
+{
+  "seq_len": 4096,
+  "hidden_size": 8,
+  "embedding_dim": 160,
+  "per_head": 10,
+  "prime_sizes": [
+    17,
+    19,
+    23,
+    29,
+    31,
+    37,
+    41,
+    43,
+    47,
+    53,
+    59,
+    61,
+    67,
+    71,
+    73,
+    79
+  ],
+  "total_rows": 750,
+  "ngram_sizes": [
+    2,
+    3
+  ],
+  "n_head_per_ngram": 8,
+  "hc_mult": 1,
+  "conv_kernel_size": 2,
+  "conv_dilation": 2,
+  "multipliers": [
+    23703573157769,
+    20109073645365,
+    8052911324071
+  ],
+  "eos": 248044,
+  "source": "qwen35_ple.official_ple_snapshot (frozen upstream refs/qwen4_exp_modeling.py)"
+}

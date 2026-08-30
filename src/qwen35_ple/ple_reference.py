@@ -49,7 +49,6 @@ def qwen_ple_forward_reference(
         ``[B, T, hidden_size]`` matching ``EngramLayer.forward`` with
         ``hc_mult=1``.
     """
-    batch_size, seq_len = input_ids.shape
     with torch.no_grad():
         # 1. Hash to local per-head indices, then gather from the same
         #    MultiHeadEmbedding used by the production layer.

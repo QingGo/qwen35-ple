@@ -36,7 +36,8 @@
 - [x] M0 合成表磁盘注入完整 forward/generate 闭环（`scripts/run_m0_smoke.py --synthetic-e2e`）
 - [x] M1 hc=1 PLE-lite 前向 golden（与 Qwen PLE 参考数学 4096 token 对拍）
 - [x] A0/A1 评测对比入口（`scripts/run_eval.py` + `eval/protocol.py`）
-- [x] qwen35-ple 已推送到 GitHub（`451b046` / `cbf640c`）
+- [x] CI：lint + 基础单元测试（`.github/workflows/ci.yml`）
+- [x] qwen35-ple 已推送到 GitHub（`451b046` / `cbf640c` / `aad9bec` / `f86fd0f` / `91a032f`）
 - [x] engram-peft 已推送到 GitHub（`5fc90d2` + `272166a`）
 - [ ] M0 真表 e2e（TinyLlama/Qwen + 完整 engram-peft + 50GB PLE 表环境）
 - [ ] CPT 消融（A0/A1）
@@ -80,8 +81,8 @@
 
 ### 3.6 工程过程
 
-- 还没有 CI workflow；有 session log 与跨仓 golden 测试。
-- 兄弟仓库已有成熟“门禁 + 文档同步”习惯，本仓需要对齐。
+- 已有基础 CI workflow（lint + 单元测试）；跨仓 golden/重依赖 e2e 尚未进 CI。
+- 兄弟仓库已有成熟“门禁 + 文档同步”习惯，本仓继续对齐。
 - 本 session 暴露了跨仓 git 权限问题：某些环境下不能直接写 engram-peft `.git`，
   需要用可写镜像 + rebase 完成提交；后续应把跨仓变更流程标准化为 patch/镜像流程。
 

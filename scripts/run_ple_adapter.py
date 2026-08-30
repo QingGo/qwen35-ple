@@ -83,16 +83,23 @@ def _load_model(model_path: str):
 
 
 class PleAdapter(torch.nn.Module):
+    """Small gated MLP that maps e_t to a hidden-state delta.
+
+    The scalar gate starts at zero so the adapter begins as an identity and
+    can grow only if the gradient signal justifies it.
+    """
+
     def __init__(self, hidden_size: int) -> None:
         super().__init__()
         self.fc1 = torch.nn.Linear(2560, hidden_size)
         self.act = torch.nn.GELU()
         self.fc2 = torch.nn.Linear(hidden_size, hidden_size)
+        self.gate = torch.nn.Parameter(torch.tensor(0.01))
         torch.nn.init.zeros_(self.fc2.weight)
         torch.nn.init.zeros_(self.fc2.bias)
 
     def forward(self, e_t):
-        return self.fc2(self.act(self.fc1(e_t)))
+        return self.gate * self.fc2(self.act(self.fc1(e_t)))
 
 
 def _train(

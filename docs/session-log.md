@@ -748,7 +748,9 @@ python scripts/run_qwen35_ablation.py --mode a1 --steps 10 --lr 1e-5
   - 4593 tokens
   - 真实 FP8 预计算
 
-### 3. 结果（负结果/需改进）
+### 3. 结果
+
+#### 3.1 首版 naive 注入（负结果）
 
 20 步、seq_len=64、lr=1e-4：
 
@@ -757,20 +759,27 @@ python scripts/run_qwen35_ablation.py --mode a1 --steps 10 --lr 1e-5
 | real | 5.283 | 6.183 | +0.900 |
 | control | 5.283 | 5.571 | +0.288 |
 
-- 当前 naive 注入（layer 1 + 直接加 MLP(e_t)）没有带来 LM 增益，反而比 shuffled control 更差。
-- 可能原因：
-  - 注入位置太早，干扰了 pretrained 内部表示；
-  - 缺少 gating/normalization；
-  - 训练步数/学习率不合适；
-  - LM next-token 任务并不是 PLE 知识的最佳评测方式。
-- 这并不否定 PLE 知识探针的正向信号；它说明“直接把 e_t 加到 hidden”不是正确嫁接方式。
+- 直接 `hidden + MLP(e_t)` 没有 LM 增益，且比 shuffled control 更差。
+- 说明需要 gating / 更稳定注入。
+
+#### 3.2 加入 gated scalar 后（改进结果）
+
+gate 初始化为 0.01，其余条件相同：
+
+| 模式 | held-out loss before | after | delta |
+|---|---:|---:|---:|
+| real | 5.283 | 4.879 | **-0.404** |
+| control | 5.283 | 4.982 | -0.301 |
+
+- 真实 PLE e_t 比 shuffled control 多降约 **0.103** held-out loss。
+- 这仍然是小规模初步信号，不是最终结论，但比 naive 注入更值得继续优化。
 
 ### 4. 下一步候选
 
-- 尝试在更深的层注入，或在层输出之后加 adapter。
-- 加 gating / LayerNorm / 小 scale 初始化。
-- 改用分类/知识任务而不是 LM loss。
-- 或者退回 engram-peft 的 PLE gating 结构，用真实表 live 读取做训练。
+- 尝试更深的层注入。
+- 增加 LayerNorm / 多 head 融合。
+- 增大语料和 step。
+- 如果稳定正向，再进入真实 PLE 推理路径。
 
 ### 7. 关键提交记录
 

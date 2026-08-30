@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +28,13 @@ ENGRAM_PEFT_HASHING = (
 def _load_engram_peft_hashing():
     if not ENGRAM_PEFT_HASHING.exists():
         pytest.skip(f"engram-peft hashing source not found: {ENGRAM_PEFT_HASHING}")
+    # hashing.py only needs torch for type annotations in the hash methods;
+    # the QwenPleHashMapping path is pure NumPy, so a tiny stub keeps this
+    # cross-repo contract test runnable without a multi-GB torch install.
+    if "torch" not in sys.modules:
+        torch_stub = types.ModuleType("torch")
+        torch_stub.Tensor = type("Tensor", (), {})
+        sys.modules["torch"] = torch_stub
     spec = importlib.util.spec_from_file_location("engram_peft_hashing", ENGRAM_PEFT_HASHING)
     if spec is None or spec.loader is None:
         pytest.skip("cannot load engram-peft hashing source")

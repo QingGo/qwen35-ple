@@ -8,8 +8,25 @@ on:
 jobs:
   lint-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qwen35-ple
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: qwen35-ple
+
+      # Cross-repo contract smoke: make sibling repos available for
+      # tests/test_hash_golden.py and tests/test_cross_repo_hash_golden.py.
+      - uses: actions/checkout@v4
+        with:
+          repository: QingGo/EngramDB
+          path: EngramDB
+      - uses: actions/checkout@v4
+        with:
+          repository: QingGo/engram-peft
+          ref: master
+          path: engram-peft
 
       - uses: actions/setup-python@v5
         with:
@@ -18,7 +35,7 @@ jobs:
       - name: Install package and test deps
         run: |
           python -m pip install -e . --no-deps
-          python -m pip install pytest ruff pyyaml numpy
+          python -m pip install pytest ruff pyyaml numpy sympy
 
       - name: Lint
         run: ruff check src tests

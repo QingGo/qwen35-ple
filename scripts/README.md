@@ -16,6 +16,8 @@
 | `generate_official_ple_forward_golden.py` | 用官方 PLE 快照生成 4096 token 前向 golden（`tests/golden/`） |
 | `run_qwen35_e2e.py` | Qwen3.5-0.8B + engram-peft PLE-lite 的 CPU forward/generate e2e（模型放 `data/`，已 gitignore） |
 | `run_qwen35_ablation.py` | Qwen3.5-0.8B A0/A1 极小消融：同语料同 step 数，记录 held-out loss + 迷你知识/推理 probe |
+| `precompute_real_ple_features.py` | 用真实 FP8 PLE 表 + EngramDB Store 预计算 `e_t` 特征 |
+| `run_ple_knowledge_probe.py` | 真实 PLE `e_t` 线性知识探针：语义类别可分性 |
 
 ## 预期脚本（与设计文档里程碑对应）
 

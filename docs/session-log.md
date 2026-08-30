@@ -693,6 +693,41 @@ python scripts/run_qwen35_ablation.py --mode a1 --steps 10 --lr 1e-5
 - 这个结果不能证明 PLE 无效，只能说明当前合成表/训练预算不足以产生可检测的嫁接收益。
 - 不要把该结果当作“PLA 失败”的最终科学结论；下一步应使用更大/真实 PLE 表或更充分训练再做判断。
 
+## 2026-08-30：第十轮增量（真实 PLE e_t 预计算 + 知识探针）
+
+### 1. 目标
+
+验证“冻结真实 PLE 表作为外部世界知识库”是否值得继续投入。
+
+### 2. 完成
+
+- 新增 `src/qwen35_ple/real_ple.py`
+  - 真实 FP8 `Store` / `PleDiskGather` 读取
+  - `F8_E4M3` → float32 转换
+  - `e_t [T, 2560]` 组装
+- 新增 `scripts/precompute_real_ple_features.py`
+  - 真实表小语料 `e_t` 离线预计算
+  - 输出 tokens / keys / e_t / meta
+- 新增 `scripts/run_ple_knowledge_probe.py`
+  - 6 个语义类别，36 个短句
+  - segment mean e_t → ridge linear probe
+  - 随机标签对照
+
+### 3. 探针结果（重要，正信号）
+
+- 时间：`fetch+dequant 0.13s` for 264 tokens
+- 线性探针 test accuracy：**72.7%**
+- 随机基线：**16.7%**
+- shuffled-label control：45.5% / 54.5% / 45.5%
+- 结论：真实 PLE `e_t` 在该小规模语义分类任务上明显高于随机基线。
+- 这为“PLE as world-knowledge database”提供了第一个正向证据。
+
+### 4. 下一步
+
+- 用预计算 `e_t` 训练一个冻结 PLE + 小模型薄 adapter。
+- 先评估“只利用 PLE feature”是否能给 Qwen3.5-0.8B 带来增量。
+- 如果 adapter 有效，再考虑真实推理路径和 Store-P 视图优化。
+
 ### 7. 关键提交记录
 
 | 仓库 | commit | 说明 |

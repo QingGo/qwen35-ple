@@ -43,6 +43,7 @@
 - [x] M2 CPT 训练冒烟（`scripts/run_cpt_smoke.py`）：A0/A1 均可反向训练
 - [x] Qwen3.5-0.8B A0/A1 极小消融脚本（`scripts/run_qwen35_ablation.py`）：10 步 pipeline 已跑通
 - [x] 第一轮极小 A0/A1 结果：A1 ≈ A0，未见增益（负结果已记录，不视为最终结论）
+- [x] 真实 PLE `e_t` 预计算 + 知识探针：test acc 72.7% vs random 16.7%（正信号）
 - [x] CI：lint + 基础单元测试（`.github/workflows/ci.yml`），已修复本轮 ruff 失败
 - [x] qwen35-ple 已推送到 GitHub（`451b046` / `cbf640c` / `aad9bec` / `f86fd0f` / `91a032f`）
 - [x] engram-peft 已推送到 GitHub（`5fc90d2` + `272166a`）
@@ -148,7 +149,8 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - 实现 config/data/train/eval 编排。
 - ✅ 训练冒烟已通：`scripts/run_cpt_smoke.py --ple` 可反向更新 PLE 层。
 - ✅ 已跑第一轮极小 A0/A1（Qwen3.5-0.8B + 10 步 + 小语料），结果 A1 ≈ A0，无可见增益。
-- ⏳ 需要真实/更大 PLE 表或更充分训练后再做正式 go/no-go。
+- ✅ 真实 PLE 知识探针通过：线性分类 acc=72.7% vs random=16.7%，说明 `e_t` 含语义信号。
+- ⏳ 基于真实 PLE `e_t` 训练冻结 PLE + 小模型薄 adapter，再和 A0 正式对比。
 - 输出知识 recall、长上下文、基础 reasoning 报告（当前为迷你 probe）。
 
 **Gate：** 报告 + go/no-go；A1 不优于 A0 则停止放大。当前第一轮证据不足以下结论，但未观察到增益。

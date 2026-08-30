@@ -128,6 +128,19 @@ EngramDB ──► qwen35-ple（消费方）
 | `table_spec` | `str \| None = None` | `"PLE_QWEN_V1"` / `"ENG_DEEPSEEK_V1"`；None = engine 默认 |
 | `table_source` | `str = "memory"` | `"memory"` \| `"engramdb:store"` \| `"engramdb:view"` |
 | `prime_sizes` | `list[int] \| None = None` | 仅开发/合成表用；提供 16 头素数可绕过真实 320M 行表；生产置 None |
+| `table_store_path` | `str \| None = None` | `table_source="engramdb:store"` 时的 Store-I 目录 |
+| `table_model_dir` | `str \| None = None` | 真实 Qwen checkpoint 目录，用于自动读取 FP8 `weight_scale` |
+| `table_shards` | `int \| None = None` | Store 分片数；`PLE_QWEN_V1` 默认为 128 |
+| `table_rows_per_shard` | `int \| None = None` | 每分片行数；`PLE_QWEN_V1` 默认为 2_500_012 |
+| `table_width` | `int \| None = None` | 行字节宽；`PLE_QWEN_V1` 默认为 160 |
+| `table_dtype` | `str = "float32"` | Store 行 dtype：`"float32"` / `"float8_e4m3fn"` |
+| `table_scale` | `float \| None = None` | 显式 FP8 `weight_scale`；与 `table_model_dir` 二选一 |
+| `table_cache_size` | `int = 4096` | Disk MultiHeadEmbedding LRU 容量 |
+
+> **自动消费**：当 `table_source="engramdb:store"` 时，`get_engram_model()` 会自动打开
+> EngramDB Store 并调用 `engramdb.integrations` 注入 Disk MultiHeadEmbedding，
+> 调用方无需手动 import `install_disk_multi_head_embedding` / `install_real_qwen_ple_embedding`。
+
 
 约束：`engine="qwen_ple"` 时（`table_spec="PLE_QWEN_V1"`）的语义由 C1 定义；
 `engine="deepseek"` 的所有行为与现有版本**完全一致**（回归保障）。

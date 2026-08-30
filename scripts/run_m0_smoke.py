@@ -120,7 +120,6 @@ def synthetic_e2e_check(model_name: str, steps: int = 2) -> None:
     import numpy as np
     from engram_peft import EngramConfig, get_engram_model
     from engram_peft.hashing import create_hash_mapping
-    from engramdb.integrations import install_disk_multi_head_embedding
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -162,8 +161,6 @@ def synthetic_e2e_check(model_name: str, steps: int = 2) -> None:
     ).astype(np.float32)
     with open(directory / "shard_000.bin", "wb") as f:
         f.write(rows.tobytes())
-    store = engramdb.Store(str(directory), 1, total_rows, row_width)
-    install_disk_multi_head_embedding(store, cache_size=100_000)
 
     config = EngramConfig(
         hidden_size=model.config.hidden_size,
@@ -178,6 +175,12 @@ def synthetic_e2e_check(model_name: str, steps: int = 2) -> None:
         engine="qwen_ple",
         table_spec="PLE_QWEN_V1",
         table_source="engramdb:store",
+        table_store_path=str(directory),
+        table_shards=1,
+        table_rows_per_shard=total_rows,
+        table_width=row_width,
+        table_dtype="float32",
+        table_cache_size=100_000,
         enable_tokenizer_compression=False,
         hc_mult=1,
         conv_kernel_size=2,
@@ -202,17 +205,20 @@ def synthetic_e2e_check(model_name: str, steps: int = 2) -> None:
             assert generated.shape[-1] > ids.shape[-1], "generation did not extend"
             ids = tokenizer("The meaning of life is", return_tensors="pt").input_ids
 
-    store.close()
     print(
         f"[M0] synthetic e2e forward/generate OK "
         f"({total_rows} rows, {row_width} B/row)"
     )
 
-def e2e_check(model_name: str, store_dir: str | None, steps: int = 2) -> None:
+def e2e_check(
+    model_name: str,
+    store_dir: str | None,
+    ple_model_dir: str | None = None,
+    steps: int = 2,
+) -> None:
     print(f"[M0] e2e with base model: {model_name}")
     _load_e2e_dependencies()
     from engram_peft import EngramConfig, get_engram_model
-    from engramdb.integrations import install_disk_multi_head_embedding
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     if store_dir is None:
@@ -221,10 +227,6 @@ def e2e_check(model_name: str, store_dir: str | None, steps: int = 2) -> None:
             "(e.g. data/real-rows or an EngramDB Store-I directory). Synthetic tiny stores "
             "cannot cover the real 320M-row PLE rowid space."
         )
-
-    # Real Qwen PLE Store-I: 128 shards x 2,500,012 rows x 160 bytes.
-    store = engramdb.Store(store_dir, 128, 2_500_012, 160)
-    install_disk_multi_head_embedding(store)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name)
@@ -242,6 +244,10 @@ def e2e_check(model_name: str, store_dir: str | None, steps: int = 2) -> None:
         engine="qwen_ple",
         table_spec="PLE_QWEN_V1",
         table_source="engramdb:store",
+        table_store_path=store_dir,
+        table_model_dir=ple_model_dir,
+        table_dtype="float8_e4m3fn",
+        table_cache_size=4096,
         enable_tokenizer_compression=False,
         hc_mult=1,
         conv_kernel_size=4,
@@ -261,7 +267,6 @@ def e2e_check(model_name: str, store_dir: str | None, steps: int = 2) -> None:
             assert torch.isfinite(logits).all(), "non-finite logits"
             ids = tokenizer("The meaning of life is", return_tensors="pt").input_ids
 
-    store.close()
     print("[M0] e2e forward/generate smoke OK")
 
 
@@ -276,6 +281,12 @@ def main() -> None:
     )
     parser.add_argument("--model", default="hf-internal-testing/tiny-random-LlamaForCausalLM")
     parser.add_argument("--store-dir", default=None, help="real Store-I dir needed for --e2e")
+    parser.add_argument(
+        "--ple-model-dir",
+        default=None,
+        help="Qwen PLE checkpoint dir for FP8 weight_scale discovery "
+        "(default: /Volumes/My Passport/qwen38-ple)",
+    )
     parser.add_argument("--steps", type=int, default=2, help="number of forward steps")
     args = parser.parse_args()
 
@@ -283,7 +294,13 @@ def main() -> None:
         _load_e2e_dependencies()
         synthetic_e2e_check(args.model, steps=args.steps)
     elif args.e2e:
-        e2e_check(args.model, args.store_dir, steps=args.steps)
+        ple_model_dir = args.ple_model_dir or "/Volumes/My Passport/qwen38-ple"
+        e2e_check(
+            args.model,
+            args.store_dir,
+            ple_model_dir=ple_model_dir,
+            steps=args.steps,
+        )
     else:
         quick_check()
 

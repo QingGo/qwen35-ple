@@ -129,3 +129,52 @@ def test_repo_sample_config_is_loadable():
     assert cfg.engine.engine == "qwen_ple"
     assert cfg.engine.table_spec == "PLE_QWEN_V1"
     assert cfg.engram.target_layers == [1]
+
+def test_to_engram_config_bridges_store_fields(tmp_path):
+    cfg_path = tmp_path / "store.yaml"
+    cfg_path.write_text(
+        yaml.safe_dump(
+            {
+                "project": "store-e2e",
+                "base_model": "tiny",
+                "tokenizer": "tiny",
+                "engine": {
+                    "engine": "qwen_ple",
+                    "table_spec": "PLE_QWEN_V1",
+                    "table_source": "engramdb:store",
+                    "store_path": "/tmp/rows",
+                    "model_dir": "/tmp/qwen-ple",
+                    "shards": 128,
+                    "rows_per_shard": 2_500_012,
+                    "width": 160,
+                    "scale": 0.0002,
+                    "cache_size": 2048,
+                },
+                "engram": {
+                    "embedding_dim": 2560,
+                    "target_layers": [1],
+                },
+                "training": {},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_path)
+    ecfg = cfg.to_engram_config(
+        hidden_size=2560,
+        compressed_vocab_size=248320,
+        pad_id=248044,
+        tokenizer_name_or_path="/tmp/tokenizer",
+    )
+    assert ecfg.table_source == "engramdb:store"
+    assert ecfg.table_store_path == "/tmp/rows"
+    assert ecfg.table_model_dir == "/tmp/qwen-ple"
+    assert ecfg.table_shards == 128
+    assert ecfg.table_rows_per_shard == 2_500_012
+    assert ecfg.table_width == 160
+    assert ecfg.table_scale == 0.0002
+    assert ecfg.table_cache_size == 2048
+    assert ecfg.hidden_size == 2560
+    assert ecfg.engine == "qwen_ple"
+

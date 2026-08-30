@@ -32,6 +32,12 @@ class EngineConfig:
     view_path: str | None = None
     keys_path: str | None = None
     store_path: str | None = None
+    model_dir: str | None = None
+    shards: int | None = None
+    rows_per_shard: int | None = None
+    width: int | None = None
+    scale: float | None = None
+    cache_size: int = 4096
 
     def validate(self) -> None:
         if self.engine not in ALLOWED_ENGINES:
@@ -42,6 +48,8 @@ class EngineConfig:
             raise ValueError(f"unsupported table_source: {self.table_source}")
         if self.table_source == "engramdb:view" and not (self.view_path or self.keys_path):
             raise ValueError("engramdb:view requires view_path and/or keys_path")
+        if self.table_source == "engramdb:store" and not self.store_path:
+            raise ValueError("engramdb:store requires store_path")
 
 
 @dataclass
@@ -113,6 +121,56 @@ class Qwen35PleConfig:
         self.engram.validate()
         self.training.validate()
 
+    def to_engram_config(
+        self,
+        *,
+        hidden_size: int | None = None,
+        compressed_vocab_size: int | None = None,
+        pad_id: int | None = None,
+        tokenizer_name_or_path: str | None = None,
+        **overrides: Any,
+    ):
+        """Build an engram-peft ``EngramConfig`` from this YAML/contract config.
+
+        This is the "configuration-only" bridge: after loading a qwen35-ple
+        YAML, callers can hand the result directly to ``get_engram_model`` and
+        ``table_source`` will be consumed automatically by engram-peft.
+        """
+        from engram_peft.config import EngramConfig as PeftEngramConfig
+
+        data: dict[str, Any] = {
+            "hidden_size": hidden_size,
+            "compressed_vocab_size": compressed_vocab_size,
+            "pad_id": pad_id,
+            "tokenizer_name_or_path": tokenizer_name_or_path,
+            "ngram_sizes": list(self.engram.ngram_sizes),
+            "n_head_per_ngram": self.engram.n_head_per_ngram,
+            "embedding_dim": self.engram.embedding_dim,
+            "engram_vocab_size_per_ngram": list(
+                self.engram.engram_vocab_size_per_ngram
+            ),
+            "target_layers": list(self.engram.target_layers),
+            "hc_mult": self.engram.hc_mult,
+            "conv_kernel_size": self.engram.conv_kernel_size,
+            "conv_dilation": self.engram.conv_dilation,
+            "engram_dtype": self.engram.engram_dtype,
+            "prime_sizes": self.engram.prime_sizes,
+            "use_sparse_embeddings": self.engram.use_sparse_embeddings,
+            "engine": self.engine.engine,
+            "table_spec": self.engine.table_spec,
+            "table_source": self.engine.table_source,
+            "table_store_path": self.engine.store_path,
+            "table_model_dir": self.engine.model_dir,
+            "table_shards": self.engine.shards,
+            "table_rows_per_shard": self.engine.rows_per_shard,
+            "table_width": self.engine.width,
+            "table_scale": self.engine.scale,
+            "table_cache_size": self.engine.cache_size,
+        }
+        data.update(self.engram.extra)
+        data.update(overrides)
+        return PeftEngramConfig(**{k: v for k, v in data.items() if v is not None})
+
 
 def _section(data: dict[str, Any], key: str) -> dict[str, Any]:
     value = data.get(key, {})
@@ -147,6 +205,28 @@ def load_config(path: str | Path) -> Qwen35PleConfig:
             view_path=engine_raw.get("view_path"),
             keys_path=engine_raw.get("keys_path"),
             store_path=engine_raw.get("store_path"),
+            model_dir=engine_raw.get("model_dir"),
+            shards=(
+                int(engine_raw["shards"])
+                if engine_raw.get("shards") is not None
+                else None
+            ),
+            rows_per_shard=(
+                int(engine_raw["rows_per_shard"])
+                if engine_raw.get("rows_per_shard") is not None
+                else None
+            ),
+            width=(
+                int(engine_raw["width"])
+                if engine_raw.get("width") is not None
+                else None
+            ),
+            scale=(
+                float(engine_raw["scale"])
+                if engine_raw.get("scale") is not None
+                else None
+            ),
+            cache_size=int(engine_raw.get("cache_size", 4096)),
         ),
         engram=EngramConfig(
             ngram_sizes=list(engram_raw.get("ngram_sizes", [2, 3])),

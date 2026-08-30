@@ -1296,3 +1296,33 @@ LLM-CompileForge 提供产品化推理路径
 |---|---|
 | `a2b5cb4` | 第十六轮调研：下一步实验方向 |
 | `e727cc5` | EngramDB v0.2.8 适配：rowid/discover/scale + 修复 e_t 缩放 + CI ruff |
+
+## 2026-08-30：第十八轮增量（Phase 0 基座 + Phase 1 reader/live gate）
+
+### 本轮完成
+
+1. **Phase 0 实验基座**
+   - `scripts/run_phase0.py`：固定 train/val 分割、多 seed、no-reader/real/control 三线、最小 QA log-likelihood。
+   - `scripts/run_phase0.sh`：一条命令 wrapper。
+   - 本地 1 seed / 1 step smoke 通过（no-reader + real + QA）。
+2. **忠实 reader**
+   - `src/qwen35_ple/reader.py` 新增：
+     - `QwenShortConv`（多分支、kernel=4/dilation=3、残差）
+     - `QwenEngramReader`（4 分支 ContextAwareGating + ShortConv，官方 gate 非线性）
+   - `run_phase0.py` 支持 `--reader engram`。
+3. **Phase 1 live 数值 gate**
+   - `scripts/run_live_vs_precomputed.py`
+   - 实测 live `DiskPleNGramEmbedding` 与当前 `fetch_e_t` 路径：`max_abs_diff=0.0`，通过。
+4. **发现旧预计算 e_t 文件已过期**
+   - 旧 `data/ple-adapter-features*.npy` 与当前 Store 不一致（许多行为 0）。
+   - 原因很可能是这些文件生成于 FP8 表/scale 修复之前。
+   - 后续要么重新生成，要么直接走 live Store 训练；Phase 2 建议 live。
+
+### 本轮技术债新增/更新
+
+- 旧预计算特征文件不可信，需要重新生成或弃用。
+- Phase 0 尚未跑正式 3-seed 报告。
+- Phase 1 还差：
+  - 用 live Store 直接训练（不再依赖预计算数组）；
+  - 官方 PLE 权重作为初始化/源空间 reader 的对照；
+  - WSL/GPU 实机验证。

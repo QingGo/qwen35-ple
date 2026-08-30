@@ -8,7 +8,8 @@
 |---|---|
 | `build_table_assets.sh` | 调用 EngramDB CLI 构建/校验 Store-P 视图，并检查 manifest 字段 |
 | `run_m0_smoke.py` | M0 冒烟：磁盘版 MultiHeadEmbedding 自检 + 合成表/真表模型 e2e |
-| `run_ablation_eval.py` | 最小知识召回评测执行器，产出 A0/A1 兼容 JSON |
+| `run_ablation_eval.py` | 最小知识召回/长上下文/推理评测执行器，产出 A0/A1 兼容 JSON |
+| `run_cpt_smoke.py` | M2 CPT 训练冒烟：A0 基线 / A1 PLE 处理可训练性验证 |
 | `run_eval.py` | A0/A1 评测结果 JSON 对比报告入口 |
 | `table_assets.py`（src 内） | 查找 EngramDB CLI、读取/校验视图 manifest 的 Python 编排层 |
 

@@ -36,7 +36,8 @@
 - [x] M0 合成表磁盘注入完整 forward/generate 闭环（`scripts/run_m0_smoke.py --synthetic-e2e`）
 - [x] M1 hc=1 PLE-lite 前向 golden（与 Qwen PLE 参考数学 4096 token 对拍）
 - [x] A0/A1 评测对比入口（`scripts/run_eval.py` + `eval/protocol.py`）
-- [x] 最小知识召回评测执行器（`scripts/run_ablation_eval.py`）
+- [x] 最小知识召回/长上下文/推理评测执行器（`scripts/run_ablation_eval.py`）
+- [x] M2 CPT 训练冒烟（`scripts/run_cpt_smoke.py`）：A0/A1 均可反向训练
 - [x] CI：lint + 基础单元测试（`.github/workflows/ci.yml`）
 - [x] qwen35-ple 已推送到 GitHub（`451b046` / `cbf640c` / `aad9bec` / `f86fd0f` / `91a032f`）
 - [x] engram-peft 已推送到 GitHub（`5fc90d2` + `272166a`）
@@ -138,7 +139,8 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 ### Phase 3：M2 小规模消融（决策点）
 
 - 实现 config/data/train/eval 编排。
-- 先跑 A0 vs A1（0.2-1B tokens 量级）。
+- ✅ 训练冒烟已通：`scripts/run_cpt_smoke.py --ple` 可反向更新 PLE 层。
+- ⏳ 先跑 A0 vs A1（0.2-1B tokens 量级）。
 - 输出知识 recall、长上下文、基础 reasoning 报告。
 
 **Gate：** 报告 + go/no-go；A1 不优于 A0 则停止放大。

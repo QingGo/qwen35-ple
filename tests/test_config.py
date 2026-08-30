@@ -131,6 +131,11 @@ def test_repo_sample_config_is_loadable():
     assert cfg.engram.target_layers == [1]
 
 def test_to_engram_config_bridges_store_fields(tmp_path):
+    try:
+        import engram_peft  # noqa: F401
+    except ImportError:
+        pytest.skip("engram-peft is not installed; config bridge requires it")
+
     cfg_path = tmp_path / "store.yaml"
     cfg_path.write_text(
         yaml.safe_dump(

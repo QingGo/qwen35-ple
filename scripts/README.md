@@ -24,6 +24,7 @@
 | `run_phase0.py` | Phase 0 三线实验基座：train/val 分割、多 seed、no-reader/real/control、最小 QA log-likelihood |
 | `run_phase0.sh` | Phase 0 一条命令 wrapper（自动处理本机兼容 PYTHONPATH）|
 | `run_live_vs_precomputed.py` | Phase 1 gate：live DiskPleNGramEmbedding 与当前 fetch_e_t 数值一致性 |
+| `qwen4_ple_custom_loader.py` | Phase B：官方 Qwen4Exp 模型加载时跳过 ngram shard，并安装磁盘 PLE adapter（支持 dry-run） |
 
 ## 预期脚本（与设计文档里程碑对应）
 

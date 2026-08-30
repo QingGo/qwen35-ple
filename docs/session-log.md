@@ -642,6 +642,33 @@
 
 ---
 
+## 2026-08-30：第九轮增量（A0/A1 消融脚本落地并跑通）
+
+### 1. 已完成
+
+- 新增 `scripts/run_qwen35_ablation.py`：
+  - A0 = Qwen3.5-0.8B 全参微调；
+  - A1 = 同模型 + 小素数 PLE_QWEN_V1 层全参微调；
+  - 同数据、同 step、同 lr、同 seed；
+  - 记录 train loss、held-out loss、迷你知识/推理 eval。
+- 已在本机 CPU 跑通 A0 和 A1 各 1 步 smoke。
+- 输出：
+  - `outputs/ablation-a0.json`
+  - `outputs/ablation-a1.json`
+
+### 2. 当前结论
+
+- 1 步不是科学消融，只是 pipeline 可跑通。
+- 两步结果目前高度相似，且单步高 lr 导致 held-out loss 飙升，说明需要：
+  - 更长/更多语料；
+  - 更低学习率或 warmup；
+  - 固定 eval 协议后再出正式 go/no-go。
+
+### 3. 下一步
+
+- 如果继续在 Intel Mac 上跑：用小语料 + `lr=1e-5`、更多 step，跑 10-50 步。
+- 如果太慢：按你建议切到 Windows + WSL，把环境准备脚本移植过去。
+
 ### 7. 关键提交记录
 
 | 仓库 | commit | 说明 |

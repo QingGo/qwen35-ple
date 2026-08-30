@@ -224,11 +224,12 @@
   - 新增 `scripts/run_m0_smoke.py --synthetic-e2e`。
   - 用 `hf-internal-testing/tiny-random-LlamaForCausalLM` + 小型 EngramDB Store-I
     跑通完整 engram-peft forward/generate。
+  - 走 `engine='qwen_ple'` + `prime_sizes` 小素数表，直接覆盖 PLE rowid 语义和磁盘注入。
   - 验证 logits 有限、生成能扩展。
   - 增加 `--steps`、离线 HF 环境变量、旧 torch RMSNorm 兼容 shim。
   - 运行验证：
     ```text
-    [M0] synthetic e2e forward/generate OK (240 rows, 32 B/row)
+    [M0] synthetic e2e forward/generate OK (750 rows, 40 B/row)
     ```
 - **M1 hc=1 PLE-lite 前向 golden**
   - 新增 `src/qwen35_ple/ple_reference.py`：复刻 Qwen `Qwen4ExpTextPLELayer` 的

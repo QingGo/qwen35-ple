@@ -184,6 +184,22 @@ python scripts/bench_store_vs_view.py \
     --tokens 20000 --reps 3 --csv /tmp/store-vs-view.csv
 ```
 
+懒加载逐窗口基准（Track B/C，不会物化全量 e_t）：
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/bench_lazy_windows.py \
+    --rows-dir "/Volumes/My Passport/qwen38-rows" \
+    --tokens 100000 --seq-len 128 --step 128 \
+    --csv /tmp/lazy-100k-store.csv
+```
+
+本机 Mac 外盘实测（非 WSL 结论）：
+
+- 100k token Store-I 懒加载：781 窗口，约 60.5s
+- 100k token Store-P 懒加载：781 窗口，约 0.58s
+- 1M token Store-P 懒加载：7812 窗口，约 7.1s
+
 > **推荐方式（1M token/内存受限机器）**：`--live-store` 现在不会预加载完整 10GB `e_t`，
 > 而是只保留 `[T,16]` rowids，训练/评测时按当前窗口懒加载对应 PLE 行。
 > 因此 1M token 也可以直接跑，只要单窗口内存足够（~seq_len × 2560 × 4B）。

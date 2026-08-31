@@ -1464,12 +1464,15 @@ python scripts/bench_store_vs_view.py \
 结果（单次热态、Mac 外盘、本地小样本）：
 
 ```text
-store_fetch=0.162s
-fetch_tensor=0.025s
-LiveETStore.get=0.039s
-Store-P view=0.021s
+20k tokens:
+store_fetch=1.920s
+fetch_tensor=0.272s
+LiveETStore.get=0.354s
+Store-P view=0.160s
 ```
 
-说明：Store-P 在本机小样本上快于 Store-I 单次 scatter；WSL 冷/热、1M、多线程结论仍需 Track B 正式 CSV。
+说明：Store-P 在本机 20k 样本上快于 Store-I 单次 scatter（约 12× store_fetch）；
+`LiveETStore.get` 已远快于裸 `store_fetch`，但仍比 Store-P 慢约 2.2×。
+WSL 冷/热、1M、多线程结论仍需 Track B 正式 CSV。
 
 

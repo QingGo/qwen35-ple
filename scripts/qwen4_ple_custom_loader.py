@@ -135,6 +135,7 @@ def main() -> int:
             scale=info.get("weight_scale"),
             cache_size=args.cache_size,
             layer_ids=args.layer_ids,
+            prefetch=True,
         )
         print(f"[loader] replaced PLE modules: {replaced}")
         model.eval()

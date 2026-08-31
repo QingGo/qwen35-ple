@@ -19,10 +19,9 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator, Sequence
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
-from typing_extensions import Self
 
 try:
     from torch.utils.data import IterableDataset as _IterableDataset

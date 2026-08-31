@@ -17,14 +17,17 @@ disk.  Full ``e_t`` materialization remains an explicit anti-pattern.
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator, Sequence
 from dataclasses import asdict, dataclass
-from typing import Any, Iterator, Sequence
+from typing import Any
 
 import numpy as np
+from typing_extensions import Self
 
 try:
-    from torch.utils.data import IterableDataset as _IterableDataset, get_worker_info
-except Exception:  # pragma: no cover - torch is optional for pure-Python consumers
+    from torch.utils.data import IterableDataset as _IterableDataset
+    from torch.utils.data import get_worker_info
+except ImportError:  # pragma: no cover - torch is optional for pure-Python consumers
     _IterableDataset = object  # type: ignore[assignment,misc]
     get_worker_info = None  # type: ignore[assignment]
 
@@ -59,7 +62,7 @@ class FetchStats:
     def as_dict(self) -> dict[str, float | int]:
         return asdict(self)
 
-    def merge(self, other: "FetchStats") -> None:
+    def merge(self, other: FetchStats) -> None:
         self.windows += other.windows
         self.tokens += other.tokens
         self.rows += other.rows
@@ -178,7 +181,7 @@ class LiveETStore:
     def reset_stats(self) -> None:
         self.stats = FetchStats()
 
-    def view(self, start: int = 0, length: int | None = None) -> "LiveETView":
+    def view(self, start: int = 0, length: int | None = None) -> LiveETView:
         n = len(self.rowids)
         if length is None:
             length = n - start
@@ -191,10 +194,10 @@ class LiveETStore:
             self.store.close()
             self._closed = True
 
-    def __enter__(self) -> "LiveETStore":
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *exc_info: Any) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         self.close()
 
     def __getstate__(self) -> dict[str, Any]:
@@ -272,10 +275,10 @@ class LiveETView:
             return self.base.get(idx)
         return self.base.get(np.array([self.indices[item]], dtype=np.int64))
 
-    def permuted(self, perm: np.ndarray) -> "LiveETView":
+    def permuted(self, perm: np.ndarray) -> LiveETView:
         return LiveETView(self.base, self.indices[np.asarray(perm, dtype=np.int64)])
 
-    def subset(self, indices: np.ndarray) -> "LiveETView":
+    def subset(self, indices: np.ndarray) -> LiveETView:
         return LiveETView(self.base, self.indices[np.asarray(indices, dtype=np.int64)])
 
     @property
@@ -342,7 +345,7 @@ class LiveETViewStore:
             raise ValueError("LiveETViewStore is closed")
         return self._fetch(self.slot_indices[np.asarray(indices, dtype=np.int64)])
 
-    def permuted(self, perm: np.ndarray) -> "LiveETViewStore":
+    def permuted(self, perm: np.ndarray) -> LiveETViewStore:
         return LiveETViewStore(
             self.view,
             self.slot_indices[np.asarray(perm, dtype=np.int64)],
@@ -357,7 +360,7 @@ class LiveETViewStore:
             view_path=self._view_path,
         )
 
-    def subset(self, indices: np.ndarray) -> "LiveETViewStore":
+    def subset(self, indices: np.ndarray) -> LiveETViewStore:
         return LiveETViewStore(
             self.view,
             self.slot_indices[np.asarray(indices, dtype=np.int64)],

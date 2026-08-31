@@ -71,6 +71,25 @@ This proves:
 - `DiskPleNGramEmbedding` reading the real Store produces the same dequantized
   values as the same rows read directly from the checkpoint.
 
+## Prefetch A/B smoke
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/prefetch_real_ab.py --tokens 64 --compute-ms 30
+```
+
+Result:
+
+```text
+[sync]     total=192.390ms fetch_s=188.817ms
+[prefetch] total=34.117ms fetch_s=1.434ms wait_s=0.028ms issued=1024
+[delta]    sync - prefetch = 158.273ms
+PREFETCH_AB_SMOKE_OK
+```
+
+This shows the new prefetch pipeline can hide disk fetch behind a simulated
+earlier-layer compute window.
+
 Still pending:
 - Full official Qwen4Exp model load/memory verification on a Transformers build
   that ships Qwen4-Exp.

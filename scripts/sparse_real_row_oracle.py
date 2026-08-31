@@ -3,7 +3,9 @@
 
 This script verifies that EngramDB Store-I rows are byte-identical to the rows
 stored in the original Qwen3.8/Qwen4Exp checkpoint, without loading either the
-48GB Store or the full PLE embedding into RAM.
+48GB Store or the full PLE embedding into RAM.  It then runs
+``DiskPleNGramEmbedding`` against the real Store and compares its dequantized
+output to the same real rows read directly from the checkpoint.
 
 It only:
 
@@ -12,7 +14,7 @@ It only:
 3. reads only the touched FP8 rows from the original safetensors shards via raw
    header/data-offset slicing;
 4. fetches the same rowids from the EngramDB Store;
-5. compares the raw bytes.
+5. compares raw bytes and DiskPle dequantized forward output.
 
 Usage:
 
@@ -29,12 +31,16 @@ import json
 import struct
 from pathlib import Path
 
+import torch
+
 import engramdb
 from engramdb.ple_adapter import (
+    DiskPleNGramEmbedding,
     PLE_BASE,
     PLE_EOS,
     head_offsets,
     head_vocab_sizes,
+    padded_vocab_size,
     ple_rowids,
 )
 
@@ -142,26 +148,70 @@ def main() -> int:
     )
     try:
         raw = store.fetch(unique)
+        assert len(raw) == len(unique) * args.width
+        store_rows: dict[int, bytes] = {}
+        for i, rowid in enumerate(unique):
+            store_rows[rowid] = raw[i * args.width:(i + 1) * args.width]
+
+        mismatches = []
+        for rowid in unique:
+            if ckpt_rows[rowid] != store_rows[rowid]:
+                mismatches.append(rowid)
+                if len(mismatches) >= 5:
+                    break
+
+        if mismatches:
+            print(f"[oracle] MISMATCH rows: {mismatches}")
+            return 1
+
+        print(f"[oracle] all {len(unique)} real rows byte-identical")
+
+        # Run DiskPle against the real Store and compare to checkpoint rows.
+        scale = float(info.get("weight_scale") or 1.0)
+        embed_dim = int(info["ple_embed_dim"])
+        disk = DiskPleNGramEmbedding(
+            store=store,
+            num_embeddings=padded_vocab_size(sizes),
+            embedding_dim=embed_dim,
+            num_heads=16,
+            layer_multipliers=multipliers,
+            scale=scale,
+            dtype=torch.float8_e4m3fn,
+            cache_size=4096,
+            eos=eos,
+            prime_sizes=sizes,
+            offsets=offsets,
+            ngram_size=3,
+            heads_per_ngram=8,
+        )
+
+        tokens = torch.tensor([TOKENS], dtype=torch.long)
+        with torch.no_grad():
+            actual = disk(tokens, None)
+
+        assert tuple(actual.shape) == (1, len(TOKENS), embed_dim), actual.shape
+        parts = []
+        for token_rows in rows:
+            head_parts = []
+            for rowid in token_rows:
+                raw_row = ckpt_rows[rowid]
+                vals = (
+                    torch.frombuffer(bytearray(raw_row), dtype=torch.float8_e4m3fn)
+                    .to(torch.float32)
+                    * scale
+                )
+                head_parts.append(vals)
+            parts.append(torch.cat(head_parts))
+        reference = torch.stack(parts).unsqueeze(0)
+
+        maxdiff = (actual - reference).abs().max().item()
+        print(f"[oracle] DiskPle real-Store maxdiff vs checkpoint rows: {maxdiff}")
+        if maxdiff != 0.0:
+            print("[oracle] DiskPle dequant mismatch")
+            return 1
     finally:
         store.close()
 
-    assert len(raw) == len(unique) * args.width
-    store_rows: dict[int, bytes] = {}
-    for i, rowid in enumerate(unique):
-        store_rows[rowid] = raw[i * args.width:(i + 1) * args.width]
-
-    mismatches = []
-    for rowid in unique:
-        if ckpt_rows[rowid] != store_rows[rowid]:
-            mismatches.append(rowid)
-            if len(mismatches) >= 5:
-                break
-
-    if mismatches:
-        print(f"[oracle] MISMATCH rows: {mismatches}")
-        return 1
-
-    print(f"[oracle] all {len(unique)} real rows byte-identical")
     print("SPARSE_REAL_ROW_ORACLE_OK")
     return 0
 

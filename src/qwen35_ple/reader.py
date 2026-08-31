@@ -394,7 +394,7 @@ class OfficialSourceQwenReader(torch.nn.Module):
         bridge_hidden: int | None = None,
         out_mlp: bool = False,
         out_hidden: int | None = None,
-    ) -> "OfficialSourceQwenReader":
+    ) -> OfficialSourceQwenReader:
         """Create the reader and load official source tensors from a .pt/.bin file.
 
         The file must contain the reader keys produced by

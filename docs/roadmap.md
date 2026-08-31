@@ -234,3 +234,35 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - Track C：用 `LiveETDataset` 跑 1M token real/control/3-seed，并输出每窗口
   fetch 时间 / CSV。
 - Track D/E：Store 连接池、服务化、CI nightly 入 live-store smoke。
+
+---
+
+## 9. 2026-09-01 第二十轮系统性思考（Session 34）
+
+> 完整版见 EngramDB `docs/roadmap.md` Section 24 与本仓 `docs/session-log.md`。
+
+### 9.1 当前定位
+
+- 终极目标不变：磁盘优先的 PLE/Engram 记忆表基础设施。
+- Track A 已完成；Track B/C 完成了“读取基准”，但尚未完成“真实模型实验”。
+- 已确认 Store-P 是 WSL 随机 IO 的正确出路；但缺少 rowid→slot 语义映射和访问序调度。
+
+### 9.2 新增技术债（V123–V132）
+
+- V123 rowid-tuple → Store-P slot 语义映射
+- V124 access-order 视图/调度
+- V125 真实模型 1M real/control/3-seed
+- V126 WSL golden 漂移
+- V127 serving A/B
+- V128 懒加载基准门禁
+- V129 StorePool 与 LiveET 深度集成
+- V130 Arrow IPC 验证
+- V131 WSL 复现脚本
+- V132 WSL 全表 Store-P 构建策略
+
+### 9.3 下一阶段
+
+1. P0：语义映射 + access-order + 真实模型 1M 三线实验。
+2. P1：性能门禁 + WSL 复现 + golden 对齐。
+3. P2：serving / Arrow / 连接池深化。
+4. P3：全表 Store-P + 三仓同步 + 发布。

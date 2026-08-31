@@ -1584,4 +1584,15 @@ WSL Store-P 1000 tokens, 6 windows, workers=2: wall 0.145s, fetch_total 0.039s
 说明：Store-P 视图读取器已能用于 PyTorch DataLoader 多 worker，每 worker
 会重新打开自己的 Store-P 视图句柄。
 
+## Session 34 系统性思考指针
+
+完整版见 EngramDB `docs/roadmap.md` Section 24、`docs/session-summary.md`
+Session 34。本仓同步记录：
+
+- 终极目标不变：磁盘优先 PLE/Engram 记忆表基础设施。
+- 当前最大缺口：rowid→Store-P slot 语义映射、access-order 视图/调度、真实模型 1M 三线实验。
+- 新增技术债 V123–V132，对应 EngramDB Section 24。
+- 下一阶段 P0：语义映射 + access-order + 真实模型 1M；P1：门禁/WSL 复现/golden；P2：serving/Arrow/连接池；P3：全表 Store-P/三仓同步。
+
+
 

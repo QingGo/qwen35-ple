@@ -202,3 +202,32 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 
 若 Phase 2 仍无稳定正增益：记录负结果，停止放大。
 若 Phase 2 有正增益：才进入 backbone 策略矩阵和产品化。
+
+---
+
+## 8. 2026-09-01 Track A：通用懒加载数据流
+
+> 详细复盘见 `docs/session-log.md` 的“Session 33 Track A”章节。
+
+### 8.1 已完成
+
+- [x] 将 `LiveETStore` / `LiveETView` 从 `run_phase0.py` 提炼到
+  `src/qwen35_ple/live_store.py`。
+- [x] 实现 `LiveETDataset`（IterableDataset 兼容）：
+  - 每个 `__iter__` 只取一个窗口；
+  - 支持 `control`、`shuffle`、`worker_id` / `num_workers` 分片；
+  - 支持 `torch.utils.data.DataLoader(num_workers=N)`，每个 worker 自动按
+    `get_worker_info()` 分片并重新打开自己的 Store 句柄；
+  - 记录 `LiveETBatch.fetch_seconds` / `rows`，Store 级统计 `FetchStats`。
+- [x] `LiveETStore` 支持 pickle / unpickle，为 DataLoader 多进程子进程重开 Store。
+- [x] `run_phase0.py --live-store` 改用统一模块，不再在脚本内维护私有类。
+- [x] 新增 `scripts/run_live_et_dataset_smoke.py` 冒烟入口。
+- [x] 新增 `tests/test_live_store.py`（8 个测试通过）。
+- [x] README 增加三行接入示例。
+
+### 8.2 下一个最高优先
+
+- Track B：WSL Store-P 构建 + Store-I / Store-P / lazy / full-memory 同口径 A/B。
+- Track C：用 `LiveETDataset` 跑 1M token real/control/3-seed，并输出每窗口
+  fetch 时间 / CSV。
+- Track D/E：Store 连接池、服务化、CI nightly 入 live-store smoke。

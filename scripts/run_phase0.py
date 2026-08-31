@@ -42,6 +42,7 @@ from qwen35_ple.reader import (
     install_reader_hook,
 )
 from qwen35_ple.real_ple import resolve_ple_weight_scale
+from qwen35_ple.live_store import LiveETStore
 
 
 DEFAULT_QA = [
@@ -95,70 +96,6 @@ def _install_torch_compat() -> None:
     import typing_extensions
     if not hasattr(typing, "override"):
         typing.override = typing_extensions.override
-
-class LiveETStore:
-    """Disk-first live e_t reader.
-
-    It does not materialize the full ``e_t`` array.  Instead it keeps the full
-    rowid matrix (small compared to e_t) and fetches only the requested token
-    slice from EngramDB on demand.
-    """
-
-    def __init__(self, store: Any, rowids: np.ndarray, scale: float) -> None:
-        self.store = store
-        self.rowids = np.asarray(rowids, dtype=np.int64)
-        self.scale = float(scale)
-
-    def __len__(self) -> int:
-        return len(self.rowids)
-
-    def get(self, indices: np.ndarray) -> np.ndarray:
-        """Fetch e_t for a 1-D array of token indices."""
-        import engramdb
-
-        indices = np.asarray(indices, dtype=np.int64)
-        if indices.size == 0:
-            return np.zeros((0, 2560), dtype=np.float32)
-        rows = self.rowids[indices]
-        flat = rows.reshape(-1).tolist()
-        arr = engramdb.fetch_e_t_tensor(
-            self.store,
-            flat,
-            scale=self.scale,
-            num_heads=16,
-            head_dim=160,
-            dtype=torch.float8_e4m3fn,
-            out_dtype=torch.float32,
-        )
-        return arr.reshape(len(indices), 2560).numpy()
-
-    def view(self, start: int = 0, length: int | None = None) -> "LiveETView":
-        n = len(self.rowids)
-        if length is None:
-            length = n - start
-        return LiveETView(self, np.arange(start, start + length, dtype=np.int64))
-
-    def close(self) -> None:
-        self.store.close()
-
-
-class LiveETView:
-    """A lazy view over LiveETStore, supporting permutation/control."""
-
-    def __init__(self, base: LiveETStore, indices: np.ndarray) -> None:
-        self.base = base
-        self.indices = np.asarray(indices, dtype=np.int64)
-
-    def __len__(self) -> int:
-        return len(self.indices)
-
-    def get(self, offset: int, length: int) -> np.ndarray:
-        return self.base.get(self.indices[offset:offset + length])
-
-    def permuted(self, perm: np.ndarray) -> "LiveETView":
-        return LiveETView(self.base, self.indices[perm])
-
-
 
 def _load_model(model_path: str, device: str = "cpu"):
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -558,7 +495,15 @@ def main() -> int:
         live_store_handle = live_store
         # Keep only rowids in memory; e_t is fetched lazily per training/eval
         # window.  This avoids materializing a full 10GB e_t array on WSL.
-        e_t = LiveETStore(live_store, rowids, applied_scale)
+        e_t = LiveETStore(
+            live_store,
+            rowids,
+            applied_scale,
+            store_path=args.rows_dir,
+            shards=128,
+            rows_per_shard=2_500_012,
+            width=160,
+        )
         print(
             f"[phase0] live-store ready: {len(tokens)} tokens, "
             f"rowids={len(rowids)}x{len(rowids[0])}, rowid_s={rowid_s:.2f}s, "

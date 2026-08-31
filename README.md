@@ -180,8 +180,40 @@ python scripts/bench_live_store.py \
 > 因此 1M token 也可以直接跑，只要单窗口内存足够（~seq_len × 2560 × 4B）。
 > 不需要先做全量 chunk npy，也不需要全量 `e_t` 常驻内存。
 
+#### LiveETDataset：通用懒加载数据流（Track A）
 
-核心代码：`src/qwen35_ple/real_ple.py`。
+任意实验脚本只需三行即可接入 live-store：
+
+```python
+from qwen35_ple.live_store import LiveETStore, LiveETDataset
+
+live = LiveETStore(store, rowids, scale, store_path=rows_dir,
+                   shards=128, rows_per_shard=2_500_012, width=160)
+dataset = LiveETDataset(tokens, live, seq_len=128, step=128)
+for batch in dataset:
+    # batch.tokens + batch.e_t are already fetched from disk, no full e_t
+    ...
+```
+
+`LiveETDataset` 支持：
+
+- 直接 `for` 迭代，或传给 `torch.utils.data.DataLoader(..., num_workers=N)`
+- 每 worker 自动分片，并且每个 worker 会重新打开自己的 Store 句柄
+- `control=True` 做 e_t 行乱序对照
+- `LiveETStore.stats` 记录每窗口/累计 `rows`、`unique_rows`、`fetch_seconds`
+
+冒烟命令：
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/run_live_et_dataset_smoke.py \
+    --rows-dir "/Volumes/My Passport/qwen38-rows" \
+    --tokens-npy /path/to/tokens.npy \
+    --model-dir "/Volumes/My Passport/qwen38-ple" \
+    --seq-len 128 --max-batches 4
+```
+
+核心代码：`src/qwen35_ple/live_store.py`、`src/qwen35_ple/real_ple.py`。
 
 ### 2. PLE 知识探针
 

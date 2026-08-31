@@ -1411,3 +1411,39 @@ LLM-CompileForge 提供产品化推理路径
 | vLLM/SGLang | 磁盘 PLE offload、预取、serving | 现在不引入 serving |
 | PWC/标准评测 | WikiText-103、TriviaQA、NQ、BoolQ、OpenBookQA 等口径 | 不追榜单 |
 
+## Session 33 Track A：通用懒加载数据流
+
+### 1. 完成
+
+- 新建 `src/qwen35_ple/live_store.py`：
+  - `FetchStats`：windows / tokens / rows / unique_rows / fetch_seconds / cache_hits。
+  - `LiveETStore`：只保留 rowids，按窗口懒加载；支持 `reset_stats()` / context manager / pickle。
+  - `LiveETView`：lazy slice / permuted / subset。
+  - `LiveETBatch`：每窗口 tokens + e_t + start + fetch_seconds + rows。
+  - `LiveETDataset`：IterableDataset 兼容，`control` / `shuffle` / worker 分片。
+- `run_phase0.py` 已删除内置 `LiveETStore` / `LiveETView`，改为从统一模块导入。
+- 新增 `scripts/run_live_et_dataset_smoke.py`：三行接入入口，支持 `--workers`。
+- 新增 `tests/test_live_store.py`：8 个测试，覆盖 ndarray、control、worker、view、
+  Store stats、Store-backed dataset、pickle 重开。
+- README 增加 `LiveETDataset` 三行示例与冒烟命令。
+
+### 2. 关键踩坑
+
+1. PyTorch DataLoader 多进程不能 pickle 原生 PyO3 `Store`；
+   解决：`LiveETStore` 保存 `store_path / shards / rows_per_shard / width`，
+   `__getstate__` / `__setstate__` 在 worker 中重新 `engramdb.Store(...)`。
+2. `LiveETDataset` 的 `__len__` 一开始与 `_window_starts()` 不一致；
+   修复为按 `(n - seq_len) // step + 1` 并保留 tiny-sequence 单窗口 fallback。
+3. 多进程 DataLoader 冒烟必须在 `if __name__ == "__main__"` 中启动，否则 macOS
+   spawn 会报 bootstrap 错误。
+
+### 3. 验证
+
+```text
+8 passed (test_live_store.py)
+full qwen35 pytest: 24 passed, 7 skipped
+ruff: src / tests / scripts 全绿
+DataLoader(num_workers=2) tiny Store 冒烟通过
+```
+
+

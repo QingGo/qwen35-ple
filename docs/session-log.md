@@ -1424,8 +1424,9 @@ LLM-CompileForge 提供产品化推理路径
   - `LiveETDataset`：IterableDataset 兼容，`control` / `shuffle` / worker 分片。
 - `run_phase0.py` 已删除内置 `LiveETStore` / `LiveETView`，改为从统一模块导入。
 - 新增 `scripts/run_live_et_dataset_smoke.py`：三行接入入口，支持 `--workers`。
-- 新增 `tests/test_live_store.py`：8 个测试，覆盖 ndarray、control、worker、view、
-  Store stats、Store-backed dataset、pickle 重开。
+- 新增 `scripts/bench_store_vs_view.py`：Store-I vs Store-P A/B 骨架 + CSV / 阈值。
+- 新增 `tests/test_live_store.py`：9 个测试，覆盖 ndarray、control、worker、view、
+  Store stats、Store-backed dataset、Store-P view reader、pickle 重开。
 - README 增加 `LiveETDataset` 三行示例与冒烟命令。
 
 ### 2. 关键踩坑
@@ -1441,8 +1442,8 @@ LLM-CompileForge 提供产品化推理路径
 ### 3. 验证
 
 ```text
-8 passed (test_live_store.py)
-full qwen35 pytest: 24 passed, 7 skipped
+9 passed (test_live_store.py)
+full qwen35 pytest: 25 passed, 7 skipped
 ruff: src / tests / scripts 全绿
 DataLoader(num_workers=2) tiny Store 冒烟通过
 ```

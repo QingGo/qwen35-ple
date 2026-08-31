@@ -221,6 +221,7 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
   - 记录 `LiveETBatch.fetch_seconds` / `rows`，Store 级统计 `FetchStats`。
 - [x] `LiveETStore` 支持 pickle / unpickle，为 DataLoader 多进程子进程重开 Store。
 - [x] 新增 `LiveETViewStore`：Store-P 物化视图读取器，为 Track B 提供同构 A/B 路径。
+- [x] 新增 `scripts/bench_store_vs_view.py`：Store-I 与 Store-P 同 token 集 A/B 骨架 + CSV / 阈值。
 - [x] `run_phase0.py --live-store` 改用统一模块，不再在脚本内维护私有类。
 - [x] 新增 `scripts/run_live_et_dataset_smoke.py` 冒烟入口。
 - [x] 新增 `tests/test_live_store.py`（8 个测试通过）。

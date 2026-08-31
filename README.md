@@ -175,6 +175,15 @@ python scripts/bench_live_store.py \
 核心 API：`engramdb.fetch_e_t_tensor()` / `PleDiskGather.fetch_tensor()`；
 `real_ple.fetch_e_t` 已不再使用旧 Python 字节展开路径。
 
+Store-I vs Store-P 同口径 A/B 骨架：
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/bench_store_vs_view.py \
+    --rows-dir "/Volumes/My Passport/qwen38-rows" \
+    --tokens 20000 --reps 3 --csv /tmp/store-vs-view.csv
+```
+
 > **推荐方式（1M token/内存受限机器）**：`--live-store` 现在不会预加载完整 10GB `e_t`，
 > 而是只保留 `[T,16]` rowids，训练/评测时按当前窗口懒加载对应 PLE 行。
 > 因此 1M token 也可以直接跑，只要单窗口内存足够（~seq_len × 2560 × 4B）。

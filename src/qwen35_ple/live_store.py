@@ -383,7 +383,10 @@ class LiveETViewStore:
         if n == 0:
             return np.zeros((0, self.embedding_dim), dtype=np.float32)
         rec_len = self.num_heads * self.head_dim
-        view_slot = int(getattr(self.view, "slot_bytes", rec_len) or rec_len)
+        slot_bytes_attr = getattr(self.view, "slot_bytes", rec_len)
+        if callable(slot_bytes_attr):
+            slot_bytes_attr = slot_bytes_attr()
+        view_slot = int(slot_bytes_attr or rec_len)
 
         unique_slots = len(set(slot_positions.tolist())) if self.record_stats else 0
         t0 = time.perf_counter()

@@ -207,10 +207,11 @@ def test_live_et_view_store_reads_padded_or_raw_slots() -> None:
     rec_len = num_heads * head_dim
 
     class FakeView:
-        slot_bytes = rec_len
-
         def __init__(self, rec_len: int) -> None:
             self.rec_len = rec_len
+
+        def slot_bytes(self) -> int:
+            return self.rec_len
 
         def read_records(self, indices):
             return b"".join(self.read_record(i) for i in indices)

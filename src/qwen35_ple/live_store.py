@@ -171,6 +171,7 @@ class LiveETStore:
                 rows=len(flat),
                 unique_rows=unique_count,
                 seconds=elapsed,
+                cache_hits=max(0, len(flat) - unique_count),
             )
         return result
 

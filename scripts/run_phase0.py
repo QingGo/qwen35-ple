@@ -34,6 +34,7 @@ import torch.nn.functional as F
 
 from qwen35_ple.reader import (
     EngramReader,
+    OfficialSourceQwenReader,
     QwenEngramReader,
     ShortConv,
     install_reader_hook,
@@ -94,7 +95,7 @@ def _install_torch_compat() -> None:
         typing.override = typing_extensions.override
 
 
-def _load_model(model_path: str):
+def _load_model(model_path: str, device: str = "cpu"):
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -104,6 +105,8 @@ def _load_model(model_path: str):
         model_path, local_files_only=True, dtype=torch.float32
     )
     model.eval()
+    if device != "cpu":
+        model = model.to(device)
     return tokenizer, model
 
 
@@ -146,11 +149,12 @@ def _window_loss(
     if len(starts) > max_windows:
         idx = np.linspace(0, len(starts) - 1, max_windows).astype(int)
         starts = [starts[i] for i in idx]
+    device = next(model.parameters()).device
     losses = []
     with torch.no_grad():
         for start in starts:
-            ids = torch.from_numpy(tokens[start : start + seq_len][None, :]).long()
-            ets = torch.from_numpy(e_t[start : start + seq_len][None, :]).float()
+            ids = torch.from_numpy(tokens[start : start + seq_len][None, :]).long().to(device)
+            ets = torch.from_numpy(e_t[start : start + seq_len][None, :]).float().to(device)
             model._current_ple_e_t = ets
             out = model(input_ids=ids)
             logits = out.logits
@@ -178,13 +182,14 @@ def _train_reader(
 ) -> list[float]:
     assert len(tokens) > seq_len + 1
     params = [reader] + ([short_conv] if short_conv is not None else [])
+    device = next(model.parameters()).device
     optimizer = torch.optim.AdamW(torch.nn.ModuleList(params).parameters(), lr=lr)
     rng = random.Random(seed)
     losses = []
     for step in range(steps):
         start = rng.randint(0, len(tokens) - seq_len - 1)
-        ids = torch.from_numpy(tokens[start : start + seq_len][None, :]).long()
-        ets = torch.from_numpy(e_t[start : start + seq_len][None, :]).float()
+        ids = torch.from_numpy(tokens[start : start + seq_len][None, :]).long().to(device)
+        ets = torch.from_numpy(e_t[start : start + seq_len][None, :]).float().to(device)
         model._current_ple_e_t = ets
         optimizer.zero_grad()
         out = model(input_ids=ids)
@@ -255,8 +260,9 @@ def _qa_loglik(model, tokenizer, items: list[dict], control: bool, seed: int) ->
     answers = []
     per_task_loss: dict[str, list[float]] = {}
     for idx, item in enumerate(items):
-        ids = torch.from_numpy(item["ids"]).long().unsqueeze(0)
-        ets = torch.from_numpy(item["e_t"]).float().unsqueeze(0)
+        device = next(model.parameters()).device
+        ids = torch.from_numpy(item["ids"]).long().unsqueeze(0).to(device)
+        ets = torch.from_numpy(item["e_t"]).float().unsqueeze(0).to(device)
         model._current_ple_e_t = ets
         with torch.no_grad():
             out = model(input_ids=ids)
@@ -303,7 +309,17 @@ def _run_mode(
 
     torch.manual_seed(seed)
     random.seed(seed)
-    if args.reader == "engram":
+    if args.reader == "official":
+        reader = OfficialSourceQwenReader.from_official_checkpoint(
+            args.official_reader_path,
+            d_target=model.config.hidden_size,
+            bridge_mlp=args.bridge_mlp,
+            bridge_hidden=args.bridge_hidden,
+            out_mlp=args.out_mlp,
+            out_hidden=args.out_hidden,
+        )
+        short_conv = None
+    elif args.reader == "engram":
         reader = QwenEngramReader(
             model.config.hidden_size,
             d_mem=2560,
@@ -320,6 +336,10 @@ def _run_mode(
             zero_init_v=args.zero_init_v,
         )
         short_conv = ShortConv(model.config.hidden_size) if args.short_conv else None
+    if args.device != "cpu":
+        reader = reader.to(args.device)
+        if short_conv is not None:
+            short_conv = short_conv.to(args.device)
     handle = install_reader_hook(model, args.layer, reader, short_conv)
 
     e_t = train_e_t
@@ -392,7 +412,12 @@ def main() -> int:
     parser.add_argument("--scale", type=float, default=None)
     parser.add_argument("--layer", type=int, default=8)
     parser.add_argument("--branches", type=int, default=1)
-    parser.add_argument("--reader", choices=["simple", "engram"], default="simple")
+    parser.add_argument("--reader", choices=["simple", "engram", "official"], default="simple")
+    parser.add_argument("--official-reader-path", default="data/official_ple_reader.pt")
+    parser.add_argument("--bridge-mlp", action="store_true")
+    parser.add_argument("--bridge-hidden", type=int, default=None)
+    parser.add_argument("--out-mlp", action="store_true")
+    parser.add_argument("--out-hidden", type=int, default=None)
     parser.add_argument("--short-conv", action="store_true")
     parser.add_argument("--hc-mult", type=int, default=4)
     parser.add_argument("--kernel-size", type=int, default=4)
@@ -411,6 +436,7 @@ def main() -> int:
     )
     parser.add_argument("--qa", action="store_true", help="run minimal QA log-likelihood probes")
     parser.add_argument("--output", default="outputs/phase0.json")
+    parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
     args = parser.parse_args()
 
     _install_torch_compat()
@@ -427,7 +453,7 @@ def main() -> int:
         f"val_frac={args.val_frac}"
     )
 
-    tokenizer, model = _load_model(args.model)
+    tokenizer, model = _load_model(args.model, args.device)
     for p in model.parameters():
         p.requires_grad_(False)
 

@@ -9,6 +9,7 @@ full official Qwen/Engram ``ContextAwareGating + ShortConv`` path.
 from __future__ import annotations
 
 import math
+import os
 
 import torch
 import torch.nn.functional as F
@@ -257,3 +258,236 @@ class QwenEngramReader(torch.nn.Module):
         gated_value = gate * value.unsqueeze(2)  # [B, T, hc_mult, d_model]
         y = self.short_conv(gated_value)  # [B, T, hc_mult, d_model]
         return y.sum(dim=2)
+
+
+class OfficialQwenRMSNorm(torch.nn.Module):
+    """Qwen4ExpTextRMSNorm-compatible grouped RMSNorm.
+
+    The official Qwen PLE reader uses:
+        output = norm(x) * (1 + weight)
+    with ``weight`` initialized to zero.  This implementation mirrors that
+    behaviour so we can directly load the checkpoint tensors.
+    """
+
+    def __init__(self, dim: int, group_size: int | None = None, eps: float = 1e-6):
+        super().__init__()
+        self.dim = dim
+        self.group_size = group_size
+        self.eps = eps
+        self.weight = torch.nn.Parameter(torch.zeros(dim))
+
+    def forward(self, x):
+        orig_dtype = x.dtype
+        out = x.float()
+        if self.group_size is not None:
+            out = out.reshape(*out.shape[:-1], -1, self.group_size)
+            out = out * torch.rsqrt(out.pow(2).mean(-1, keepdim=True) + self.eps)
+            out = out.reshape(*x.shape[:-1], self.dim)
+        else:
+            out = out * torch.rsqrt(out.pow(2).mean(-1, keepdim=True) + self.eps)
+        out = out * (1.0 + self.weight.float())
+        return out.to(orig_dtype)
+
+
+class OfficialSourceQwenReader(torch.nn.Module):
+    """Best-effort reuse of the official Qwen3.8 PLE reader.
+
+    The official ``key_proj`` / ``value_proj`` / norms / ``conv1d`` are reused
+    as a frozen *source-space* reader.  Only two small trainable adapters are
+    added:
+
+    * ``query_bridge``: target hidden (e.g. 1024) -> source query space (4x2560)
+    * ``out_proj``: source PLE output (2560) -> target hidden (e.g. 1024)
+
+    The official source weights are kept frozen by default so that training is
+    cheap and the Qwen3.8 reader semantics are preserved.
+    """
+
+    def __init__(
+        self,
+        d_target: int,
+        d_source: int = 2560,
+        d_mem: int = 2560,
+        hc: int = 4,
+        kernel_size: int = 4,
+        dilation: int = 3,
+        source_state: dict[str, torch.Tensor] | str | None = None,
+        freeze_source: bool = True,
+        zero_init_out: bool = True,
+        bridge_mlp: bool = False,
+        bridge_hidden: int | None = None,
+        out_mlp: bool = False,
+        out_hidden: int | None = None,
+        eps: float = 1e-6,
+    ):
+        super().__init__()
+        self.d_target = d_target
+        self.d_source = d_source
+        self.d_mem = d_mem
+        self.hc = hc
+        self.kernel_size = kernel_size
+        self.dilation = dilation
+        self.src_dim = hc * d_source
+
+        # Trainable adapters.
+        bridge_hidden = bridge_hidden or d_target
+        out_hidden = out_hidden or d_target
+        if bridge_mlp:
+            self.query_bridge = torch.nn.Sequential(
+                torch.nn.Linear(d_target, bridge_hidden, bias=False),
+                torch.nn.GELU(),
+                torch.nn.Linear(bridge_hidden, self.src_dim, bias=False),
+            )
+        else:
+            self.query_bridge = torch.nn.Linear(d_target, self.src_dim, bias=False)
+
+        if out_mlp:
+            self.out_proj = torch.nn.Sequential(
+                torch.nn.Linear(d_source, out_hidden, bias=False),
+                torch.nn.GELU(),
+                torch.nn.Linear(out_hidden, d_target, bias=False),
+            )
+            if zero_init_out:
+                last = self.out_proj[-1]
+                torch.nn.init.zeros_(last.weight)
+        else:
+            self.out_proj = torch.nn.Linear(d_source, d_target, bias=False)
+            if zero_init_out:
+                torch.nn.init.zeros_(self.out_proj.weight)
+
+        # Official source-space reader.
+        self.key_proj = torch.nn.Linear(d_mem, self.src_dim, bias=False)
+        self.value_proj = torch.nn.Linear(d_mem, d_source, bias=False)
+        self.norm_key = OfficialQwenRMSNorm(self.src_dim, group_size=d_source, eps=eps)
+        self.norm_query = OfficialQwenRMSNorm(self.src_dim, group_size=d_source, eps=eps)
+        self.norm_conv = OfficialQwenRMSNorm(self.src_dim, group_size=d_source, eps=eps)
+        self.conv1d = torch.nn.Conv1d(
+            self.src_dim,
+            self.src_dim,
+            kernel_size=kernel_size,
+            groups=self.src_dim,
+            dilation=dilation,
+            bias=False,
+        )
+
+        if source_state is not None:
+            self.load_source_state(source_state, strict=True)
+
+        if freeze_source:
+            for name, p in self.named_parameters():
+                if name.startswith(("key_proj.", "value_proj.", "norm_", "conv1d.")):
+                    p.requires_grad_(False)
+
+    @classmethod
+    def from_official_checkpoint(
+        cls,
+        checkpoint_path: str,
+        d_target: int,
+        d_source: int = 2560,
+        d_mem: int = 2560,
+        hc: int = 4,
+        kernel_size: int = 4,
+        dilation: int = 3,
+        freeze_source: bool = True,
+        zero_init_out: bool = True,
+        bridge_mlp: bool = False,
+        bridge_hidden: int | None = None,
+        out_mlp: bool = False,
+        out_hidden: int | None = None,
+    ) -> "OfficialSourceQwenReader":
+        """Create the reader and load official source tensors from a .pt/.bin file.
+
+        The file must contain the reader keys produced by
+        ``scripts/extract_official_reader.py``.
+        """
+        state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        return cls(
+            d_target=d_target,
+            d_source=d_source,
+            d_mem=d_mem,
+            hc=hc,
+            kernel_size=kernel_size,
+            dilation=dilation,
+            source_state=state,
+            freeze_source=freeze_source,
+            zero_init_out=zero_init_out,
+            bridge_mlp=bridge_mlp,
+            bridge_hidden=bridge_hidden,
+            out_mlp=out_mlp,
+            out_hidden=out_hidden,
+        )
+
+    def load_source_state(
+        self, source_state: dict[str, torch.Tensor], strict: bool = True
+    ) -> None:
+        if isinstance(source_state, (str, os.PathLike)):
+            source_state = torch.load(source_state, map_location="cpu")
+        prefix = "model.language_model.layers.1.ple."
+        target = {
+            "key_proj.weight": self.key_proj.weight,
+            "value_proj.weight": self.value_proj.weight,
+            "norm_key.weight": self.norm_key.weight,
+            "norm_query.weight": self.norm_query.weight,
+            "norm_conv.weight": self.norm_conv.weight,
+            "conv1d.weight": self.conv1d.weight,
+        }
+        missing = []
+        unexpected = []
+        for name, param in target.items():
+            src = source_state.get(name) or source_state.get(prefix + name)
+            if src is not None:
+                with torch.no_grad():
+                    param.copy_(src.to(param.dtype))
+            else:
+                missing.append(name)
+        for name in source_state:
+            if name in target or name == prefix + name:
+                continue
+            if name.startswith(prefix):
+                short = name[len(prefix):]
+                if short in target:
+                    continue
+            unexpected.append(name)
+        if strict and missing:
+            raise KeyError(f"missing official source tensors: {missing}")
+        if strict and unexpected:
+            # Allow extra bookkeeping keys but raise for truly unknown weights.
+            known_extra = {
+                "layer_multipliers",
+                "ngram_heads_offsets",
+                "ngram_heads_vocab_sizes",
+                "ple_embedding.layer_multipliers",
+                "ple_embedding.ngram_heads_offsets",
+                "ple_embedding.ngram_heads_vocab_sizes",
+            }
+            real_unexpected = [k for k in unexpected if k not in known_extra]
+            if real_unexpected:
+                raise KeyError(f"unexpected source tensors: {real_unexpected}")
+
+    def forward(self, h, e_t):
+        # h: [B, T, d_target], e_t: [B, T, d_mem]
+        b, t, _ = h.shape
+
+        key = self.key_proj(e_t)                       # [B,T,4*2560]
+        key_normed = self.norm_key(key).view(b, t, self.hc, self.d_source)
+
+        query = self.query_bridge(h)                   # [B,T,4*2560]
+        query_normed = self.norm_query(query).view(b, t, self.hc, self.d_source)
+
+        score = (key_normed * query_normed).sum(-1, keepdim=True) / math.sqrt(self.d_source)
+        score = score.abs().clamp_min(1e-6).sqrt() * score.sign()
+        gate = torch.sigmoid(score)                    # [B,T,4,1]
+
+        value = self.value_proj(e_t)                   # [B,T,2560]
+        gated = gate * value.unsqueeze(2)              # [B,T,4,2560]
+        gated_flat = gated.reshape(b, t, self.src_dim)
+
+        gated_normed = self.norm_conv(gated_flat)
+        conv_in = gated_normed.transpose(1, 2)
+        pad_len = (self.kernel_size - 1) * self.dilation
+        conv_in = F.pad(conv_in, (pad_len, 0))
+        conv_out = F.silu(self.conv1d(conv_in)).transpose(1, 2)
+
+        source_output = gated_flat + conv_out          # [B,T,4*2560]
+        branch_sum = source_output.view(b, t, self.hc, self.d_source).sum(dim=2)
+        return self.out_proj(branch_sum)               # [B,T,d_target]

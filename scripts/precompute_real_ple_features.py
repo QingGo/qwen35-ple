@@ -56,9 +56,11 @@ def _tokenize(tokenizer_path: str, texts: list[str]) -> np.ndarray:
 
 
 def _rowids_from_tokens(tokens: np.ndarray) -> tuple[np.ndarray, list[list[int]]]:
-    spec = real_spec()
-    rows = spec.rowids_for_seq(tokens.tolist())
-    arr = np.asarray(rows, dtype=np.int64)
+    # Prefer EngramDB's native/fast rowid implementation when available.
+    from qwen35_ple.real_ple import rowids_from_tokens as fast_rowids
+
+    arr = fast_rowids(tokens)
+    rows = arr.tolist()
     return arr, rows
 
 
@@ -76,7 +78,9 @@ def _fetch_fp8(rows_dir: str, flat_rowids: np.ndarray, scale: float = 1.0) -> np
         gather = PleDiskGather(store, row_bytes=160)
         raw = gather.fetch(flat_rowids.tolist())
         arr = torch.frombuffer(bytearray(raw), dtype=torch.float8_e4m3fn)
-        return (arr.float().numpy() * scale)
+        # Avoid torch->numpy bridge in this mixed environment; convert via Python list.
+        values = arr.float().reshape(-1).tolist()
+        return (np.asarray(values, dtype=np.float32) * scale)
     finally:
         store.close()
 
@@ -98,8 +102,12 @@ def main() -> int:
         "--corpus", default=None, help="text file; one line per segment"
     )
     parser.add_argument(
+        "--tokens-npy", default=None, help="pre-tokenized tokens.npy (skips tokenizer)"
+    )
+    parser.add_argument(
         "--output", default="data/ple-features", help="output directory"
     )
+    parser.add_argument("--max-tokens", type=int, default=None)
     parser.add_argument(
         "--model-dir",
         default="/Volumes/My Passport/qwen38-ple",
@@ -113,20 +121,29 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.corpus:
-        texts = [
-            line.strip()
-            for line in Path(args.corpus).read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-    elif args.text:
-        texts = [args.text]
+    if args.tokens_npy:
+        tokens = np.load(args.tokens_npy).astype(np.int64)
+        if args.max_tokens is not None and len(tokens) > args.max_tokens:
+            tokens = tokens[: args.max_tokens]
+        print(f"[precompute] loaded tokens from {args.tokens_npy}: {len(tokens)}")
     else:
-        texts = [DEFAULT_TEXT]
+        if args.corpus:
+            texts = [
+                line.strip()
+                for line in Path(args.corpus).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        elif args.text:
+            texts = [args.text]
+        else:
+            texts = [DEFAULT_TEXT]
 
-    print(f"[precompute] tokenizing {len(texts)} segments ...")
-    tokens = _tokenize(args.tokenizer, texts)
-    print(f"[precompute] tokens={len(tokens)}")
+        print(f"[precompute] tokenizing {len(texts)} segments ...")
+        tokens = _tokenize(args.tokenizer, texts)
+        if args.max_tokens is not None and len(tokens) > args.max_tokens:
+            print(f"[precompute] truncating to max_tokens={args.max_tokens}")
+            tokens = tokens[: args.max_tokens]
+        print(f"[precompute] tokens={len(tokens)}")
 
     print("[precompute] generating official PLE rowids ...")
     rowids, _rows = _rowids_from_tokens(tokens)
@@ -164,7 +181,7 @@ def main() -> int:
         "head_dim": 160,
         "dtype": "float32",
         "fetch_seconds": float(elapsed),
-        "corpus_segments": len(texts),
+        "corpus_segments": len(texts) if args.tokens_npy is None else 1,
         "weight_scale": scale,
     }
     (out_dir / "meta.json").write_text(

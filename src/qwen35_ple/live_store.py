@@ -385,6 +385,7 @@ class LiveETViewStore:
         rec_len = self.num_heads * self.head_dim
         view_slot = int(getattr(self.view, "slot_bytes", rec_len) or rec_len)
 
+        unique_slots = len(set(slot_positions.tolist())) if self.record_stats else 0
         t0 = time.perf_counter()
         if hasattr(self.view, "read_records"):
             raw = self.view.read_records(slot_positions.tolist())
@@ -411,11 +412,13 @@ class LiveETViewStore:
         arr = arr.reshape(n, self.num_heads, self.head_dim).reshape(n, self.embedding_dim)
 
         if self.record_stats:
+            unique_rows = unique_slots * self.num_heads
             self.stats.record(
                 tokens=n,
                 rows=n * self.num_heads,
-                unique_rows=n * self.num_heads,
+                unique_rows=unique_rows,
                 seconds=elapsed,
+                cache_hits=max(0, n * self.num_heads - unique_rows),
             )
         return arr.numpy()
 

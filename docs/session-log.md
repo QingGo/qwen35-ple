@@ -1524,4 +1524,36 @@ seed 2: wall 17.28s, mean 0.00212s/window
 说明：即使 Store-P 顺序读本身很快，随机/置换访问仍会比顺序访问慢约 2.4×；
 因此真实训练应优先做访问序视图/顺序化批量预取，而不是依赖全量内存。
 
+### 6. WSL Store-P 构建与 p4view A/B（Track B 初步）
+
+在 WSL (`/home/zeng/qwen38-rows`) 上用 `p4view` 构建 Store-P 视图并跑同口径 A/B：
+
+```bash
+# 构建 20k / 100k 视图
+p4view build /home/zeng/qwen38-rows 20000 /home/zeng/wsl-20k.view /home/zeng/wsl-20k.keys --slot 2560
+p4view build /home/zeng/qwen38-rows 100000 /home/zeng/wsl-100k.view /home/zeng/wsl-100k.keys --slot 2560
+
+# 对拍
+p4view bench /home/zeng/qwen38-rows /home/zeng/wsl-20k.view --keys /home/zeng/wsl-20k.keys --sub 20000 --threads 1
+p4view bench /home/zeng/qwen38-rows /home/zeng/wsl-100k.view --keys /home/zeng/wsl-100k.keys --sub 100000 --threads 8
+```
+
+WSL 结果：
+
+```text
+20k grams:
+  Store-I A 1t:   1.33M rows/s
+  Store-P B 1t:   6.48M rows/s
+  Store-P B 8t:  17.81M rows/s
+
+100k grams:
+  Store-I A 1t:   1.56M rows/s
+  Store-P B 1t:   6.07M rows/s
+  Store-P B 8t:  22.22M rows/s
+```
+
+结论：WSL 上 Store-P 相比 Store-I 有明确的吞吐收益，且 8 线程可将 Store-P
+推到约 22M rows/s。之前 WSL Store.fetch 100k tokens 约 56s 的慢路径应该通过
+Store-P / 多线程 / 访问序视图规避。
+
 

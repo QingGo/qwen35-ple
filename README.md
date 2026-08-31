@@ -200,7 +200,7 @@ for batch in dataset:
 - 直接 `for` 迭代，或传给 `torch.utils.data.DataLoader(..., num_workers=N)`
 - 每 worker 自动分片，并且每个 worker 会重新打开自己的 Store 句柄
 - `control=True` 做 e_t 行乱序对照
-- `LiveETStore.stats` 记录每窗口/累计 `rows`、`unique_rows`、`fetch_seconds`
+- `LiveETStore.stats` 记录每窗口/累计 `rows`、`unique_rows`、`cache_hits`、`fetch_seconds`
 
 冒烟命令：
 

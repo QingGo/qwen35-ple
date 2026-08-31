@@ -1419,6 +1419,7 @@ LLM-CompileForge 提供产品化推理路径
   - `FetchStats`：windows / tokens / rows / unique_rows / fetch_seconds / cache_hits。
   - `LiveETStore`：只保留 rowids，按窗口懒加载；支持 `reset_stats()` / context manager / pickle。
   - `LiveETView`：lazy slice / permuted / subset。
+  - `LiveETViewStore`：Store-P 物化视图读取器。
   - `LiveETBatch`：每窗口 tokens + e_t + start + fetch_seconds + rows。
   - `LiveETDataset`：IterableDataset 兼容，`control` / `shuffle` / worker 分片。
 - `run_phase0.py` 已删除内置 `LiveETStore` / `LiveETView`，改为从统一模块导入。

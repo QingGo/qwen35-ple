@@ -201,6 +201,7 @@ for batch in dataset:
 - 每 worker 自动分片，并且每个 worker 会重新打开自己的 Store 句柄
 - `control=True` 做 e_t 行乱序对照
 - `LiveETStore.stats` 记录每窗口/累计 `rows`、`unique_rows`、`cache_hits`、`fetch_seconds`
+- Store-P 路径可使用 `LiveETViewStore` 从 `engramdb.View` 按物化槽位直接读取，供 Track B 做 Store-I vs Store-P A/B
 
 冒烟命令：
 

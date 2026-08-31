@@ -18,6 +18,7 @@ from qwen35_ple.live_store import (
     LiveETDataset,
     LiveETStore,
     LiveETView,
+    LiveETViewStore,
 )
 
 
@@ -196,3 +197,42 @@ def test_live_et_store_pickle_reopens_own_store() -> None:
             assert out.shape == (2, 64)
         finally:
             live.close()
+
+
+def test_live_et_view_store_reads_padded_or_raw_slots() -> None:
+    pytest.importorskip("torch")
+
+    num_heads = 16
+    head_dim = 4
+    rec_len = num_heads * head_dim
+
+    class FakeView:
+        slot_bytes = rec_len
+
+        def __init__(self, rec_len: int) -> None:
+            self.rec_len = rec_len
+
+        def read_records(self, indices):
+            return b"".join(self.read_record(i) for i in indices)
+
+        def read_record(self, index: int) -> bytes:
+            return bytes([(index + j) % 256 for j in range(self.rec_len)])
+
+    view = LiveETViewStore(
+        FakeView(rec_len),
+        np.array([0, 2, 4], dtype=np.int64),
+        scale=1.0,
+        num_heads=num_heads,
+        head_dim=head_dim,
+        embedding_dim=rec_len,
+    )
+    try:
+        out = view.get(0, 2)
+        assert out.shape == (2, rec_len)
+        assert view.stats.windows == 1
+        ds = LiveETDataset(np.arange(3, dtype=np.int64), view, seq_len=1, step=1)
+        assert len(ds) == 3
+        batches = list(ds)
+        assert all(b.e_t.shape == (1, rec_len) for b in batches)
+    finally:
+        view.close()

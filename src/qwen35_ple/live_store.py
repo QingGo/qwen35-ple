@@ -287,6 +287,139 @@ class LiveETView:
         return self.base.num_heads
 
 
+class LiveETViewStore:
+    """Disk-first reader over a Store-P materialized View.
+
+    This is the Store-P counterpart of :class:`LiveETStore`.  Instead of
+    scattering 16 independent Store-I rows per token, it reads one contiguous
+    2560-byte (or padded) slot per token.  ``slot_indices`` maps token positions
+    to physical view slots (for example, the access-order index used when the
+    view was built with ``view build --keys``).
+    """
+
+    def __init__(
+        self,
+        view: Any,
+        slot_indices: np.ndarray,
+        scale: float = 1.0,
+        *,
+        num_heads: int = 16,
+        head_dim: int = 160,
+        embedding_dim: int | None = None,
+        record_stats: bool = True,
+        stats: FetchStats | None = None,
+        dtype: Any = None,
+        out_dtype: Any = None,
+    ) -> None:
+        self.view = view
+        self.slot_indices = np.asarray(slot_indices, dtype=np.int64)
+        self.scale = float(scale)
+        self.num_heads = int(num_heads)
+        self.head_dim = int(head_dim)
+        if embedding_dim is None:
+            embedding_dim = self.num_heads * self.head_dim
+        self.embedding_dim = int(embedding_dim)
+        self.record_stats = bool(record_stats)
+        self.stats = stats if stats is not None else FetchStats()
+        self.dtype = dtype
+        self.out_dtype = out_dtype
+        self._closed = False
+
+    def __len__(self) -> int:
+        return len(self.slot_indices)
+
+    def get(self, offset: int, length: int) -> np.ndarray:
+        """Fetch one window using the view-protocol ``(offset, length)`` shape."""
+        if self._closed:
+            raise ValueError("LiveETViewStore is closed")
+        return self._fetch(self.slot_indices[offset : offset + length])
+
+    def get_indices(self, indices: np.ndarray) -> np.ndarray:
+        """Fetch by absolute token-position indices."""
+        if self._closed:
+            raise ValueError("LiveETViewStore is closed")
+        return self._fetch(self.slot_indices[np.asarray(indices, dtype=np.int64)])
+
+    def permuted(self, perm: np.ndarray) -> "LiveETViewStore":
+        return LiveETViewStore(
+            self.view,
+            self.slot_indices[np.asarray(perm, dtype=np.int64)],
+            self.scale,
+            num_heads=self.num_heads,
+            head_dim=self.head_dim,
+            embedding_dim=self.embedding_dim,
+            record_stats=self.record_stats,
+            stats=self.stats,
+            dtype=self.dtype,
+            out_dtype=self.out_dtype,
+        )
+
+    def subset(self, indices: np.ndarray) -> "LiveETViewStore":
+        return LiveETViewStore(
+            self.view,
+            self.slot_indices[np.asarray(indices, dtype=np.int64)],
+            self.scale,
+            num_heads=self.num_heads,
+            head_dim=self.head_dim,
+            embedding_dim=self.embedding_dim,
+            record_stats=self.record_stats,
+            stats=self.stats,
+            dtype=self.dtype,
+            out_dtype=self.out_dtype,
+        )
+
+    def close(self) -> None:
+        if not self._closed:
+            close = getattr(self.view, "close", None)
+            if callable(close):
+                close()
+            self._closed = True
+
+    def _fetch(self, slot_positions: np.ndarray) -> np.ndarray:
+        import torch
+
+        slot_positions = np.asarray(slot_positions, dtype=np.int64)
+        n = len(slot_positions)
+        if n == 0:
+            return np.zeros((0, self.embedding_dim), dtype=np.float32)
+        rec_len = self.num_heads * self.head_dim
+        view_slot = int(getattr(self.view, "slot_bytes", rec_len) or rec_len)
+
+        t0 = time.perf_counter()
+        if hasattr(self.view, "read_records"):
+            raw = self.view.read_records(slot_positions.tolist())
+        else:
+            raw = b"".join(self.view.read_record(int(i)) for i in slot_positions)
+        elapsed = time.perf_counter() - t0
+
+        dtype = self.dtype
+        if dtype is None:
+            dtype = torch.float8_e4m3fn
+        out_dtype = self.out_dtype
+        if out_dtype is None:
+            out_dtype = torch.float32
+
+        if view_slot != rec_len:
+            buf = torch.frombuffer(bytearray(raw), dtype=dtype).reshape(n, view_slot)
+            arr = buf[:, :rec_len].reshape(-1)
+        else:
+            arr = torch.frombuffer(bytearray(raw), dtype=dtype)
+        if arr.dtype != out_dtype:
+            arr = arr.to(out_dtype)
+        if self.scale != 1.0:
+            arr = arr * self.scale
+        arr = arr.reshape(n, self.num_heads, self.head_dim).reshape(n, self.embedding_dim)
+
+        if self.record_stats:
+            self.stats.record(
+                tokens=n,
+                rows=n * self.num_heads,
+                unique_rows=n * self.num_heads,
+                seconds=elapsed,
+            )
+        return arr.numpy()
+
+
 class LiveETDataset(_IterableDataset):  # type: ignore[misc]
     """Iterable live-store window dataset.
 
@@ -297,9 +430,9 @@ class LiveETDataset(_IterableDataset):  # type: ignore[misc]
     Parameters mirror the existing experimental harness:
 
     * ``tokens`` is the full token sequence.
-    * ``e_t`` may be a ``LiveETStore``, ``LiveETView``, or a precomputed numpy
-      array.  For the numpy case the stream works identically but records no
-      fetch time.
+    * ``e_t`` may be a ``LiveETStore``, ``LiveETView``, ``LiveETViewStore``,
+      or a precomputed numpy array.  For the numpy case the stream works
+      identically but records no fetch time.
     * ``control`` permutes the e_t stream relative to the token stream, matching
       the shuffled-control arm.
     * ``shuffle`` randomly orders windows (not tokens) for the current epoch.
@@ -311,7 +444,7 @@ class LiveETDataset(_IterableDataset):  # type: ignore[misc]
     def __init__(
         self,
         tokens: np.ndarray,
-        e_t: LiveETStore | LiveETView | np.ndarray,
+        e_t: LiveETStore | LiveETView | LiveETViewStore | np.ndarray,
         *,
         seq_len: int = 128,
         step: int | None = None,
@@ -344,7 +477,7 @@ class LiveETDataset(_IterableDataset):  # type: ignore[misc]
 
         # Normalize stores/views to the ``get(offset, length)`` view protocol so
         # iterating a bare LiveETStore uses the same slicing semantics as a view.
-        base_e_t: LiveETStore | LiveETView | np.ndarray = e_t
+        base_e_t: LiveETStore | LiveETView | LiveETViewStore | np.ndarray = e_t
         if isinstance(base_e_t, LiveETStore):
             base_e_t = base_e_t.view(0, len(self.tokens))
 

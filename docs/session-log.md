@@ -1475,4 +1475,42 @@ Store-P view=0.160s
 `LiveETStore.get` 已远快于裸 `store_fetch`，但仍比 Store-P 慢约 2.2×。
 WSL 冷/热、1M、多线程结论仍需 Track B 正式 CSV。
 
+### 5. 懒加载逐窗口基准（Track B/C 本机初测）
+
+新脚本 `scripts/bench_lazy_windows.py`，每次只取一个窗口，不物化全量 e_t。
+
+```bash
+# Store-I
+python scripts/bench_lazy_windows.py \
+    --rows-dir "/Volumes/My Passport/qwen38-rows" \
+    --tokens 100000 --seq-len 128 --step 128 \
+    --csv /tmp/lazy-100k-store.csv
+
+# Store-P
+python scripts/bench_lazy_windows.py \
+    --rows-dir "/Volumes/My Passport/qwen38-rows" \
+    --view "/Volumes/My Passport/p4view-200k-2560.bin" \
+    --tokens 100000 --seq-len 128 --step 128 \
+    --csv /tmp/lazy-100k-view.csv
+
+# Store-P 1M
+python scripts/bench_lazy_windows.py \
+    --rows-dir "/Volumes/My Passport/qwen38-rows" \
+    --view "/Volumes/My Passport/p4view-full-2560.bin" \
+    --tokens 1000000 --seq-len 128 --step 128 \
+    --csv /tmp/lazy-1m-view.csv
+```
+
+结果（Mac 外盘、单次热态、非 WSL）：
+
+```text
+100k Store-I lazy:  781 windows, wall 60.51s,  mean 0.077s/window
+100k Store-P lazy:  781 windows, wall  0.58s,  mean 0.00070s/window
+1M   Store-P lazy: 7812 windows, wall  7.09s,  mean 0.00087s/window
+```
+
+结论：在本机外盘上，Store-P 懒加载比 Store-I 懒加载快约 100×；1M token 的
+Store-P 逐窗口读取可以在约 7 秒内完成，证明“磁盘优先 + Store-P 顺序读”是
+大规模训练/评测的正确路径。仍需在 WSL 上复测冷热与多线程。
+
 

@@ -28,6 +28,7 @@ import os
 import random
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -95,6 +96,69 @@ def _install_torch_compat() -> None:
     if not hasattr(typing, "override"):
         typing.override = typing_extensions.override
 
+class LiveETStore:
+    """Disk-first live e_t reader.
+
+    It does not materialize the full ``e_t`` array.  Instead it keeps the full
+    rowid matrix (small compared to e_t) and fetches only the requested token
+    slice from EngramDB on demand.
+    """
+
+    def __init__(self, store: Any, rowids: np.ndarray, scale: float) -> None:
+        self.store = store
+        self.rowids = np.asarray(rowids, dtype=np.int64)
+        self.scale = float(scale)
+
+    def __len__(self) -> int:
+        return len(self.rowids)
+
+    def get(self, indices: np.ndarray) -> np.ndarray:
+        """Fetch e_t for a 1-D array of token indices."""
+        import engramdb
+
+        indices = np.asarray(indices, dtype=np.int64)
+        if indices.size == 0:
+            return np.zeros((0, 2560), dtype=np.float32)
+        rows = self.rowids[indices]
+        flat = rows.reshape(-1).tolist()
+        arr = engramdb.fetch_e_t_tensor(
+            self.store,
+            flat,
+            scale=self.scale,
+            num_heads=16,
+            head_dim=160,
+            dtype=torch.float8_e4m3fn,
+            out_dtype=torch.float32,
+        )
+        return arr.reshape(len(indices), 2560).numpy()
+
+    def view(self, start: int = 0, length: int | None = None) -> "LiveETView":
+        n = len(self.rowids)
+        if length is None:
+            length = n - start
+        return LiveETView(self, np.arange(start, start + length, dtype=np.int64))
+
+    def close(self) -> None:
+        self.store.close()
+
+
+class LiveETView:
+    """A lazy view over LiveETStore, supporting permutation/control."""
+
+    def __init__(self, base: LiveETStore, indices: np.ndarray) -> None:
+        self.base = base
+        self.indices = np.asarray(indices, dtype=np.int64)
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+    def get(self, offset: int, length: int) -> np.ndarray:
+        return self.base.get(self.indices[offset:offset + length])
+
+    def permuted(self, perm: np.ndarray) -> "LiveETView":
+        return LiveETView(self.base, self.indices[perm])
+
+
 
 def _load_model(model_path: str, device: str = "cpu"):
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -129,11 +193,20 @@ def _load_features(feature_dir: Path, model_dir: str, scale: float | None):
     return tokens, e_t, applied_scale
 
 
-def _split(tokens: np.ndarray, e_t: np.ndarray, val_frac: float):
+def _split(tokens: np.ndarray, e_t: Any, val_frac: float):
     cut = int(len(tokens) * (1.0 - val_frac))
+    if hasattr(e_t, "view"):
+        return (tokens[:cut], e_t.view(0, cut)), (tokens[cut:], e_t.view(cut, len(tokens) - cut))
     train = (tokens[:cut], e_t[:cut])
     val = (tokens[cut:], e_t[cut:])
     return train, val
+
+def _e_t_slice(e_t: Any, start: int, length: int) -> np.ndarray:
+    """Return e_t[start:start+length], fetching lazily when in live-store mode."""
+    if hasattr(e_t, "get"):
+        return e_t.get(start, length)
+    return e_t[start:start + length]
+
 
 
 def _window_loss(
@@ -155,7 +228,8 @@ def _window_loss(
     with torch.no_grad():
         for start in starts:
             ids = torch.from_numpy(tokens[start : start + seq_len][None, :]).long().to(device)
-            ets = torch.from_numpy(e_t[start : start + seq_len][None, :]).float().to(device)
+            ets_np = _e_t_slice(e_t, start, seq_len)
+            ets = torch.from_numpy(ets_np[None, :]).float().to(device)
             model._current_ple_e_t = ets
             out = model(input_ids=ids)
             logits = out.logits
@@ -190,7 +264,8 @@ def _train_reader(
     for step in range(steps):
         start = rng.randint(0, len(tokens) - seq_len - 1)
         ids = torch.from_numpy(tokens[start : start + seq_len][None, :]).long().to(device)
-        ets = torch.from_numpy(e_t[start : start + seq_len][None, :]).float().to(device)
+        ets_np = _e_t_slice(e_t, start, seq_len)
+        ets = torch.from_numpy(ets_np[None, :]).float().to(device)
         model._current_ple_e_t = ets
         optimizer.zero_grad()
         out = model(input_ids=ids)
@@ -346,7 +421,8 @@ def _run_mode(
     e_t = train_e_t
     if mode == "control":
         rng = np.random.default_rng(seed)
-        e_t = e_t[rng.permutation(len(e_t))]
+        perm = rng.permutation(len(e_t))
+        e_t = e_t.permuted(perm) if hasattr(e_t, "permuted") else e_t[perm]
 
     print(f"  [{mode}] seed={seed} training ...")
     train_losses = _train_reader(
@@ -365,7 +441,8 @@ def _run_mode(
     val_eval_e_t = val_e_t
     if mode == "control":
         rng = np.random.default_rng(seed)
-        val_eval_e_t = val_e_t[rng.permutation(len(val_e_t))]
+        perm = rng.permutation(len(val_e_t))
+        val_eval_e_t = val_e_t.permuted(perm) if hasattr(val_e_t, "permuted") else val_e_t[perm]
     val_loss = _window_loss(model, val_tokens, val_eval_e_t, args.seq_len)
     qa = None
     if args.qa:
@@ -444,6 +521,7 @@ def main() -> int:
 
     _install_torch_compat()
     feature_dir = Path(args.features)
+    live_store_handle = None
     if args.live_store:
         # Live path: read PLE rows directly from EngramDB instead of loading a
         # precomputed e_t.npy.  This uses the fast Store.fetch + torch tensor
@@ -457,21 +535,34 @@ def main() -> int:
                 "--live-store requires --tokens-npy or a --features dir with tokens.npy"
             )
 
-        from qwen35_ple.real_ple import fetch_e_t, resolve_ple_weight_scale, rowids_from_tokens
+        from qwen35_ple.real_ple import resolve_ple_weight_scale, rowids_from_tokens
 
         applied_scale = resolve_ple_weight_scale(
             model_dir=args.model_dir, scale=args.scale
         )
         print(
-            f"[phase0] live-store: {len(tokens)} tokens, reading PLE rows from "
+            f"[phase0] live-store: {len(tokens)} tokens, rowids from "
             f"{args.rows_dir} (scale={applied_scale:.6g}) ..."
         )
         t0 = time.time()
         rowids = rowids_from_tokens(tokens)
-        e_t = fetch_e_t(args.rows_dir, rowids, scale=applied_scale)
+        rowid_s = time.time() - t0
+        import engramdb
+
+        live_store = engramdb.Store(
+            args.rows_dir,
+            shards=128,
+            rows_per_shard=2_500_012,
+            width=160,
+        )
+        live_store_handle = live_store
+        # Keep only rowids in memory; e_t is fetched lazily per training/eval
+        # window.  This avoids materializing a full 10GB e_t array on WSL.
+        e_t = LiveETStore(live_store, rowids, applied_scale)
         print(
-            f"[phase0] live fetch {time.time() - t0:.2f}s "
-            f"e_t={e_t.shape} scale={applied_scale:.6g}"
+            f"[phase0] live-store ready: {len(tokens)} tokens, "
+            f"rowids={len(rowids)}x{len(rowids[0])}, rowid_s={rowid_s:.2f}s, "
+            f"no full e_t allocated"
         )
     else:
         print(f"[phase0] loading features from {feature_dir}")
@@ -556,6 +647,9 @@ def main() -> int:
         encoding="utf-8",
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
+    if live_store_handle is not None:
+        live_store_handle.close()
+        print("[phase0] live-store closed")
     print(f"[phase0] saved to {out_path}")
     return 0
 

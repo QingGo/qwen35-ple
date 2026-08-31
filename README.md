@@ -175,6 +175,12 @@ python scripts/bench_live_store.py \
 核心 API：`engramdb.fetch_e_t_tensor()` / `PleDiskGather.fetch_tensor()`；
 `real_ple.fetch_e_t` 已不再使用旧 Python 字节展开路径。
 
+> **推荐方式（1M token/内存受限机器）**：`--live-store` 现在不会预加载完整 10GB `e_t`，
+> 而是只保留 `[T,16]` rowids，训练/评测时按当前窗口懒加载对应 PLE 行。
+> 因此 1M token 也可以直接跑，只要单窗口内存足够（~seq_len × 2560 × 4B）。
+> 不需要先做全量 chunk npy，也不需要全量 `e_t` 常驻内存。
+
+
 核心代码：`src/qwen35_ple/real_ple.py`。
 
 ### 2. PLE 知识探针

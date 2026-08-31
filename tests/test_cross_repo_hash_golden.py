@@ -31,16 +31,24 @@ def _load_engram_peft_hashing():
     # hashing.py only needs torch for type annotations in the hash methods;
     # the QwenPleHashMapping path is pure NumPy, so a tiny stub keeps this
     # cross-repo contract test runnable without a multi-GB torch install.
-    if "torch" not in sys.modules:
+    torch_was_present = "torch" in sys.modules
+    original_torch = sys.modules.get("torch")
+    if not torch_was_present:
         torch_stub = types.ModuleType("torch")
         torch_stub.Tensor = type("Tensor", (), {})
         sys.modules["torch"] = torch_stub
-    spec = importlib.util.spec_from_file_location("engram_peft_hashing", ENGRAM_PEFT_HASHING)
-    if spec is None or spec.loader is None:
-        pytest.skip("cannot load engram-peft hashing source")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    try:
+        spec = importlib.util.spec_from_file_location("engram_peft_hashing", ENGRAM_PEFT_HASHING)
+        if spec is None or spec.loader is None:
+            pytest.skip("cannot load engram-peft hashing source")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        if not torch_was_present:
+            sys.modules.pop("torch", None)
+        else:
+            sys.modules["torch"] = original_torch
 
 
 def test_qwen_ple_mapping_matches_engramdb_golden():

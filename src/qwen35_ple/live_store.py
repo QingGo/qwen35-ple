@@ -317,7 +317,7 @@ class LiveETViewStore:
         out_dtype: Any = None,
         view_path: str | None = None,
     ) -> None:
-        self.view = view
+        self._view = view
         self.slot_indices = np.asarray(slot_indices, dtype=np.int64)
         self.scale = float(scale)
         self.num_heads = int(num_heads)
@@ -335,6 +335,26 @@ class LiveETViewStore:
     def __len__(self) -> int:
         return len(self.slot_indices)
 
+    def view(self, start: int = 0, length: int | None = None) -> "LiveETViewStore":
+        n = len(self.slot_indices)
+        if length is None:
+            length = n - start
+        if start < 0 or length < 0 or start + length > n:
+            raise IndexError(f"view slice out of range: [{start}:{start + length}] of {n}")
+        return LiveETViewStore(
+            self._view,
+            self.slot_indices[start : start + length],
+            self.scale,
+            num_heads=self.num_heads,
+            head_dim=self.head_dim,
+            embedding_dim=self.embedding_dim,
+            record_stats=self.record_stats,
+            stats=self.stats,
+            dtype=self.dtype,
+            out_dtype=self.out_dtype,
+            view_path=self._view_path,
+        )
+
     def get(self, offset: int, length: int) -> np.ndarray:
         """Fetch one window using the view-protocol ``(offset, length)`` shape."""
         if self._closed:
@@ -349,7 +369,7 @@ class LiveETViewStore:
 
     def permuted(self, perm: np.ndarray) -> LiveETViewStore:
         return LiveETViewStore(
-            self.view,
+            self._view,
             self.slot_indices[np.asarray(perm, dtype=np.int64)],
             self.scale,
             num_heads=self.num_heads,
@@ -364,7 +384,7 @@ class LiveETViewStore:
 
     def subset(self, indices: np.ndarray) -> LiveETViewStore:
         return LiveETViewStore(
-            self.view,
+            self._view,
             self.slot_indices[np.asarray(indices, dtype=np.int64)],
             self.scale,
             num_heads=self.num_heads,
@@ -379,7 +399,7 @@ class LiveETViewStore:
 
     def close(self) -> None:
         if not self._closed:
-            close = getattr(self.view, "close", None)
+            close = getattr(self._view, "close", None)
             if callable(close):
                 close()
             self._closed = True
@@ -416,7 +436,7 @@ class LiveETViewStore:
         self.dtype = state["dtype"]
         self.out_dtype = state["out_dtype"]
         self._view_path = str(state["view_path"])
-        self.view = engramdb.View(self._view_path)
+        self._view = engramdb.View(self._view_path)
         self._closed = False
 
     def _fetch(self, slot_positions: np.ndarray) -> np.ndarray:
@@ -427,17 +447,17 @@ class LiveETViewStore:
         if n == 0:
             return np.zeros((0, self.embedding_dim), dtype=np.float32)
         rec_len = self.num_heads * self.head_dim
-        slot_bytes_attr = getattr(self.view, "slot_bytes", rec_len)
+        slot_bytes_attr = getattr(self._view, "slot_bytes", rec_len)
         if callable(slot_bytes_attr):
             slot_bytes_attr = slot_bytes_attr()
         view_slot = int(slot_bytes_attr or rec_len)
 
         unique_slots = len(set(slot_positions.tolist())) if self.record_stats else 0
         t0 = time.perf_counter()
-        if hasattr(self.view, "read_records"):
-            raw = self.view.read_records(slot_positions.tolist())
+        if hasattr(self._view, "read_records"):
+            raw = self._view.read_records(slot_positions.tolist())
         else:
-            raw = b"".join(self.view.read_record(int(i)) for i in slot_positions)
+            raw = b"".join(self._view.read_record(int(i)) for i in slot_positions)
         elapsed = time.perf_counter() - t0
 
         dtype = self.dtype

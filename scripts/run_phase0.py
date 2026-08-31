@@ -42,7 +42,7 @@ from qwen35_ple.reader import (
     install_reader_hook,
 )
 from qwen35_ple.real_ple import resolve_ple_weight_scale
-from qwen35_ple.live_store import LiveETStore
+from qwen35_ple.live_store import LiveETStore, LiveETViewStore
 
 
 DEFAULT_QA = [
@@ -425,6 +425,8 @@ def main() -> int:
     parser.add_argument("--rows-dir", default="/Volumes/My Passport/qwen38-rows")
     parser.add_argument("--model-dir", default="/Volumes/My Passport/qwen38-ple")
     parser.add_argument("--live-store", action="store_true")
+    parser.add_argument("--store-p-view", default=None)
+    parser.add_argument("--store-p-slot-indices", default=None)
     parser.add_argument("--tokens-npy", default=None)
     parser.add_argument("--scale", type=float, default=None)
     parser.add_argument("--layer", type=int, default=8)
@@ -472,43 +474,75 @@ def main() -> int:
                 "--live-store requires --tokens-npy or a --features dir with tokens.npy"
             )
 
-        from qwen35_ple.real_ple import resolve_ple_weight_scale, rowids_from_tokens
+        from qwen35_ple.real_ple import resolve_ple_weight_scale
 
         applied_scale = resolve_ple_weight_scale(
             model_dir=args.model_dir, scale=args.scale
         )
-        print(
-            f"[phase0] live-store: {len(tokens)} tokens, rowids from "
-            f"{args.rows_dir} (scale={applied_scale:.6g}) ..."
-        )
-        t0 = time.time()
-        rowids = rowids_from_tokens(tokens)
-        rowid_s = time.time() - t0
         import engramdb
 
-        live_store = engramdb.Store(
-            args.rows_dir,
-            shards=128,
-            rows_per_shard=2_500_012,
-            width=160,
-        )
-        live_store_handle = live_store
-        # Keep only rowids in memory; e_t is fetched lazily per training/eval
-        # window.  This avoids materializing a full 10GB e_t array on WSL.
-        e_t = LiveETStore(
-            live_store,
-            rowids,
-            applied_scale,
-            store_path=args.rows_dir,
-            shards=128,
-            rows_per_shard=2_500_012,
-            width=160,
-        )
-        print(
-            f"[phase0] live-store ready: {len(tokens)} tokens, "
-            f"rowids={len(rowids)}x{len(rowids[0])}, rowid_s={rowid_s:.2f}s, "
-            f"no full e_t allocated"
-        )
+        if args.store_p_view:
+            print(
+                f"[phase0] live-store Store-P: {len(tokens)} tokens, "
+                f"view={args.store_p_view} (scale={applied_scale:.6g}) ..."
+            )
+            if args.store_p_slot_indices:
+                slot_indices = np.load(args.store_p_slot_indices).astype(np.int64)
+                if len(slot_indices) < len(tokens):
+                    raise SystemExit(
+                        f"store-p slot_indices length {len(slot_indices)} < tokens {len(tokens)}"
+                    )
+                slot_indices = slot_indices[: len(tokens)]
+            else:
+                slot_indices = np.arange(len(tokens), dtype=np.int64)
+            view = engramdb.View(args.store_p_view)
+            e_t = LiveETViewStore(
+                view,
+                slot_indices,
+                applied_scale,
+                num_heads=16,
+                head_dim=160,
+                embedding_dim=2560,
+                view_path=args.store_p_view,
+            )
+            live_store_handle = e_t
+            print(
+                f"[phase0] Store-P ready: {len(tokens)} tokens, "
+                f"slot_indices={len(slot_indices)}, no full e_t allocated"
+            )
+        else:
+            from qwen35_ple.real_ple import rowids_from_tokens
+
+            print(
+                f"[phase0] live-store: {len(tokens)} tokens, rowids from "
+                f"{args.rows_dir} (scale={applied_scale:.6g}) ..."
+            )
+            t0 = time.time()
+            rowids = rowids_from_tokens(tokens)
+            rowid_s = time.time() - t0
+            live_store = engramdb.Store(
+                args.rows_dir,
+                shards=128,
+                rows_per_shard=2_500_012,
+                width=160,
+            )
+            live_store_handle = live_store
+            # Keep only rowids in memory; e_t is fetched lazily per training/eval
+            # window.  This avoids materializing a full 10GB e_t array on WSL.
+            e_t = LiveETStore(
+                live_store,
+                rowids,
+                applied_scale,
+                store_path=args.rows_dir,
+                shards=128,
+                rows_per_shard=2_500_012,
+                width=160,
+            )
+            print(
+                f"[phase0] live-store ready: {len(tokens)} tokens, "
+                f"rowids={len(rowids)}x{len(rowids[0])}, rowid_s={rowid_s:.2f}s, "
+                f"no full e_t allocated"
+            )
     else:
         print(f"[phase0] loading features from {feature_dir}")
         tokens, e_t, applied_scale = _load_features(feature_dir, args.model_dir, args.scale)

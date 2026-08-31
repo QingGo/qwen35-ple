@@ -231,6 +231,10 @@ def test_live_et_view_store_reads_padded_or_raw_slots() -> None:
         out = view.get(0, 2)
         assert out.shape == (2, rec_len)
         assert view.stats.windows == 1
+        sub = view.view(1, 2)
+        assert len(sub) == 2
+        sub_out = sub.get(0, 2)
+        assert sub_out.shape == (2, rec_len)
         ds = LiveETDataset(np.arange(3, dtype=np.int64), view, seq_len=1, step=1)
         assert len(ds) == 3
         batches = list(ds)

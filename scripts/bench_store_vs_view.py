@@ -10,6 +10,10 @@ Store-I path:
 Store-P path (when ``--view`` / ``--slot-indices-npy`` are supplied):
     ``LiveETViewStore.get`` -> ``View.read_records`` -> torch dequant
 
+For semantic Store-P training access, ``slot_indices.npy`` should map each token
+to the physical slot used when building the access-order view.  For raw I/O A/B
+it can be any position sequence of the same length.
+
 Usage:
 
     PYTHONPATH=src:/path/to/EngramDB/python \\

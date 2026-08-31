@@ -46,6 +46,7 @@ def main() -> int:
     parser.add_argument("--seq-len", type=int, default=128)
     parser.add_argument("--step", type=int, default=None)
     parser.add_argument("--max-batches", type=int, default=None)
+    parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--control", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--shards", type=int, default=128)
@@ -101,6 +102,7 @@ def main() -> int:
                 num_heads=16,
                 head_dim=args.width,
                 embedding_dim=16 * args.width,
+                view_path=args.view,
             )
             dataset = LiveETDataset(
                 tokens,
@@ -141,9 +143,20 @@ def main() -> int:
                 max_windows=args.max_batches,
             )
 
+        if args.workers and args.workers > 0:
+            from torch.utils.data import DataLoader
+
+            iterator = DataLoader(
+                dataset,
+                batch_size=None,
+                num_workers=args.workers,
+            )
+        else:
+            iterator = dataset
+
         rows: list[dict[str, Any]] = []
         t_start = time.perf_counter()
-        for batch in dataset:
+        for batch in iterator:
             rows.append(
                 {
                     "batch": len(rows),
@@ -163,6 +176,7 @@ def main() -> int:
         sorted_times = sorted(times)
         summary = {
             "mode": "view" if args.view is not None else "store",
+            "workers": args.workers,
             "tokens": len(tokens),
             "windows": len(rows),
             "wall_seconds": wall,

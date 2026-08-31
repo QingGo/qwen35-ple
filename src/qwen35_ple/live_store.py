@@ -310,6 +310,7 @@ class LiveETViewStore:
         stats: FetchStats | None = None,
         dtype: Any = None,
         out_dtype: Any = None,
+        view_path: str | None = None,
     ) -> None:
         self.view = view
         self.slot_indices = np.asarray(slot_indices, dtype=np.int64)
@@ -324,6 +325,7 @@ class LiveETViewStore:
         self.dtype = dtype
         self.out_dtype = out_dtype
         self._closed = False
+        self._view_path = str(view_path) if view_path is not None else None
 
     def __len__(self) -> int:
         return len(self.slot_indices)
@@ -352,6 +354,7 @@ class LiveETViewStore:
             stats=self.stats,
             dtype=self.dtype,
             out_dtype=self.out_dtype,
+            view_path=self._view_path,
         )
 
     def subset(self, indices: np.ndarray) -> "LiveETViewStore":
@@ -366,6 +369,7 @@ class LiveETViewStore:
             stats=self.stats,
             dtype=self.dtype,
             out_dtype=self.out_dtype,
+            view_path=self._view_path,
         )
 
     def close(self) -> None:
@@ -374,6 +378,41 @@ class LiveETViewStore:
             if callable(close):
                 close()
             self._closed = True
+
+    def __getstate__(self) -> dict[str, Any]:
+        if self._view_path is None:
+            raise TypeError(
+                "LiveETViewStore cannot be pickled for DataLoader workers "
+                "without view_path"
+            )
+        return {
+            "slot_indices": self.slot_indices,
+            "scale": self.scale,
+            "num_heads": self.num_heads,
+            "head_dim": self.head_dim,
+            "embedding_dim": self.embedding_dim,
+            "record_stats": self.record_stats,
+            "stats": self.stats,
+            "dtype": self.dtype,
+            "out_dtype": self.out_dtype,
+            "view_path": self._view_path,
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        import engramdb
+
+        self.slot_indices = np.asarray(state["slot_indices"], dtype=np.int64)
+        self.scale = float(state["scale"])
+        self.num_heads = int(state["num_heads"])
+        self.head_dim = int(state["head_dim"])
+        self.embedding_dim = int(state["embedding_dim"])
+        self.record_stats = bool(state["record_stats"])
+        self.stats = state["stats"]
+        self.dtype = state["dtype"]
+        self.out_dtype = state["out_dtype"]
+        self._view_path = str(state["view_path"])
+        self.view = engramdb.View(self._view_path)
+        self._closed = False
 
     def _fetch(self, slot_positions: np.ndarray) -> np.ndarray:
         import torch

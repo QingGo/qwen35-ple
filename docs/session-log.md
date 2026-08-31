@@ -1572,4 +1572,16 @@ WSL 1M   Store-P lazy: 7812 windows, wall 23.93s, mean 0.00283s/window
 Store-P 逐窗口读取约 24 秒，已满足后续大规模实验的磁盘读取基线。仍可继续
 做访问序视图、多线程批量预取来进一步降低延迟。
 
+### 8. WSL 多 worker Store-P 懒加载（Track D 初步）
+
+`LiveETViewStore` 已支持 pickle 重开 `View`，`bench_lazy_windows.py` 新增
+`--workers`。在 WSL 上用 2 worker 跑 Store-P 懒加载：
+
+```text
+WSL Store-P 1000 tokens, 6 windows, workers=2: wall 0.145s, fetch_total 0.039s
+```
+
+说明：Store-P 视图读取器已能用于 PyTorch DataLoader 多 worker，每 worker
+会重新打开自己的 Store-P 视图句柄。
+
 

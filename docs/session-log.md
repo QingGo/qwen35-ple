@@ -1513,4 +1513,15 @@ python scripts/bench_lazy_windows.py \
 Store-P 逐窗口读取可以在约 7 秒内完成，证明“磁盘优先 + Store-P 顺序读”是
 大规模训练/评测的正确路径。仍需在 WSL 上复测冷热与多线程。
 
+控制组（permuted slots）1M Store-P 三 seed：
+
+```text
+seed 0: wall 17.20s, mean 0.00210s/window
+seed 1: wall 17.91s, mean 0.00217s/window
+seed 2: wall 17.28s, mean 0.00212s/window
+```
+
+说明：即使 Store-P 顺序读本身很快，随机/置换访问仍会比顺序访问慢约 2.4×；
+因此真实训练应优先做访问序视图/顺序化批量预取，而不是依赖全量内存。
+
 

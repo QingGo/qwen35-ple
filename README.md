@@ -199,6 +199,7 @@ python scripts/bench_lazy_windows.py \
 - 100k token Store-I 懒加载：781 窗口，约 60.5s
 - 100k token Store-P 懒加载：781 窗口，约 0.58s
 - 1M token Store-P 懒加载：7812 窗口，约 7.1s
+- 1M token Store-P 控制/置换访问：3 seeds 约 17.2–17.9s，说明访问序/顺序化仍有 2.4× 收益
 
 > **推荐方式（1M token/内存受限机器）**：`--live-store` 现在不会预加载完整 10GB `e_t`，
 > 而是只保留 `[T,16]` rowids，训练/评测时按当前窗口懒加载对应 PLE 行。

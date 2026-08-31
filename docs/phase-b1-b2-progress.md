@@ -41,12 +41,13 @@ python scripts/qwen4_ple_bit_exact_small.py
 # OFFICIAL_DISK_PLE_BIT_EXACT_SMALL_OK
 ```
 
-Covered: batched input and an EOS token inside a sequence.  MTP/streaming and
-real-PLE-row validation remain open.
+Covered: batched input, an EOS token inside a sequence, and chunked/streaming
+calls using per-batch internal context.  MTP and real-PLE-row validation remain
+open.
 
 ## Pending
 
 - Full official Qwen4Exp model load/memory verification on a Transformers build
   that ships Qwen4-Exp.
-- Real PLE rows + official class + disk adapter bit-exact A/B.
-- Multi-segment / MTP / Transformers `Cache` streaming integration.
+- MTP / Transformers `Cache` streaming integration.
+- Real-PLE rows + official class + disk adapter bit-exact A/B.

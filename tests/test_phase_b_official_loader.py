@@ -156,5 +156,15 @@ def test_disk_ple_bit_exact_small_batch_eos() -> None:
                 expected = official(tokens, None)
                 actual = disk(tokens, None)
             torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+
+            # Chunked/streaming path with per-batch internal context.
+            full = torch.tensor([[1, 2, 3, 4, eos, 6]], dtype=torch.long)
+            with torch.no_grad():
+                expected_stream = official(full, None)[0]
+                disk.reset_history()
+                part1 = disk(full[:, :2], None)
+                part2 = disk(full[:, 2:], None)
+                actual_stream = torch.cat([part1[0], part2[0]], dim=0)
+            torch.testing.assert_close(actual_stream, expected_stream, atol=0, rtol=0)
         finally:
             store.close()

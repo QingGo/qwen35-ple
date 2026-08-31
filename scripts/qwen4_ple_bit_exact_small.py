@@ -9,6 +9,7 @@ the frozen official ``Qwen4ExpTextNGramEmbedding`` against EngramDB's
 * batched input,
 * EOS token in the middle of a sequence,
 * multi-token n-gram context,
+* chunked/streaming calls with per-batch context,
 * both memory and disk paths using the same deterministic table.
 
 Usage:
@@ -93,7 +94,21 @@ def main() -> int:
                 actual = disk(tokens, None)
 
             torch.testing.assert_close(actual, expected, atol=0, rtol=0)
-            print(f"[bit-exact] shapes {tuple(actual.shape)} maxdiff 0.0")
+            print(f"[bit-exact] batch shapes {tuple(actual.shape)} maxdiff 0.0")
+
+            # Chunked/streaming path: feed the same sequence in two calls and
+            # make sure the adapter's per-batch n-gram context preserves the
+            # exact same rowids as a single full-sequence official forward.
+            stream_tokens = torch.tensor([[1, 2, 3, 4, eos, 6]], dtype=torch.long)
+            with torch.no_grad():
+                expected_stream = official(stream_tokens, None)[0]
+                disk.reset_history()
+                part1 = disk(stream_tokens[:, :2], None)
+                part2 = disk(stream_tokens[:, 2:], None)
+                actual_stream = torch.cat([part1[0], part2[0]], dim=0)
+
+            torch.testing.assert_close(actual_stream, expected_stream, atol=0, rtol=0)
+            print("[bit-exact] streaming maxdiff 0.0")
         finally:
             store.close()
 

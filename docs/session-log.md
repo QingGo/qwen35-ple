@@ -1448,4 +1448,28 @@ ruff: src / tests / scripts 全绿
 DataLoader(num_workers=2) tiny Store 冒烟通过
 ```
 
+### 4. 本机小样本 Store-I vs Store-P 实测（Mac 外盘，非 WSL 结论）
+
+命令：
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/bench_store_vs_view.py \
+    --rows-dir "/Volumes/My Passport/qwen38-rows" \
+    --view "/Volumes/My Passport/p4view-20k-2560.bin" \
+    --slot-indices-npy /tmp/slot-n2000.npy \
+    --tokens 2000 --reps 1 --warmup 0
+```
+
+结果（单次热态、Mac 外盘、本地小样本）：
+
+```text
+store_fetch=0.162s
+fetch_tensor=0.025s
+LiveETStore.get=0.039s
+Store-P view=0.021s
+```
+
+说明：Store-P 在本机小样本上快于 Store-I 单次 scatter；WSL 冷/热、1M、多线程结论仍需 Track B 正式 CSV。
+
 

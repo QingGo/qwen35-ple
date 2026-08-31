@@ -246,6 +246,8 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - 终极目标不变：磁盘优先的 PLE/Engram 记忆表基础设施。
 - Track A 已完成；Track B/C 完成了“读取基准”，但尚未完成“真实模型实验”。
 - 已确认 Store-P 是 WSL 随机 IO 的正确出路；但缺少 rowid→slot 语义映射和访问序调度。
+- 已新增有限语料的 access-order Store-P builder：`scripts/build_corpus_store_p_view.py`。
+- 已让 `run_phase0.py --store-p-view` 可直接走 Store-P 训练路径。
 
 ### 9.2 新增技术债（V123–V132）
 

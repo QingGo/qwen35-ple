@@ -207,6 +207,41 @@ WSL 真表初测：
 - 100k Store-P 懒加载：781 窗口，约 1.9s
 - 1M Store-P 懒加载：7812 窗口，约 23.9s
 
+#### Access-order Store-P 语义视图（P0 起步）
+
+构建一个“语料 access-order Store-P 视图”：
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/build_corpus_store_p_view.py \
+    --rows-dir "/Volumes/My Passport/qwen38-rows" \
+    --tokens-npy /path/to/tokens.npy \
+    --model-dir "/Volumes/My Passport/qwen38-ple" \
+    --output-view /tmp/corpus.view \
+    --keys-out /tmp/corpus.keys \
+    --slot-indices-out /tmp/corpus.slot_indices.npy \
+    --engramdb-bin /path/to/engramdb \
+    --verify
+```
+
+因为槽位顺序 = 语料 token 顺序，所以：
+
+```python
+slot_indices = np.load("/tmp/corpus.slot_indices.npy")  # arange(T)
+store_p = LiveETViewStore(view, slot_indices, scale, view_path="/tmp/corpus.view")
+```
+
+本机已验证：该 access-order Store-P 与 Store-I 逐 token e_t `maxdiff=0.0`。
+`run_phase0.py` 可直接用：
+
+```bash
+python scripts/run_phase0.py --live-store \
+    --store-p-view /tmp/corpus.view \
+    --store-p-slot-indices /tmp/corpus.slot_indices.npy \
+    --tokens-npy /path/to/tokens.npy \
+    --rows-dir "/Volumes/My Passport/qwen38-rows"
+```
+
 > **推荐方式（1M token/内存受限机器）**：`--live-store` 现在不会预加载完整 10GB `e_t`，
 > 而是只保留 `[T,16]` rowids，训练/评测时按当前窗口懒加载对应 PLE 行。
 > 因此 1M token 也可以直接跑，只要单窗口内存足够（~seq_len × 2560 × 4B）。

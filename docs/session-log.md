@@ -1584,15 +1584,70 @@ WSL Store-P 1000 tokens, 6 windows, workers=2: wall 0.145s, fetch_total 0.039s
 说明：Store-P 视图读取器已能用于 PyTorch DataLoader 多 worker，每 worker
 会重新打开自己的 Store-P 视图句柄。
 
-## Session 34 系统性思考指针
+## Session 34 系统性思考与本轮实现记录
 
-完整版见 EngramDB `docs/roadmap.md` Section 24、`docs/session-summary.md`
-Session 34。本仓同步记录：
+### 1. 本轮计划
 
-- 终极目标不变：磁盘优先 PLE/Engram 记忆表基础设施。
-- 当前最大缺口：rowid→Store-P slot 语义映射、access-order 视图/调度、真实模型 1M 三线实验。
-- 新增技术债 V123–V132，对应 EngramDB Section 24。
-- 下一阶段 P0：语义映射 + access-order + 真实模型 1M；P1：门禁/WSL 复现/golden；P2：serving/Arrow/连接池；P3：全表 Store-P/三仓同步。
+- 系统性思考：终极目标、技术债、借鉴矩阵、阶段计划。
+- 完成 WSL Store-P A/B 与懒加载实测。
+- 发布 v0.2.10。
+- 开始 P0：把 Store-P 从 raw slot 基准推进到 access-order 语义路径。
+
+### 2. 本轮发现
+
+- Store-I 随机读是 WSL 主要瓶颈。
+- Store-P 比 Store-I 快约两个数量级。
+- 访问序影响显著：permuted 比顺序慢约 2.4×。
+- 多 worker Store-P 可跑。
+- 完整模型实验仍是缺口。
+
+### 3. 做的尝试
+
+- WSL p4view 构建 20k/100k/1M Store-P 视图。
+- WSL Python 懒加载基准。
+- WSL 2 worker DataLoader。
+- 新增 `StorePool` / `ThreadLocalStore` / `Database` 池化。
+- 新增 `scripts/build_corpus_store_p_view.py`：
+  - tokens → rowids → flat keys → `engramdb view build --keys`；
+  - 输出 access-order view + `slot_indices.npy`；
+  - 本机验证 maxdiff=0.0。
+- `LiveETViewStore` 增加 `view()` 切分，并修复 `self.view` 遮蔽方法。
+- `run_phase0.py` 增加 `--store-p-view` / `--store-p-slot-indices`。
+
+### 4. 踩过的坑
+
+1. WSL `engramdb` 二进制不支持 `--keys`。
+2. `LiveETViewStore.self.view` 遮蔽 `view()` 方法。
+3. `gate.sh` / `p4view bench` 缺 `--keys` 导致 release gate 失败。
+4. WSL qwen35 venv 符号链接损坏，需重建。
+5. WSL 全量 pytest 存在 1 个 golden 漂移（V126）。
+
+### 5. 完成
+
+- [x] v0.2.10 发布。
+- [x] WSL Store-P p4view A/B。
+- [x] WSL 1M Store-P lazy 23.9s。
+- [x] StorePool / ThreadLocalStore。
+- [x] Store-P 多 worker。
+- [x] access-order Store-P builder + 语义验证。
+- [x] `run_phase0.py --store-p-view` 接入。
+
+### 6. 未完成
+
+- V123 通用 rowid→slot 语义索引
+- V124 access-order 自动调度端到端
+- V125 完整模型 1M 三线实验
+- V126 WSL golden 漂移
+- V127 serving A/B
+- V128 懒加载门禁
+- V129-132 连接池深化/Arrow/WSL 复现/全表 Store-P
+
+### 7. 下一阶段
+
+- P0：语义索引 + access-order + 真实模型 1M。
+- P1：基准门禁 + WSL 复现 + golden。
+- P2：serving / Arrow / 连接池深化。
+- P3：全表 Store-P + 三仓同步 + 发布。
 
 
 

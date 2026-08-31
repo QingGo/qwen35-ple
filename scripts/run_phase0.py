@@ -26,6 +26,7 @@ import json
 import math
 import os
 import random
+import time
 from pathlib import Path
 
 import numpy as np
@@ -409,6 +410,8 @@ def main() -> int:
     parser.add_argument("--features", default="data/ple-adapter-features-20k")
     parser.add_argument("--rows-dir", default="/Volumes/My Passport/qwen38-rows")
     parser.add_argument("--model-dir", default="/Volumes/My Passport/qwen38-ple")
+    parser.add_argument("--live-store", action="store_true")
+    parser.add_argument("--tokens-npy", default=None)
     parser.add_argument("--scale", type=float, default=None)
     parser.add_argument("--layer", type=int, default=8)
     parser.add_argument("--branches", type=int, default=1)
@@ -441,9 +444,39 @@ def main() -> int:
 
     _install_torch_compat()
     feature_dir = Path(args.features)
-    print(f"[phase0] loading features from {feature_dir}")
-    tokens, e_t, applied_scale = _load_features(feature_dir, args.model_dir, args.scale)
-    print(f"[phase0] tokens={len(tokens)} e_t={e_t.shape} scale={applied_scale:.6g}")
+    if args.live_store:
+        # Live path: read PLE rows directly from EngramDB instead of loading a
+        # precomputed e_t.npy.  This uses the fast Store.fetch + torch tensor
+        # path (fetch_e_t_tensor) and avoids the slow Python byte expansion.
+        if args.tokens_npy:
+            tokens = np.load(args.tokens_npy).astype(np.int64)
+        elif (feature_dir / "tokens.npy").exists():
+            tokens = np.load(feature_dir / "tokens.npy").astype(np.int64)
+        else:
+            raise SystemExit(
+                "--live-store requires --tokens-npy or a --features dir with tokens.npy"
+            )
+
+        from qwen35_ple.real_ple import fetch_e_t, resolve_ple_weight_scale, rowids_from_tokens
+
+        applied_scale = resolve_ple_weight_scale(
+            model_dir=args.model_dir, scale=args.scale
+        )
+        print(
+            f"[phase0] live-store: {len(tokens)} tokens, reading PLE rows from "
+            f"{args.rows_dir} (scale={applied_scale:.6g}) ..."
+        )
+        t0 = time.time()
+        rowids = rowids_from_tokens(tokens)
+        e_t = fetch_e_t(args.rows_dir, rowids, scale=applied_scale)
+        print(
+            f"[phase0] live fetch {time.time() - t0:.2f}s "
+            f"e_t={e_t.shape} scale={applied_scale:.6g}"
+        )
+    else:
+        print(f"[phase0] loading features from {feature_dir}")
+        tokens, e_t, applied_scale = _load_features(feature_dir, args.model_dir, args.scale)
+        print(f"[phase0] tokens={len(tokens)} e_t={e_t.shape} scale={applied_scale:.6g}")
 
     (train_tokens, train_e_t), (val_tokens, val_e_t) = _split(
         tokens, e_t, args.val_frac
@@ -495,6 +528,8 @@ def main() -> int:
         "config": {
             "model": args.model,
             "features": args.features,
+            "rows_dir": args.rows_dir,
+            "live_store": bool(args.live_store),
             "layer": args.layer,
             "branches": args.branches,
             "reader": args.reader,

@@ -108,9 +108,11 @@ def fetch_e_t(
 
     The returned vectors are dequantized with the PLE ``weight_scale`` so they
     match EngramDB's real ``DiskPleNGramEmbedding`` / official PLE path.
+
+    This uses the direct ``Store.fetch`` + ``torch.frombuffer`` fast path, not
+    the Python byte-slicing ``PleDiskGather.fetch`` path.
     """
     import engramdb
-    from engramdb.vllm import PleDiskGather
 
     spec = real_spec()
     store = engramdb.Store(
@@ -121,12 +123,17 @@ def fetch_e_t(
     )
 
     try:
-        gather = PleDiskGather(store, row_bytes=160)
         flat = rowids.reshape(-1)
-        raw = gather.fetch(flat.tolist())
-        arr = torch.frombuffer(bytearray(raw), dtype=torch.float8_e4m3fn)
-        fp8 = arr.float().numpy()
-        return (fp8 * scale).reshape(len(rowids), 16, 160).reshape(len(rowids), 2560)
+        arr = engramdb.fetch_e_t_tensor(
+            store,
+            flat.tolist(),
+            scale=scale,
+            num_heads=16,
+            head_dim=160,
+            dtype=torch.float8_e4m3fn,
+            out_dtype=torch.float32,
+        )
+        return arr.reshape(len(rowids), 2560).numpy()
     finally:
         store.close()
 

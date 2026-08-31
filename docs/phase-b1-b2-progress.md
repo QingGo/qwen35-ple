@@ -127,6 +127,37 @@ It also exposed/fixed two production details:
   prefetch executor and can be used in benchmark scripts and long-running
   services without leaking worker threads.
 
+## Fast e_t fetch path (Store.fetch + torch tensor)
+
+The 20k-token precompute benchmark showed that the old `PleDiskGather.fetch`
+Python byte-expansion path was the bottleneck:
+
+- `PleDiskGather.fetch` (old): 16.857s for 320k rows
+- `Store.fetch` direct: 0.562s for 320k rows
+- `Store.fetch` + torch conversion: 0.808s end-to-end
+
+This has now been addressed in EngramDB:
+
+- `PleDiskGather.fetch` no longer does Python per-row dedup/slice/join; it
+  returns the contiguous `Store.fetch` buffer directly.
+- New `engramdb.fetch_e_t_tensor(store, rowids, ...)` returns a torch tensor
+  with shape `[T, 16, 160]` from one `Store.fetch` call, optionally scaled.
+- `PleDiskGather.fetch_tensor(...)` is the same fast path through the gather
+  helper.
+- `qwen35_ple.real_ple.fetch_e_t` and
+  `scripts/precompute_real_ple_features.py` now use the direct tensor path.
+- `scripts/run_phase0.py --live-store` can read PLE rows live from EngramDB
+  instead of loading a precomputed `e_t.npy`.
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/run_phase0.py --live-store \
+    --tokens-npy /tmp/tokens.npy \
+    --rows-dir "/Volumes/My Passport/qwen38-rows" \
+    --model-dir "/Volumes/My Passport/qwen38-ple"
+```
+
+
 Still pending:
 - Full official Qwen4Exp model load/memory verification on a Transformers build
   that ships Qwen4-Exp.

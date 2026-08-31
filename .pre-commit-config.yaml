@@ -1,4 +1,5 @@
-# Pre-commit hooks: catch lint/format issues locally before CI.
+# Pre-commit hooks: catch lint issues locally before CI.
+# Matches the CI lint command: `ruff check src tests`.
 # Install with:
 #   pip install pre-commit
 #   pre-commit install
@@ -8,4 +9,3 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
-      - id: ruff-format

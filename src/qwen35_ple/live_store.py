@@ -19,9 +19,12 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator, Sequence
 from dataclasses import asdict, dataclass
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from typing import Self
 
 try:
     from torch.utils.data import IterableDataset as _IterableDataset
@@ -439,7 +442,7 @@ class LiveETViewStore:
 
         dtype = self.dtype
         if dtype is None:
-            dtype = torch.float8_e4m3fn
+            dtype = getattr(torch, "float8_e4m3fn", torch.uint8)
         out_dtype = self.out_dtype
         if out_dtype is None:
             out_dtype = torch.float32

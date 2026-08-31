@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import statistics
 import time
 from typing import Any
 
@@ -46,6 +47,9 @@ def main() -> int:
     parser.add_argument("--width", type=int, default=160)
     parser.add_argument("--scale", type=float, default=1.0)
     parser.add_argument("--csv", default=None)
+    parser.add_argument("--max-store-s", type=float, default=None)
+    parser.add_argument("--max-tensor-s", type=float, default=None)
+    parser.add_argument("--max-tensor-dedup-s", type=float, default=None)
     args = parser.parse_args()
 
     store = engramdb.Store(
@@ -134,6 +138,45 @@ def main() -> int:
                 writer.writeheader()
                 writer.writerows(rows)
             print(f"[csv] wrote {args.csv}")
+
+        med = {
+            "store_fetch_s": statistics.median(r["store_fetch_s"] for r in rows),
+            "ple_gather_s": statistics.median(r["ple_gather_s"] for r in rows),
+            "fetch_tensor_s": statistics.median(r["fetch_tensor_s"] for r in rows),
+            "fetch_tensor_dedup_s": statistics.median(
+                r["fetch_tensor_dedup_s"] for r in rows
+            ),
+        }
+        print(
+            f"[summary] median store={med['store_fetch_s']:.3f}s "
+            f"gather={med['ple_gather_s']:.3f}s "
+            f"tensor={med['fetch_tensor_s']:.3f}s "
+            f"tensor_dedup={med['fetch_tensor_dedup_s']:.3f}s"
+        )
+
+        failures: list[str] = []
+        if args.max_store_s is not None and med["store_fetch_s"] > args.max_store_s:
+            failures.append(
+                f"store_fetch {med['store_fetch_s']:.3f}s > {args.max_store_s:.3f}s"
+            )
+        if args.max_tensor_s is not None and med["fetch_tensor_s"] > args.max_tensor_s:
+            failures.append(
+                f"fetch_tensor {med['fetch_tensor_s']:.3f}s > {args.max_tensor_s:.3f}s"
+            )
+        if (
+            args.max_tensor_dedup_s is not None
+            and med["fetch_tensor_dedup_s"] > args.max_tensor_dedup_s
+        ):
+            failures.append(
+                "fetch_tensor_dedup "
+                f"{med['fetch_tensor_dedup_s']:.3f}s > {args.max_tensor_dedup_s:.3f}s"
+            )
+
+        if failures:
+            for f in failures:
+                print(f"[threshold] FAIL: {f}")
+            print("LIVE_STORE_BENCH_FAIL")
+            return 1
 
         print("LIVE_STORE_BENCH_OK")
         return 0

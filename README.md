@@ -124,7 +124,8 @@ tests/            一致性冒烟测试（golden 对拍）
 - [x] M0 磁盘版 MultiHeadEmbedding quick 自检
 - [x] Qwen3.5-0.8B + engram-peft PLE-lite CPU e2e
 - [x] 官方 `refs/qwen4_exp_modeling.py` 快照 + 4096 forward golden
-- [x] 真实 PLE FP8 `e_t` 预计算（EngramDB Store + PleDiskGather）
+- [x] 真实 PLE FP8 `e_t` 预计算（EngramDB `fetch_e_t_tensor` 快速路径）
+- [x] live-store 直接读取（`run_phase0.py --live-store`，无需 10GB `e_t.npy`）
 - [x] 真实 PLE 知识探针（线性分类 72.7% vs 16.7%）
 - [x] XMemTransfer 风格 reader 完整实验矩阵
 - [ ] CP/后训练正式消融与 100 tok/s 推理闭环
@@ -150,6 +151,29 @@ keys.npy
 e_t.npy
 meta.json
 ```
+
+
+#### Live-store 直接读取（推荐，避免 10GB `e_t.npy`）
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/run_phase0.py --live-store \
+    --tokens-npy /path/to/tokens.npy \
+    --rows-dir "/Volumes/My Passport/qwen38-rows" \
+    --model-dir "/Volumes/My Passport/qwen38-ple"
+```
+
+可复现基准：
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/bench_live_store.py \
+    --rows-dir "/Volumes/My Passport/qwen38-rows" \
+    --tokens 20000 --reps 3 --csv /tmp/live-store-bench.csv
+```
+
+核心 API：`engramdb.fetch_e_t_tensor()` / `PleDiskGather.fetch_tensor()`；
+`real_ple.fetch_e_t` 已不再使用旧 Python 字节展开路径。
 
 核心代码：`src/qwen35_ple/real_ple.py`。
 

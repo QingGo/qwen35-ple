@@ -33,7 +33,12 @@ import json
 from pathlib import Path
 
 import engramdb
-from engramdb.official_loader import filter_ngram_shard_state_dict
+from engramdb.official_loader import (
+    filter_ngram_shard_state_dict,
+    install_disk_ple_in_official_model,
+    load_official_checkpoint_without_ngram_shards,
+    patch_official_ngram_embedding_for_disk_load,
+)
 
 
 def main() -> int:
@@ -94,7 +99,23 @@ def main() -> int:
 
     config = AutoConfig.from_pretrained(args.model_dir)
     _tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
-    model = AutoModelForCausalLM.from_config(config)
+
+    # Phase B1: patch the official ngram embedding constructor so from_config
+    # allocates a one-row placeholder instead of the multi-hundred-GB PLE table.
+    # The real rows stay in EngramDB and are installed after non-PLE loading.
+    with patch_official_ngram_embedding_for_disk_load():
+        model = AutoModelForCausalLM.from_config(config)
+
+    load_result = load_official_checkpoint_without_ngram_shards(
+        model,
+        args.model_dir,
+        strict=False,
+    )
+    print(
+        f"[loader] loaded {load_result.loaded_tensors} non-PLE tensors, "
+        f"skipped {load_result.skipped_ngram_tensors} PLE ngram tensors; "
+        f"missing={len(load_result.missing_keys)} unexpected={len(load_result.unexpected_keys)}"
+    )
 
     store = engramdb.Store(
         args.rows_dir,
@@ -107,8 +128,6 @@ def main() -> int:
         width=160,
     )
     try:
-        from engramdb.official_loader import install_disk_ple_in_official_model
-
         replaced = install_disk_ple_in_official_model(
             model,
             store,

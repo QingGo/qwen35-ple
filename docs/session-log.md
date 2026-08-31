@@ -1556,4 +1556,20 @@ WSL 结果：
 推到约 22M rows/s。之前 WSL Store.fetch 100k tokens 约 56s 的慢路径应该通过
 Store-P / 多线程 / 访问序视图规避。
 
+### 7. WSL Python 懒加载实测（Track C 初步）
+
+已把 `live_store.py` 与 `bench_lazy_windows.py` 同步到 WSL qwen35-ple，并在
+WSL qwen35 venv 安装 `engramdb-python==0.2.9`，用真实 `/home/zeng/qwen38-rows`
+跑逐窗口懒加载：
+
+```text
+WSL 20k Store-I lazy:   156 windows, wall 22.41s, mean 0.143s/window
+WSL 100k Store-P lazy:  781 windows, wall  1.86s, mean 0.00217s/window
+WSL 1M   Store-P lazy: 7812 windows, wall 23.93s, mean 0.00283s/window
+```
+
+结论：WSL 上 Store-P 懒加载同样比 Store-I 懒加载快约两个数量级；1M token
+Store-P 逐窗口读取约 24 秒，已满足后续大规模实验的磁盘读取基线。仍可继续
+做访问序视图、多线程批量预取来进一步降低延迟。
+
 

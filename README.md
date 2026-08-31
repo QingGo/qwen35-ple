@@ -201,6 +201,12 @@ python scripts/bench_lazy_windows.py \
 - 1M token Store-P 懒加载：7812 窗口，约 7.1s
 - 1M token Store-P 控制/置换访问：3 seeds 约 17.2–17.9s，说明访问序/顺序化仍有 2.4× 收益
 
+WSL 真表初测：
+
+- 20k Store-I 懒加载：156 窗口，约 22.4s
+- 100k Store-P 懒加载：781 窗口，约 1.9s
+- 1M Store-P 懒加载：7812 窗口，约 23.9s
+
 > **推荐方式（1M token/内存受限机器）**：`--live-store` 现在不会预加载完整 10GB `e_t`，
 > 而是只保留 `[T,16]` rowids，训练/评测时按当前窗口懒加载对应 PLE 行。
 > 因此 1M token 也可以直接跑，只要单窗口内存足够（~seq_len × 2560 × 4B）。

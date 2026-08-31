@@ -3,6 +3,17 @@
 > 目标：验证 EngramDB v0.2.9 的快速 `Store.fetch` / `fetch_e_t_tensor` 路径，
 > 并确认 qwen35-ple 的 live-store 与预计算读取不再走慢的 `PleDiskGather` Python 字节展开。
 
+> **验收结果（2026-xx-xx，Mac + WSL）**
+>
+> - EngramDB v0.2.9 快速门禁通过：`python_wheel_smoke.py` ✅
+> - qwen35-ple 正确性全部通过：official smoke、bit-exact、sparse oracle、phase B tests ✅
+> - Mac 1000 tokens precompute：`fetch+dequant 0.67s` ✅
+> - WSL live-store Phase 0：`live fetch 1.05s e_t=(1000,2560)`，模型加载并完成 no-reader ✅
+> - 旧 `PleDiskGather(store` 在 qwen35-ple 主路径已无引用 ✅
+>
+> 注意：Mac 上 20k 级首次调用约 6–9s，热态约 0.55s；正式结论需以冷热分离后的 CSV 为准。
+
+
 ## 0. 版本确认
 
 ```bash

@@ -90,6 +90,43 @@ PREFETCH_AB_SMOKE_OK
 This shows the new prefetch pipeline can hide disk fetch behind a simulated
 earlier-layer compute window.
 
+## Mini official-model prefetch A/B (real Store + frozen official PLE layer)
+
+This step replaces the pure sleep-based microbench with an actual nn.Module
+forward path.  It uses:
+
+- the frozen official `Qwen4ExpTextPLELayer` as the real PLE layer,
+- `DiskPleNGramEmbedding` backed by the real EngramDB Store,
+- synthetic dense blocks before/after PLE to represent earlier/later compute,
+- the same model-level prefetch hook used by the full loader.
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/mini_official_prefetch_ab.py \
+    --checkpoint "/Volumes/My Passport/qwen38-ple" \
+    --store "/Volumes/My Passport/qwen38-rows" \
+    --tokens 8 --hidden 64 --pre-layers 2 --post-layers 1 --reps 2 \
+    --csv /tmp/mini_ab.csv
+# MINI_OFFICIAL_PREFETCH_AB_OK
+```
+
+The script records:
+
+- total forward wall time,
+- pre-PLE compute time and actual PLE-layer time,
+- prefetch issued rows, prefetch wait time, synchronous fetch time,
+- whether the prefetch had already completed when the PLE layer was entered,
+- optional CSV for later regression thresholds.
+
+This is still a low-resource smoke, not a full Qwen4Exp end-to-end tok/s result.
+It also exposed/fixed two production details:
+
+- the model-level pre-hook now tolerates both `hook(module, args)` and
+  `hook(module, args, kwargs)` calling conventions across PyTorch versions;
+- `DiskPleEmbedding.close()` / `DiskPleNGramEmbedding.close()` now shut down the
+  prefetch executor and can be used in benchmark scripts and long-running
+  services without leaking worker threads.
+
 Still pending:
 - Full official Qwen4Exp model load/memory verification on a Transformers build
   that ships Qwen4-Exp.

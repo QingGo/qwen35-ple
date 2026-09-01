@@ -302,3 +302,38 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 3. Phase C：access-order 基准门禁 + WSL 复现 + golden（合成门禁已入 CI）。
 4. Phase D：serving / Arrow / 全表 Store-P。
 5. Phase E：依赖与跨仓治理。
+
+---
+
+## 11. 2026-09-01 第二十二轮系统性思考（Session 36）
+
+> 完整版见 EngramDB `docs/roadmap.md` Section 26。
+
+### 11.1 坐标
+
+- ✅ Phase A：1M real/control/3-seed 完成，real < control < no-reader，Go。
+- ✅ DiskSlotIndex、全表批式构建、StorePool 遥测、合成 CI 门禁已落地。
+- ✅ qwen35-ple 34 passed / 7 skipped。
+- ⚠️ Phase A2：Store-P/access-order 复跑 + fetch timing 尚未做。
+
+### 11.2 本仓关注技术债
+
+| # | 债 |
+|---|---|
+| V140 | Phase A 未用 Store-P/access-order 复跑 |
+| V141 | DiskSlotIndex 无 320M 实测 |
+| V142 | bucket 文件数过多 |
+| V143 | qwen 保留本地 SlotIndex fallback |
+| V144 | CLI 未原生生成 slot index |
+| V145 | Phase A 无 fetch timing |
+| V146 | WSL golden 漂移 |
+| V147 | CI 只有合成门禁 |
+| V148 | 新功能未发布 |
+
+### 11.3 下一阶段
+
+1. Phase A2：Store-P + access-order 复跑 1M，记录 loss + fetch timing。
+2. Phase B2：DiskSlotIndex 全表实测 + 单文件/原生化。
+3. Phase C2：真表性能门禁 + golden 修复。
+4. Phase D2：Arrow / serving / 全表实际构建。
+5. Phase E2：v0.2.12 发布。

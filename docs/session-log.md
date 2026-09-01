@@ -1697,5 +1697,32 @@ WSL Store-P 1000 tokens, 6 windows, workers=2: wall 0.145s, fetch_total 0.039s
 
 详细结果见 `docs/phase-a-1m-result.md`。
 
+## Session 36 系统性思考（第二十二轮）
+
+### 1. 本轮完成
+
+- Phase A 科学闭环：WSL 1M real/control/3-seed，Go。
+- DiskSlotIndex / `--keys-stream` / batch builder / synthetic CI / StorePool stats。
+
+### 2. 新增技术债
+
+- V140 Phase A 未用 Store-P/access-order 复跑
+- V141 DiskSlotIndex 无全表实测
+- V142 bucket 文件数问题
+- V143 qwen fallback 双实现
+- V144 CLI 原生 slot-index 未做
+- V145 Phase A 无 fetch timing
+- V146 golden 漂移
+- V147 合成门禁不够
+- V148 新功能未发布
+
+### 3. 下一阶段
+
+- Phase A2：Store-P/access-order 复跑 + fetch timing。
+- Phase B2：DiskSlotIndex 真表实测 + 产品化。
+- Phase C2：真表门禁 + golden。
+- Phase D2：Arrow/serving/全表实际构建。
+- Phase E2：v0.2.12 发布与三仓同步。
+
 
 

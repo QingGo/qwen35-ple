@@ -48,3 +48,9 @@ jobs:
 
       - name: Test
         run: uv run pytest -q
+
+      - name: Access-order synthetic gate
+        run: uv run python scripts/bench_access_order.py --synthetic --synthetic-tokens 512 --seq-len 64 --step 64 --reps 2 --max-ratio 2.0
+
+      - name: Lazy-window synthetic gate
+        run: uv run python scripts/bench_lazy_windows.py --synthetic --synthetic-tokens 512 --seq-len 64 --step 64 --max-batch-s 0.05

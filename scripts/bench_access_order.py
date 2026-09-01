@@ -63,8 +63,10 @@ def _run_once(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--view", required=True)
-    parser.add_argument("--slot-indices-npy", required=True)
+    parser.add_argument("--view", default=None)
+    parser.add_argument("--slot-indices-npy", default=None)
+    parser.add_argument("--synthetic", action="store_true", help="run on a synthetic in-memory Store-P stub")
+    parser.add_argument("--synthetic-tokens", type=int, default=1000)
     parser.add_argument("--tokens-npy", default=None)
     parser.add_argument("--tokens", type=int, default=100_000)
     parser.add_argument("--seq-len", type=int, default=128)
@@ -80,28 +82,54 @@ def main() -> int:
         tokens = np.load(args.tokens_npy).astype(np.int64)
         tokens = tokens[: args.tokens]
     else:
-        tokens = np.arange(args.tokens, dtype=np.int64)
-
-    slot_indices = np.load(args.slot_indices_npy).astype(np.int64)
-    if len(slot_indices) < len(tokens):
-        raise ValueError(
-            f"slot_indices length {len(slot_indices)} < tokens {len(tokens)}"
-        )
-    slot_indices = slot_indices[: len(tokens)]
+        n = args.synthetic_tokens if args.synthetic else args.tokens
+        tokens = np.arange(n, dtype=np.int64)
 
     scale = resolve_ple_weight_scale(model_dir=args.model_dir, scale=args.scale)
-    import engramdb
 
-    view = engramdb.View(args.view)
-    store = LiveETViewStore(
-        view,
-        slot_indices,
-        scale,
-        num_heads=16,
-        head_dim=160,
-        embedding_dim=2560,
-        view_path=args.view,
-    )
+    if args.synthetic:
+        rec_len = 2560
+        rng = np.random.default_rng(0)
+        slot_indices = rng.permutation(len(tokens)).astype(np.int64)
+        store = LiveETViewStore(
+            None,
+            slot_indices,
+            scale,
+            num_heads=16,
+            head_dim=160,
+            embedding_dim=rec_len,
+        )
+
+        def fake_fetch(positions: np.ndarray) -> np.ndarray:
+            positions = np.asarray(positions, dtype=np.int64)
+            return np.stack(
+                [np.full(rec_len, float(p), dtype=np.float32) for p in positions]
+            )
+
+        store._fetch = fake_fetch  # type: ignore[method-assign]
+    else:
+        if args.view is None or args.slot_indices_npy is None:
+            raise SystemExit("--view/--slot-indices-npy or --synthetic is required")
+        slot_indices = np.load(args.slot_indices_npy).astype(np.int64)
+        if len(slot_indices) < len(tokens):
+            raise ValueError(
+                f"slot_indices length {len(slot_indices)} < tokens {len(tokens)}"
+            )
+        slot_indices = slot_indices[: len(tokens)]
+
+        import engramdb
+
+        view = engramdb.View(args.view)
+        store = LiveETViewStore(
+            view,
+            slot_indices,
+            scale,
+            num_heads=16,
+            head_dim=160,
+            embedding_dim=2560,
+            view_path=args.view,
+        )
+
     step = args.step or args.seq_len
 
     rows: list[dict[str, float | int]] = []

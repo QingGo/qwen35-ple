@@ -41,6 +41,8 @@ def main() -> int:
     parser.add_argument("--rows-dir", default="/Volumes/My Passport/qwen38-rows")
     parser.add_argument("--view", default=None)
     parser.add_argument("--slot-indices-npy", default=None)
+    parser.add_argument("--synthetic", action="store_true", help="run on a synthetic Store-P stub")
+    parser.add_argument("--synthetic-tokens", type=int, default=1000)
     parser.add_argument("--slot-index", default=None)
     parser.add_argument("--tokens-npy", default=None)
     parser.add_argument("--tokens", type=int, default=100_000)
@@ -65,7 +67,8 @@ def main() -> int:
         if len(tokens) > args.tokens:
             tokens = tokens[: args.tokens]
     else:
-        tokens = np.arange(args.tokens, dtype=np.int64)
+        n = args.synthetic_tokens if args.synthetic else args.tokens
+        tokens = np.arange(n, dtype=np.int64)
     print(
         f"[lazy] tokens={len(tokens)} seq_len={args.seq_len} "
         f"step={args.step or args.seq_len} view={args.view or '-'}"
@@ -73,20 +76,55 @@ def main() -> int:
 
     scale = resolve_ple_weight_scale(model_dir=args.model_dir, scale=args.scale)
 
-    import engramdb
+    store = None
+    if not args.synthetic:
+        import engramdb
 
-    store = engramdb.Store(
-        args.rows_dir,
-        shards=args.shards,
-        rows_per_shard=args.rows_per_shard,
-        width=args.width,
-    )
+        store = engramdb.Store(
+            args.rows_dir,
+            shards=args.shards,
+            rows_per_shard=args.rows_per_shard,
+            width=args.width,
+        )
 
     live_store = None
     view_store = None
     dataset = None
     try:
-        if args.view is not None:
+        if args.synthetic:
+            rec_len = 16 * args.width
+            rng = np.random.default_rng(args.seed)
+            slot_indices = rng.permutation(len(tokens)).astype(np.int64)
+            view_store = LiveETViewStore(
+                None,
+                slot_indices,
+                scale,
+                num_heads=16,
+                head_dim=args.width,
+                embedding_dim=rec_len,
+                access_order=args.access_order,
+            )
+
+            def fake_fetch(positions: np.ndarray) -> np.ndarray:
+                positions = np.asarray(positions, dtype=np.int64)
+                return np.stack(
+                    [np.full(rec_len, float(p), dtype=np.float32) for p in positions]
+                )
+
+            view_store._fetch = fake_fetch  # type: ignore[method-assign]
+            dataset = LiveETDataset(
+                tokens,
+                view_store,
+                seq_len=args.seq_len,
+                step=args.step,
+                control=args.control,
+                seed=args.seed,
+                max_windows=args.max_batches,
+                access_order=args.access_order,
+            )
+        elif args.view is not None:
+            import engramdb
+
             view = engramdb.View(args.view)
             if args.slot_index:
                 from qwen35_ple.slot_index import SlotIndex
@@ -124,6 +162,8 @@ def main() -> int:
                 access_order=args.access_order,
             )
         else:
+            import engramdb
+
             print("[lazy] building rowids ...")
             t0 = time.perf_counter()
             rowids = engramdb.rowids_for_seq(tokens.tolist())
@@ -185,7 +225,7 @@ def main() -> int:
         times = [r["fetch_seconds"] for r in rows]
         sorted_times = sorted(times)
         summary = {
-            "mode": "view" if args.view is not None else "store",
+            "mode": "synthetic" if args.synthetic else ("view" if args.view is not None else "store"),
             "workers": args.workers,
             "tokens": len(tokens),
             "windows": len(rows),
@@ -223,7 +263,8 @@ def main() -> int:
             view_store.close()
         if live_store is not None:
             live_store.close()
-        store.close()
+        if store is not None:
+            store.close()
 
 
 if __name__ == "__main__":

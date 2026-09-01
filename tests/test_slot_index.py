@@ -168,5 +168,36 @@ def test_live_et_view_store_from_slot_index() -> None:
     np.testing.assert_array_equal(store.slot_indices, np.array([10, 30, 10], dtype=np.int64))
 
 
+def test_slot_index_from_view_manifest() -> None:
+    with tempfile.TemporaryDirectory(prefix="slot-manifest-") as td:
+        root = Path(td)
+        view_path = root / "corpus.view"
+        keys_path = root / "corpus.keys.txt"
+        keys_path.write_text(
+            "\n".join(str(i) for i in range(32)) + "\n",
+            encoding="utf-8",
+        )
+        manifest = {
+            "grans": 2,
+            "heads": 16,
+            "slot_bytes": 2560,
+            "record_bytes": 2560,
+            "build_seconds": 0.0,
+            "build_mb_s": 0.0,
+            "rows": 32,
+            "source": "provided-keys:32",
+            "layout": "access-order",
+            "keys_out": str(keys_path),
+        }
+        (root / "corpus.manifest.json").write_text(
+            __import__("json").dumps(manifest, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        index = SlotIndex.from_view_manifest(view_path)
+        assert len(index) == 2
+        assert index.lookup(tuple(range(16))) == 0
+        assert index.lookup(tuple(range(16, 32))) == 1
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__]))

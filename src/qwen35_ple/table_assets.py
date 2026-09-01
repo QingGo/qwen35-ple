@@ -35,6 +35,9 @@ class ViewManifest:
     build_mb_s: float | None
     rows: int
     source: str
+    keys_out: str | None = None
+    slot_index: str | None = None
+    slot_indices: str | None = None
 
     @classmethod
     def from_file(cls, manifest_path: str | Path) -> ViewManifest:
@@ -50,6 +53,9 @@ class ViewManifest:
             build_mb_s=float(data["build_mb_s"]),
             rows=int(data["rows"]),
             source=str(data.get("source", "")),
+            keys_out=data.get("keys_out"),
+            slot_index=data.get("slot_index"),
+            slot_indices=data.get("slot_indices"),
         )
 
     @property

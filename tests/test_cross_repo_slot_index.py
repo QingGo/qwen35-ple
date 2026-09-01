@@ -41,7 +41,6 @@ def test_slot_index_matches_engramdb_canonical() -> None:
 
 def test_disk_slot_index_matches_in_memory() -> None:
     import tempfile
-    from pathlib import Path
 
     engramdb = pytest.importorskip("engramdb")
     if getattr(engramdb, "DiskSlotIndex", None) is None:

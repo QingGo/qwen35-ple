@@ -134,9 +134,76 @@ tests/            一致性冒烟测试（golden 对拍）
 - [x] XMemTransfer 风格 reader 完整实验矩阵
 - [x] 官方 Qwen PLE reader 权重复用（`OfficialSourceQwenReader` + 可切换 MLP bridge/out_proj）
 - [x] 1M token live-store 懒加载三线实验（real / control / no-reader）
+- [x] 1M QA exact-match（9题）三线评测完成（`outputs/phase0-live1m-qa.json`）
+- [x] 扩大 QA 集：50 TriviaQA-style + 50 NQ + 50 BoolQ（`assets/qa-expanded-150.json`）
+- [ ] target-side reader checkpoint 保存/加载与 vLLM/SGLang serving 适配
 - [x] CI 改用 uv 管理依赖与测试（`uv sync --all-groups` + `uv run ruff/pytest`）
 - [x] pre-commit 已配置（ruff）
 - [ ] CP/后训练正式消融与 100 tok/s 推理闭环
+
+## 推理 / Serving 现状与规划（2026-09-01）
+
+### 当前推理现状
+
+- 当前 `run_phase0.py --qa-exact-match` 仍是 **Transformers 手动逐 token forward**。
+- 未使用 vLLM / SGLang，也没有 KV cache / continuous batching。
+- 因此 150 题规模 QA 会比较慢，主要瓶颈是重复 forward + 每步 EngramDB fetch。
+
+### EngramDB 已有的 vLLM / SGLang 适配
+
+EngramDB 仓库中已有：
+
+```text
+engramdb/vllm_plugin.py     DiskPleEmbedding + patch_model_class_ple
+engramdb/sglang.py          install_sglang_ple + IoUringReader
+engramdb/vllm.py            fetch_e_t_tensor / PleDiskGather
+```
+
+但这些适配主要面向：
+
+```text
+源模型 / 源 PLE embedding 表（Qwen3.8-Flash-Next、Gemma 风格）
+→ 把 nn.Embedding 换成 EngramDB 磁盘表
+```
+
+**不能直接覆盖我们的 target-side reader**：
+
+```text
+Qwen3.5 backbone
+  + OfficialSourceQwenReader
+  + 每步用 [T,16] rowids 取 e_t
+  + 注入到 layer 8
+```
+
+### qwen35-ple 侧需要做的工程
+
+1. `run_phase0.py` 支持保存 / 加载训练后的 target-side reader checkpoint。
+2. 建立 `reader_registry`，以支持 reader 结构持续演进：
+   - `official_source_qwen_v1`
+   - future：dual-layer / multi-layer / LoRA
+3. 定义统一 bundle：
+   - backbone 路径
+   - PLE table 描述
+   - reader config + checkpoint
+4. 写 vLLM / SGLang 薄适配层：
+   - 加载 bundle
+   - 包装 Qwen3.5 layer 8
+   - 从 EngramDB 公共 API 增量取 e_t
+5. no-reader 基线可先直接用 vLLM / SGLang 加速。
+
+### 已完成的后续数据准备
+
+- 已生成扩大 QA 集：
+  ```text
+  assets/qa-expanded-150.json
+  50 TriviaQA-style + 50 NQ + 50 BoolQ
+  ```
+
+### 相关协调
+
+- EngramDB 内部改动由另一个 agent 独立开发。
+- engram-peft 1.2.7 发布由另一个 agent 负责，不阻塞 qwen35-ple 当前开发。
+
 
 ## 实验方法与当前结论（2026-08-30）
 

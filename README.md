@@ -214,6 +214,25 @@ WSL 真表初测：
 - 100k Store-P 懒加载：781 窗口，约 1.9s
 - 1M Store-P 懒加载：7812 窗口，约 23.9s
 
+Access-order A/B 基准（V136 起步）：
+
+```bash
+PYTHONPATH=src:../EngramDB/python \
+python scripts/bench_access_order.py \
+    --view /tmp/corpus.view \
+    --slot-indices-npy /tmp/corpus.slot_indices.npy \
+    --tokens 100000 --seq-len 128 --step 128 --reps 3 \
+    --csv /tmp/access-order.csv
+```
+
+WSL 复现环境脚本（V131）：
+
+```bash
+bash scripts/wsl_repro.sh
+# 或完整测试：
+bash scripts/wsl_repro.sh --full
+```
+
 #### Access-order Store-P 语义视图（P0 起步）
 
 构建一个“语料 access-order Store-P 视图”：

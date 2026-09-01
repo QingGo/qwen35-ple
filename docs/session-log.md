@@ -1649,5 +1649,34 @@ WSL Store-P 1000 tokens, 6 windows, workers=2: wall 0.145s, fetch_total 0.039s
 - P2：serving / Arrow / 连接池深化。
 - P3：全表 Store-P + 三仓同步 + 发布。
 
+## Session 35（第二十一轮：v0.2.11 + 系统性思考）
+
+### 1. 本轮完成
+
+- [x] `SlotIndex` 完成：通用 rowid-tuple → Store-P slot 语义索引。
+- [x] `LiveETViewStore(access_order=True)` / `LiveETDataset(access_order=True)` 完成自动访问序调度。
+- [x] 构建器自动输出 `.slot_index.npz` 并更新 manifest。
+- [x] `run_phase0 --store-p-slot-index` / `--access-order`、`bench_lazy_windows`、`bench_store_vs_view` 接入。
+- [x] 新增 6 个测试；qwen35-ple 全量 `25 passed, 11 skipped`。
+- [x] EngramDB v0.2.11 发布并推送 tag。
+
+### 2. 本轮技术债
+
+- V133 SlotIndex 全表扩展性不足（纯内存二进制索引）
+- V134 SlotIndex 两仓重复实现
+- V135 EngramDB CLI 未原生输出 slot index
+- V136 access-order 调度缺 A/B 门禁
+- V137 numpy 依赖/降级语义
+- V138 `access_order` 窗口重排语义需独立建模
+- V139 两仓缺 cross-repo contract test
+
+### 3. 下一阶段
+
+- Phase A：真实模型 1M real/control/3-seed（最高优先）。
+- Phase B：SlotIndex 统一到 EngramDB canonical + 磁盘化 + CLI manifest。
+- Phase C：access-order/懒加载基准门禁 + WSL 复现 + golden。
+- Phase D：serving/Arrow/全表 Store-P。
+- Phase E：依赖/跨仓治理。
+
 
 

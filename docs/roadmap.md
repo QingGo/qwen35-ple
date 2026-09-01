@@ -268,3 +268,36 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 2. P1：性能门禁 + WSL 复现 + golden 对齐。
 3. P2：serving / Arrow / 连接池深化。
 4. P3：全表 Store-P + 三仓同步 + 发布。
+
+---
+
+## 10. 2026-09-01 第二十一轮系统性思考（Session 35）
+
+> 完整版见 EngramDB `docs/roadmap.md` Section 25 与本仓 `docs/session-log.md`。
+
+### 10.1 本轮坐标
+
+- ✅ v0.2.11 已发布。
+- ✅ V123/V124 P0 语义索引和访问序调度代码完成。
+- ✅ qwen35-ple 全量测试 25 passed / 11 skipped。
+- ⚠️ V125 真实模型实验仍是最大科学缺口。
+
+### 10.2 本仓新增/关注技术债
+
+| # | 债 |
+|---|---|
+| V133 | SlotIndex 全表 320M 无法纯内存承载 |
+| V134 | SlotIndex 在 EngramDB 与 qwen 两仓重复实现 |
+| V135 | `engramdb view build` 尚未原生生成 slot index |
+| V136 | access-order 调度缺正式 A/B 与门禁 |
+| V137 | numpy 依赖/降级语义未完全理清 |
+| V138 | `LiveETDataset(access_order=True)` 窗口重排对顺序敏感实验需单独建模 |
+| V139 | 两仓 SlotIndex 无 cross-repo contract test |
+
+### 10.3 下一阶段
+
+1. Phase A：跑通真实模型 1M real/control/3-seed，形成 Go/No-Go。
+2. Phase B：SlotIndex 统一到 EngramDB canonical + 磁盘化 + `engramdb view build` 原生输出。
+3. Phase C：access-order 基准门禁 + WSL 复现 + golden。
+4. Phase D：serving / Arrow / 全表 Store-P。
+5. Phase E：依赖与跨仓治理。

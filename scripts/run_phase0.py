@@ -27,6 +27,7 @@ import json
 import math
 import os
 import random
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -368,6 +369,14 @@ class _QAEtStore:
         self.store.close()
 
 
+def _normalize_answer(text: str) -> str:
+    """Lightweight SQuAD-style normalization for exact-match scoring."""
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9 ]", " ", text)
+    words = [w for w in text.split() if w not in {"a", "an", "the"}]
+    return " ".join(words)
+
+
 def _qa_exact_match(
     model,
     tokenizer,
@@ -413,7 +422,7 @@ def _qa_exact_match(
                 ids.append(next_id)
 
         generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
-        hit = item["answer"].lower() in generated_text.lower()
+        hit = _normalize_answer(item["answer"]) in _normalize_answer(generated_text)
         answers.append(
             {
                 "task": item["task"],

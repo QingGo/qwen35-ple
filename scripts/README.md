@@ -21,7 +21,7 @@
 | `run_ple_adapter.py` | 冻结 Qwen3.5 + 预计算 `e_t` 的 Engram-style reader，支持 layer/branches/short_conv |
 | `run_full_matrix.sh` | 完整实验矩阵批处理：layer × branches × short_conv × real/control |
 | `run_engramdb_v028_smoke.py` | EngramDB v0.2.8 消费冒烟：rowid / discover_ple / weight_scale / Store e_t / View |
-| `run_phase0.py` | Phase 0 三线实验基座：train/val 分割、多 seed、no-reader/real/control、最小 QA log-likelihood |
+| `run_phase0.py` | Phase 0 三线实验基座：train/val 分割、多 seed、no-reader/real/control、QA log-likelihood + exact-match 生成式评测 |
 | `run_phase0.sh` | Phase 0 一条命令 wrapper（自动处理本机兼容 PYTHONPATH）|
 | `run_live_vs_precomputed.py` | Phase 1 gate：live DiskPleNGramEmbedding 与当前 fetch_e_t 数值一致性 |
 | `qwen4_ple_custom_loader.py` | Phase B：官方 Qwen4Exp 模型加载时跳过 ngram shard，并安装磁盘 PLE adapter（支持 dry-run） |

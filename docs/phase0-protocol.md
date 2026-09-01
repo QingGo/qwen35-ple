@@ -28,12 +28,18 @@
 - 每个 seed 独立初始化 reader、独立随机训练窗口、独立 control 排列。
 - 汇总输出 `mean ± std`。
 
-### 1.4 最小 QA 信号
+### 1.4 QA 信号（双口径）
 
-- 默认包含 TriviaQA / NQ / BoolQ 风格的小型题目。
-- 当前口径为 **答案 token 的平均 log-likelihood / loss**，不是 exact-match。
-- 低 loss = 模型更可能生成该答案。
-- Phase 1 接入 live reader 后再补 exact-match / 生成式评测。
+默认包含 TriviaQA / NQ / BoolQ 风格的小型题目。支持两种口径：
+
+1. **log-likelihood（`--qa`）**
+   - 计算答案 token 的平均 loss。
+   - 低 loss = 模型更可能生成该答案。
+2. **exact-match（`--qa-exact-match`）**
+   - 用贪心生成逐 token 解码，检查生成文本中是否出现标准答案。
+   - real/control 在每一步都会重新读取当前 token 序列的 PLE `e_t` 并注入 reader。
+   - no-reader 走同一条贪心生成循环，但不注入 PLE。
+   - 可用 `--qa-file` 传入外部 JSON 题目列表。
 
 ---
 
@@ -62,6 +68,8 @@ python scripts/run_phase0.py \
   --seeds 0 1 2 \
   --modes no-reader real control \
   --qa \
+  --qa-exact-match \
+  --qa-max-new-tokens 16 \
   --output outputs/phase0.json
 ```
 
@@ -130,6 +138,7 @@ Phase 0 只负责建立可信协议；科学判定在 Phase 2 的 1M–5M token 
 - [x] Phase 0 PPL 三线 + 多 seed harness：`scripts/run_phase0.py`
 - [x] 一条命令 wrapper：`scripts/run_phase0.sh`
 - [x] 最小 QA log-likelihood：TriviaQA / NQ / BoolQ 风格
+- [x] QA exact-match 生成式评测：`--qa-exact-match`（含 live PLE 逐步注入）
 - [x] 本地 smoke 已跑通（1 seed / 1 step / no-reader + real）
 - [x] `QwenEngramReader`（忠实官方/engram-peft 风格 gating）已加入 `src/qwen35_ple/reader.py`
 - [x] Phase 1 live-precomputed 数值一致性 gate 已通过（`run_live_vs_precomputed.py` 当前路径 max_abs_diff=0）

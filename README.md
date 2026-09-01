@@ -434,4 +434,4 @@ control − no-reader = −0.1158
 - 1M 下 real 稳定且明显优于 control：3 seeds 全部 positive。
 - real 也超过 no-reader baseline。
 - 说明“Qwen3.8 PLE 记忆表 + target-side reader”方向已出现较强正信号。
-- 下一步：补 QA exact-match，然后上云跑 5M 正式矩阵。
+- 1M exact-match QA 评测入口已加入（`--qa-exact-match`），下一步在 WSL/GPU 上跑 1M QA，然后上云跑 5M 正式矩阵。

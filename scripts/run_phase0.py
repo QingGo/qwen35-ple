@@ -34,6 +34,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from qwen35_ple.live_store import LiveETStore, LiveETViewStore
 from qwen35_ple.reader import (
     EngramReader,
     OfficialSourceQwenReader,
@@ -42,8 +43,6 @@ from qwen35_ple.reader import (
     install_reader_hook,
 )
 from qwen35_ple.real_ple import resolve_ple_weight_scale
-from qwen35_ple.live_store import LiveETStore, LiveETViewStore
-
 
 DEFAULT_QA = [
     {"task": "triviaqa", "question": "What is the capital of France?", "answer": "Paris"},
@@ -67,12 +66,12 @@ def _install_torch_compat() -> None:
         if not hasattr(torch, name):
             setattr(torch, name, getattr(torch, alias))
     if not hasattr(torch, "get_default_device"):
-        torch.get_default_device = lambda: torch.device("cpu")  # noqa: E731
+        torch.get_default_device = lambda: torch.device("cpu")
     if not hasattr(torch, "set_default_device"):
-        torch.set_default_device = lambda device: None  # noqa: E731
+        torch.set_default_device = lambda device: None
     _orig = torch.is_autocast_enabled
 
-    def _autocast(device_type=None):  # noqa: ANN001, ANN202
+    def _autocast(device_type=None):
         return _orig()
 
     torch.is_autocast_enabled = _autocast
@@ -93,6 +92,7 @@ def _install_torch_compat() -> None:
         torch.nn.RMSNorm = _RMSNorm
 
     import typing
+
     import typing_extensions
     if not hasattr(typing, "override"):
         typing.override = typing_extensions.override
@@ -106,6 +106,11 @@ def _load_model(model_path: str, device: str = "cpu"):
     model = AutoModelForCausalLM.from_pretrained(
         model_path, local_files_only=True, dtype=torch.float32
     )
+    # Newer Transformers releases may still load the checkpoint in its original
+    # bf16 dtype even when dtype=float32 is requested.  Our reader and eval
+    # path currently assume float32 on CPU/GPU, so force a consistent dtype.
+    if next(model.parameters()).dtype != torch.float32:
+        model = model.to(torch.float32)
     model.eval()
     if device != "cpu":
         model = model.to(device)
@@ -132,7 +137,7 @@ def _load_features(feature_dir: Path, model_dir: str, scale: float | None):
 
 def _split(tokens: np.ndarray, e_t: Any, val_frac: float):
     cut = int(len(tokens) * (1.0 - val_frac))
-    if hasattr(e_t, "view"):
+    if hasattr(e_t, "view") and not isinstance(e_t, np.ndarray):
         return (tokens[:cut], e_t.view(0, cut)), (tokens[cut:], e_t.view(cut, len(tokens) - cut))
     train = (tokens[:cut], e_t[:cut])
     val = (tokens[cut:], e_t[cut:])
@@ -297,6 +302,137 @@ def _qa_loglik(model, tokenizer, items: list[dict], control: bool, seed: int) ->
     return {"metrics": metrics, "answers": answers}
 
 
+def _load_qa_file(path: str | Path | None) -> list[dict]:
+    """Load a QA file that matches the Phase 0 default schema."""
+    if path is None:
+        return list(DEFAULT_QA)
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise TypeError("--qa-file must be a JSON list of {question, answer} items")
+    out = []
+    for item in data:
+        if "question" not in item or "answer" not in item:
+            raise ValueError("each --qa-file item must contain 'question' and 'answer'")
+        out.append(
+            {
+                "task": str(item.get("task", "qa")),
+                "question": str(item["question"]),
+                "answer": str(item["answer"]),
+            }
+        )
+    return out
+
+
+class _QAEtStore:
+    """Persistent EngramDB reader for arbitrary QA-token sequences.
+
+    This is used by the exact-match generation path.  It opens the Store once
+    and fetches the PLE rows for the currently generated token sequence on every
+    decoding step, so we can inject e_t for both the prompt and generated
+    tokens without materializing a full e_t array.
+    """
+
+    def __init__(self, rows_dir: str, scale: float) -> None:
+        import engramdb
+
+        from qwen35_ple.real_ple import real_spec
+
+        spec = real_spec()
+        self.store = engramdb.Store(
+            rows_dir,
+            shards=spec.shards,
+            rows_per_shard=spec.rows_per_shard,
+            width=160,
+        )
+        self.scale = float(scale)
+
+    def fetch(self, ids: list[int] | np.ndarray) -> np.ndarray:
+        import engramdb
+
+        from qwen35_ple.real_ple import rowids_from_tokens
+
+        rowids = rowids_from_tokens(np.asarray(ids, dtype=np.int64))
+        arr = engramdb.fetch_e_t_tensor(
+            self.store,
+            rowids.reshape(-1).tolist(),
+            scale=self.scale,
+            num_heads=16,
+            head_dim=160,
+            dtype=None,
+            out_dtype=None,
+        )
+        return arr.reshape(len(ids), 2560).numpy()
+
+    def close(self) -> None:
+        self.store.close()
+
+
+def _qa_exact_match(
+    model,
+    tokenizer,
+    items: list[dict],
+    qa_store: _QAEtStore | None,
+    control: bool,
+    seed: int,
+    max_new_tokens: int,
+) -> dict:
+    """Greedy exact-match QA generation with live PLE injection.
+
+    For real/control, every decoding step fetches the e_t rows for the current
+    token sequence and injects them through the installed reader hook.  For
+    no-reader, ``qa_store`` is None and the same greedy loop runs without PLE.
+    """
+    device = next(model.parameters()).device
+    eos_id = tokenizer.eos_token_id
+    answers: list[dict] = []
+    per_task_correct: dict[str, list[bool]] = {}
+
+    for idx, item in enumerate(items):
+        qids = tokenizer.encode(item["question"], add_special_tokens=False)
+        ids = list(qids)
+        generated_ids: list[int] = []
+        with torch.no_grad():
+            for _ in range(max_new_tokens):
+                if qa_store is not None:
+                    et_np = qa_store.fetch(ids)
+                    if control:
+                        rng = np.random.default_rng(seed * 1000 + idx)
+                        et_np = et_np[rng.permutation(len(et_np))]
+                    model._current_ple_e_t = (
+                        torch.from_numpy(et_np[None, :]).float().to(device)
+                    )
+                else:
+                    model._current_ple_e_t = None
+                out = model(input_ids=torch.tensor([ids], dtype=torch.long, device=device))
+                logits = out.logits
+                next_id = int(torch.argmax(logits[0, -1]).item())
+                if eos_id is not None and next_id == eos_id:
+                    break
+                generated_ids.append(next_id)
+                ids.append(next_id)
+
+        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        hit = item["answer"].lower() in generated_text.lower()
+        answers.append(
+            {
+                "task": item["task"],
+                "question": item["question"],
+                "answer": item["answer"],
+                "generated": generated_text,
+                "correct": hit,
+            }
+        )
+        per_task_correct.setdefault(item["task"], []).append(hit)
+
+    metrics: dict[str, float] = {}
+    for task, hits in sorted(per_task_correct.items()):
+        metrics[f"qa_{task}_em"] = float(np.mean(hits))
+    all_hits = [a["correct"] for a in answers]
+    metrics["qa_em_mean"] = float(np.mean(all_hits)) if all_hits else float("nan")
+    metrics["qa_n"] = float(len(all_hits))
+    return {"metrics": metrics, "answers": answers}
+
+
 def _run_mode(
     args,
     model,
@@ -308,16 +444,30 @@ def _run_mode(
     mode: str,
     seed: int,
     qa_items,
+    qa_exact_items,
+    qa_store,
 ):
     if mode == "no-reader":
         val_loss = _window_loss(model, val_tokens, val_e_t, args.seq_len)
         qa = _qa_loglik(model, tokenizer, qa_items, control=False, seed=seed) if args.qa else None
+        qa_exact = None
+        if args.qa_exact_match:
+            qa_exact = _qa_exact_match(
+                model,
+                tokenizer,
+                qa_exact_items,
+                None,
+                control=False,
+                seed=seed,
+                max_new_tokens=args.qa_max_new_tokens,
+            )
         return {
             "mode": mode,
             "seed": seed,
             "val_loss": val_loss,
-            "val_ppl": math.exp(val_loss) if val_loss == val_loss else None,
+            "val_ppl": math.exp(val_loss) if math.isfinite(val_loss) else None,
             "qa": qa,
+            "qa_exact": qa_exact,
         }
 
     torch.manual_seed(seed)
@@ -392,15 +542,28 @@ def _run_mode(
             seed=seed,
         )
 
+    qa_exact = None
+    if args.qa_exact_match:
+        qa_exact = _qa_exact_match(
+            model,
+            tokenizer,
+            qa_exact_items,
+            qa_store,
+            control=(mode == "control"),
+            seed=seed,
+            max_new_tokens=args.qa_max_new_tokens,
+        )
+
     handle.remove()
     return {
         "mode": mode,
         "seed": seed,
         "val_loss": val_loss,
-        "val_ppl": math.exp(val_loss) if val_loss == val_loss else None,
+        "val_ppl": math.exp(val_loss) if math.isfinite(val_loss) else None,
         "train_losses": train_losses,
         "train_final_loss": train_losses[-1] if train_losses else None,
         "qa": qa,
+        "qa_exact": qa_exact,
     }
 
 
@@ -408,13 +571,24 @@ def _summarize(results: list[dict], modes: list[str]) -> dict:
     summary = {}
     for mode in modes:
         vals = [r["val_loss"] for r in results if r["mode"] == mode and np.isfinite(r["val_loss"])]
-        summary[mode] = {
+        qa_vals = [
+            r["qa_exact"]["metrics"]["qa_em_mean"]
+            for r in results
+            if r["mode"] == mode
+            and r.get("qa_exact") is not None
+            and np.isfinite(r["qa_exact"]["metrics"]["qa_em_mean"])
+        ]
+        entry: dict[str, Any] = {
             "n_seeds": len(vals),
             "val_loss_mean": float(np.mean(vals)) if vals else None,
             "val_loss_std": float(np.std(vals)) if vals else None,
             "val_ppl_mean": float(np.exp(np.mean(vals))) if vals else None,
             "details": [r for r in results if r["mode"] == mode],
         }
+        if qa_vals:
+            entry["qa_em_mean"] = float(np.mean(qa_vals))
+            entry["qa_em_std"] = float(np.std(qa_vals))
+        summary[mode] = entry
     return summary
 
 
@@ -456,6 +630,17 @@ def main() -> int:
         default=["no-reader", "real", "control"],
     )
     parser.add_argument("--qa", action="store_true", help="run minimal QA log-likelihood probes")
+    parser.add_argument(
+        "--qa-exact-match",
+        action="store_true",
+        help="run greedy exact-match QA generation with live PLE injection",
+    )
+    parser.add_argument("--qa-max-new-tokens", type=int, default=16)
+    parser.add_argument(
+        "--qa-file",
+        default=None,
+        help="optional JSON list of {question, answer, task} for exact-match QA",
+    )
     parser.add_argument("--output", default="outputs/phase0.json")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
     args = parser.parse_args()
@@ -588,6 +773,17 @@ def main() -> int:
             seed=0,
         )
 
+    qa_exact_items = None
+    qa_store = None
+    if args.qa_exact_match:
+        qa_exact_items = _load_qa_file(args.qa_file)
+        print(
+            f"[phase0] preparing exact-match QA: {len(qa_exact_items)} items, "
+            f"max_new_tokens={args.qa_max_new_tokens}"
+        )
+        if any(mode != "no-reader" for mode in args.modes):
+            qa_store = _QAEtStore(args.rows_dir, applied_scale)
+
     all_results = []
     for seed in args.seeds:
         print(f"=== seed {seed} ===")
@@ -608,6 +804,8 @@ def main() -> int:
                 mode,
                 seed,
                 qa_items,
+                qa_exact_items,
+                qa_store,
             )
             if live_store_handle is not None:
                 stats = getattr(live_store_handle, "stats", None)
@@ -656,6 +854,10 @@ def main() -> int:
             "seeds": args.seeds,
             "modes": args.modes,
             "weight_scale": applied_scale,
+            "qa": bool(args.qa),
+            "qa_exact_match": bool(args.qa_exact_match),
+            "qa_max_new_tokens": args.qa_max_new_tokens,
+            "qa_file": args.qa_file,
         },
         "summary": summary,
         "results": all_results,
@@ -667,6 +869,9 @@ def main() -> int:
         encoding="utf-8",
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
+    if qa_store is not None:
+        qa_store.close()
+        print("[phase0] QA store closed")
     if live_store_handle is not None:
         live_store_handle.close()
         print("[phase0] live-store closed")

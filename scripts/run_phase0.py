@@ -6,7 +6,8 @@ This script establishes the reproducible Phase 0 protocol:
 * fixed train/val split (no validation leakage)
 * three arms: no-reader baseline, real PLE reader, shuffled control reader
 * 3+ seeds with aggregate mean/std
-* optional minimal QA log-likelihood probes (TriviaQA / NQ / BoolQ style)
+* optional QA probes: log-likelihood (`--qa`) and greedy exact-match generation
+  (`--qa-exact-match`, with live PLE injection for real/control)
 * one command can run the whole matrix
 
 Usage:
@@ -16,7 +17,7 @@ Usage:
         --features data/ple-adapter-features-20k \
         --steps 20 --seq-len 128 --seeds 0 1 2 \
         --modes no-reader real control \
-        --qa --output outputs/phase0.json
+        --qa --qa-exact-match --output outputs/phase0.json
 """
 
 from __future__ import annotations

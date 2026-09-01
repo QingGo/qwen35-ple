@@ -300,3 +300,13 @@ except Exception:  # pragma: no cover
 
 if _EngramDBSlotIndex is not None:  # pragma: no cover
     SlotIndex = _EngramDBSlotIndex  # type: ignore[assignment]
+
+try:  # pragma: no cover - exercised only when engramdb is installed
+    from engramdb import DiskSlotIndex as _EngramDiskSlotIndex
+except Exception:  # pragma: no cover
+    _EngramDiskSlotIndex = None
+
+if _EngramDiskSlotIndex is not None:  # pragma: no cover
+    DiskSlotIndex = _EngramDiskSlotIndex  # type: ignore[assignment]
+else:
+    DiskSlotIndex = None  # type: ignore[assignment]

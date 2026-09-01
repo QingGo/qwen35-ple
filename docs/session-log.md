@@ -1678,5 +1678,24 @@ WSL Store-P 1000 tokens, 6 windows, workers=2: wall 0.145s, fetch_total 0.039s
 - Phase D：serving/Arrow/全表 Store-P。
 - Phase E：依赖/跨仓治理。
 
+## Phase A 完成（WSL 实机）
+
+已在 WSL 上验证真实模型 1M real/control/3-seed：
+
+| Arm | val_loss | val_ppl |
+|---|---:|---:|
+| no-reader | 2.9896 | 19.88 |
+| real | 2.8167 | 16.72 |
+| control | 2.8738 | 17.70 |
+
+结论：
+
+- real < control < no-reader。
+- real 比 control 好约 2%，比 no-reader 好约 5.8%。
+- 方差小，3 seeds 稳定。
+- 建议 Go，进入 5M–20M 放大阶段。
+
+详细结果见 `docs/phase-a-1m-result.md`。
+
 
 

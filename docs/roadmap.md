@@ -281,7 +281,7 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - ✅ V123/V124 P0 语义索引和访问序调度代码完成。
 - ✅ qwen35-ple 全量测试 34 passed / 7 skipped。
 - ✅ DiskSlotIndex / access-order CI / 全表批式构建工具已推进。
-- ⚠️ V125 真实模型实验仍是最大科学缺口。
+- ✅ V125 真实模型 1M real/control/3-seed 已在 WSL 完成，结果见 `docs/phase-a-1m-result.md`。
 
 ### 10.2 本仓新增/关注技术债
 
@@ -297,8 +297,8 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 
 ### 10.3 下一阶段
 
-1. Phase A：跑通真实模型 1M real/control/3-seed，形成 Go/No-Go。
-2. Phase B：SlotIndex 统一到 EngramDB canonical + 磁盘化 + `engramdb view build` 原生输出。
-3. Phase C：access-order 基准门禁 + WSL 复现 + golden。
+1. ✅ Phase A：真实模型 1M real/control/3-seed 已完成，结论为 Go，建议继续到 5M–20M。
+2. Phase B：SlotIndex 统一到 EngramDB canonical + 磁盘化 + `engramdb view build` 原生输出（已大部分完成）。
+3. Phase C：access-order 基准门禁 + WSL 复现 + golden（合成门禁已入 CI）。
 4. Phase D：serving / Arrow / 全表 Store-P。
 5. Phase E：依赖与跨仓治理。

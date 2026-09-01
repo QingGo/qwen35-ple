@@ -335,7 +335,7 @@ class LiveETViewStore:
     def __len__(self) -> int:
         return len(self.slot_indices)
 
-    def view(self, start: int = 0, length: int | None = None) -> "LiveETViewStore":
+    def view(self, start: int = 0, length: int | None = None) -> LiveETViewStore:
         n = len(self.slot_indices)
         if length is None:
             length = n - start

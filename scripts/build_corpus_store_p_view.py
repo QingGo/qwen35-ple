@@ -58,6 +58,7 @@ def main() -> int:
     parser.add_argument("--engramdb-bin", default="engramdb")
     parser.add_argument("--slot-bytes", type=int, default=2560)
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--stream", action="store_true", help="use engramdb view build --keys-stream (CLI streams keys file)")
     parser.add_argument("--keep-temp-keys", action="store_true")
     parser.add_argument("--max-tokens", type=int, default=None)
     args = parser.parse_args()
@@ -93,6 +94,7 @@ def main() -> int:
         view_path = Path(args.output_view)
         view_path.parent.mkdir(parents=True, exist_ok=True)
 
+        key_arg = "--keys-stream" if args.stream else "--keys"
         cmd = [
             args.engramdb_bin,
             "view",
@@ -101,7 +103,7 @@ def main() -> int:
             str(n),
             str(view_path),
             str(keys_out),
-            "--keys",
+            key_arg,
             str(keys_in),
             "--slot",
             str(args.slot_bytes),

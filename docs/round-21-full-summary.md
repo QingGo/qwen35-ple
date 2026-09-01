@@ -113,6 +113,7 @@ WSL 1M real/control/no-reader，3 seeds：
 - [x] access-order + lazy synthetic CI gates
 - [x] cross-repo contract tests
 - [x] CI 本地修复：ruff / pytest / synthetic gates
+- [x] CI 固定 engram-peft v1.2.6，临时解决 golden 漂移导致的全量 pytest 失败
 - [x] 系统性思考文档 Section 25/26、Session 35/36
 
 ---

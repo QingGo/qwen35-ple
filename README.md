@@ -429,9 +429,33 @@ real − no-reader = −0.1729
 control − no-reader = −0.1158
 ```
 
+#### 1M QA exact-match / 9题 / 3 seeds
+
+| 线 | QA EM mean | 3 seeds |
+|---|---:|---|
+| no-reader | 44.44% | 44.4 / 44.4 / 44.4 |
+| control | 48.15% | 44.4 / 33.3 / 66.7 |
+| **real** | **51.85%** | 66.7 / 44.4 / 44.4 |
+
+```text
+real − control = +3.70pp
+real − no-reader = +7.41pp
+control − no-reader = +3.70pp
+```
+
+分 task 均值（3 seeds 合并）：
+
+| task | no-reader | control | real |
+|---|---:|---:|---:|
+| TriviaQA | 100% | 77.8% | 100% |
+| NQ | 33.3% | 55.6% | 55.6% |
+| BoolQ | 0% | 11.1% | 0% |
+
 结论：
 
-- 1M 下 real 稳定且明显优于 control：3 seeds 全部 positive。
-- real 也超过 no-reader baseline。
-- 说明“Qwen3.8 PLE 记忆表 + target-side reader”方向已出现较强正信号。
-- 1M exact-match QA 评测入口已加入（`--qa-exact-match`），下一步在 WSL/GPU 上跑 1M QA，然后上云跑 5M 正式矩阵。
+- PPL 三线仍然是最强信号：real 稳定优于 control，且超过 no-reader。
+- QA exact-match 上也出现 real > control > no-reader 的平均排序：
+  - real − control = +3.70pp
+  - real − no-reader = +7.41pp
+- 但 QA 集只有 9 题，种子间波动大（real 2/3 seeds 超过 control，1 seed 被 control 反超），不能单独作为决定性证据。
+- 下一步仍然应该上 5M 正式矩阵，并把 QA 集扩大到标准 TriviaQA / NQ / BoolQ 子集。

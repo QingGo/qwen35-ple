@@ -144,7 +144,7 @@ control − no-reader = −0.1158
 
 | # | 技术债 | 影响 |
 |---|---|---|
-| 1 | 1M QA exact-match 未跑 | PPL 之外还需要知识类任务证据 |
+| 1 | 1M QA exact-match 已接入 harness，尚未在 WSL 跑正式结果 | PPL 之外还需要知识类任务证据 |
 | 2 | 5M token 正式实验未跑 | XMemTransfer 显示 5M 才是可比规模 |
 | 3 | dual-layer / multi-layer reader 未系统测试 | 可能进一步提升读取能力 |
 | 4 | reader + LoRA / 部分解冻未测 | 冻结 backbone 可能忽略信号 |

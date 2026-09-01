@@ -165,12 +165,29 @@ def main() -> int:
             t0 = time.perf_counter()
             proc = subprocess.run(disk_cmd, capture_output=True, text=True)
             if proc.returncode != 0:
-                print(proc.stdout)
-                print(proc.stderr)
-                raise SystemExit(
-                    f"engramdb slot-index build failed with {proc.returncode}"
+                print(proc.stdout.strip())
+                print(proc.stderr.strip())
+                print(
+                    "[build-view] native slot-index unavailable; trying "
+                    "Python DiskSlotIndex fallback"
                 )
-            print(proc.stdout.strip())
+                try:
+                    from qwen35_ple.slot_index import DiskSlotIndex as PyDisk
+                except Exception:  # noqa: BLE001 - optional dependency
+                    PyDisk = None
+                if PyDisk is None:
+                    raise SystemExit(
+                        f"engramdb slot-index build failed with {proc.returncode} "
+                        "and no Python DiskSlotIndex fallback"
+                    )
+                PyDisk.build_from_keys_file(
+                    keys_out,
+                    slot_index_dir,
+                    num_buckets=args.slot_index_buckets,
+                    hash_name="fnv1a-64",
+                )
+            else:
+                print(proc.stdout.strip())
             print(
                 f"[build-view] disk slot_index -> {slot_index_dir} "
                 f"({time.perf_counter() - t0:.2f}s)"

@@ -55,6 +55,9 @@ def main() -> int:
     parser.add_argument("--keys-out", default=None)
     parser.add_argument("--slot-indices-out", default=None)
     parser.add_argument("--slot-index-out", default=None)
+    parser.add_argument("--slot-index-dir", default=None)
+    parser.add_argument("--slot-index-buckets", type=int, default=16384)
+    parser.add_argument("--skip-slot-index-npz", action="store_true")
     parser.add_argument("--engramdb-bin", default="engramdb")
     parser.add_argument("--slot-bytes", type=int, default=2560)
     parser.add_argument("--verify", action="store_true")
@@ -136,8 +139,42 @@ def main() -> int:
         slot_index_out = Path(args.slot_index_out) if args.slot_index_out else (
             view_path.with_suffix(".slot_index.npz")
         )
-        SlotIndex.from_rowids(rowids, np.arange(n, dtype=np.int64)).save(slot_index_out)
-        print(f"[build-view] slot_index -> {slot_index_out}")
+        if args.skip_slot_index_npz:
+            print("[build-view] skipping in-memory slot_index.npz")
+        else:
+            SlotIndex.from_rowids(rowids, np.arange(n, dtype=np.int64)).save(slot_index_out)
+            print(f"[build-view] slot_index -> {slot_index_out}")
+
+        # Optional disk-backed index for full 320M-scale tables.  The native
+        # CLI streams the keys file and emits the Python-compatible v2 format,
+        # so this path does not need to hold the whole rowid matrix in RAM.
+        slot_index_dir = None
+        if args.slot_index_dir:
+            slot_index_dir = Path(args.slot_index_dir)
+            slot_index_dir.mkdir(parents=True, exist_ok=True)
+            disk_cmd = [
+                args.engramdb_bin,
+                "slot-index",
+                "build",
+                str(keys_out),
+                str(slot_index_dir),
+                "--buckets",
+                str(args.slot_index_buckets),
+            ]
+            print("[build-view] running:", " ".join(disk_cmd))
+            t0 = time.perf_counter()
+            proc = subprocess.run(disk_cmd, capture_output=True, text=True)
+            if proc.returncode != 0:
+                print(proc.stdout)
+                print(proc.stderr)
+                raise SystemExit(
+                    f"engramdb slot-index build failed with {proc.returncode}"
+                )
+            print(proc.stdout.strip())
+            print(
+                f"[build-view] disk slot_index -> {slot_index_dir} "
+                f"({time.perf_counter() - t0:.2f}s)"
+            )
 
         if args.keys_out:
             print(f"[build-view] keys_out -> {keys_out}")
@@ -145,8 +182,11 @@ def main() -> int:
         manifest_path = view_path.with_suffix(".manifest.json")
         if manifest_path.exists():
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["slot_index"] = str(slot_index_out)
+            if not args.skip_slot_index_npz:
+                manifest["slot_index"] = str(slot_index_out)
             manifest["slot_indices"] = str(slot_out)
+            if slot_index_dir is not None:
+                manifest["slot_index_disk"] = str(slot_index_dir)
             manifest_path.write_text(
                 json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
                 encoding="utf-8",

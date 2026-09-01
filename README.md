@@ -100,6 +100,9 @@ uv sync --all-groups
 
 # 冒烟: 依赖可导入
 uv run python -c "import engram_peft, engramdb, qwen35_ple; print('ok')"
+
+# 本地提交前 lint 钩子
+uv run pre-commit install
 ```
 
 ## 目录结构
@@ -128,6 +131,10 @@ tests/            一致性冒烟测试（golden 对拍）
 - [x] live-store 直接读取（`run_phase0.py --live-store`，无需 10GB `e_t.npy`）
 - [x] 真实 PLE 知识探针（线性分类 72.7% vs 16.7%）
 - [x] XMemTransfer 风格 reader 完整实验矩阵
+- [x] 官方 Qwen PLE reader 权重复用（`OfficialSourceQwenReader` + 可切换 MLP bridge/out_proj）
+- [x] 1M token live-store 懒加载三线实验（real / control / no-reader）
+- [x] CI 改用 uv 管理依赖与测试（`uv sync --all-groups` + `uv run ruff/pytest`）
+- [x] pre-commit 已配置（ruff）
 - [ ] CP/后训练正式消融与 100 tok/s 推理闭环
 
 ## 实验方法与当前结论（2026-08-30）
@@ -335,3 +342,43 @@ bash scripts/run_full_matrix.sh
 - 但最佳 real 仍高于 no-reader baseline。
 - 当前最佳为 `layer=8, branches=1, short_conv=off`。
 - 下一步应降低初始扰动、延长训练、换知识评测，或直接使用官方 Qwen PLE gating 结构。
+
+### 4. 官方 PLE reader + MLP bridge/out_proj（最新结果）
+
+使用 `OfficialSourceQwenReader`，复用 Qwen3.8 官方 PLE key/value/norm/conv，
+只训练：
+
+- `query_bridge`：Qwen3.5 hidden → Qwen3.8 source query 空间
+- `out_proj`：source PLE output → Qwen3.5 hidden
+
+支持 1 层线性或 2 层 MLP。
+
+#### 160k / 500 steps / 3 seeds
+
+| 线 | val loss | 结论 |
+|---|---:|---|
+| real | 3.69394 | 3 seeds 均优于 control |
+| control | 3.70218 | — |
+
+#### 1M tokens / live-store / 500 steps / 3 seeds
+
+| 线 | val loss | PPL |
+|---|---:|---:|
+| no-reader | 2.9896 | 19.88 |
+| control | 2.8738 | 17.70 |
+| **real** | **2.8167** | **16.72** |
+
+关键差距：
+
+```text
+real − control = −0.0571
+real − no-reader = −0.1729
+control − no-reader = −0.1158
+```
+
+结论：
+
+- 1M 下 real 稳定且明显优于 control：3 seeds 全部 positive。
+- real 也超过 no-reader baseline。
+- 说明“Qwen3.8 PLE 记忆表 + target-side reader”方向已出现较强正信号。
+- 下一步：补 QA exact-match，然后上云跑 5M 正式矩阵。

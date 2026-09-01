@@ -64,6 +64,15 @@ class FetchStats:
     def as_dict(self) -> dict[str, float | int]:
         return asdict(self)
 
+    def reset(self) -> None:
+        """Zero all counters in-place so existing view objects stay in sync."""
+        self.windows = 0
+        self.tokens = 0
+        self.rows = 0
+        self.unique_rows = 0
+        self.fetch_seconds = 0.0
+        self.cache_hits = 0
+
     def merge(self, other: FetchStats) -> None:
         self.windows += other.windows
         self.tokens += other.tokens
@@ -187,7 +196,10 @@ class LiveETStore:
         return result
 
     def reset_stats(self) -> None:
-        self.stats = FetchStats()
+        if hasattr(self.stats, "reset"):
+            self.stats.reset()
+        else:
+            self.stats = FetchStats()
 
     def view(self, start: int = 0, length: int | None = None) -> LiveETView:
         n = len(self.rowids)
@@ -508,8 +520,11 @@ class LiveETViewStore:
         )
 
     def reset_stats(self) -> None:
-        """Reset fetch telemetry before an experiment arm/seed."""
-        self.stats = FetchStats()
+        """Reset fetch telemetry in-place so existing views stay in sync."""
+        if hasattr(self.stats, "reset"):
+            self.stats.reset()
+        else:
+            self.stats = FetchStats()
 
     def close(self) -> None:
         if not self._closed:

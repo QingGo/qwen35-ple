@@ -231,9 +231,10 @@ def test_live_et_view_store_reads_padded_or_raw_slots() -> None:
         out = view.get(0, 2)
         assert out.shape == (2, rec_len)
         assert view.stats.windows == 1
+        sub = view.view(1, 2)
         view.reset_stats()
         assert view.stats.windows == 0
-        sub = view.view(1, 2)
+        assert sub.stats.windows == 0
         assert len(sub) == 2
         sub_out = sub.get(0, 2)
         assert sub_out.shape == (2, rec_len)

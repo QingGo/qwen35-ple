@@ -295,7 +295,7 @@ class SlotIndex:
 # without engramdb-python/numpy.
 try:  # pragma: no cover - exercised only when engramdb is installed
     from engramdb import SlotIndex as _EngramDBSlotIndex
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     _EngramDBSlotIndex = None
 
 if _EngramDBSlotIndex is not None:  # pragma: no cover
@@ -303,7 +303,7 @@ if _EngramDBSlotIndex is not None:  # pragma: no cover
 
 try:  # pragma: no cover - exercised only when engramdb is installed
     from engramdb import DiskSlotIndex as _EngramDiskSlotIndex
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     _EngramDiskSlotIndex = None
 
 if _EngramDiskSlotIndex is not None:  # pragma: no cover

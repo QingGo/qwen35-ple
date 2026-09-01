@@ -1631,12 +1631,12 @@ WSL Store-P 1000 tokens, 6 windows, workers=2: wall 0.145s, fetch_total 0.039s
 - [x] Store-P 多 worker。
 - [x] access-order Store-P builder + 语义验证。
 - [x] `run_phase0.py --store-p-view` 接入。
+- [x] V123 通用 rowid→slot 语义索引：`SlotIndex`、`--slot-index-out`、`run_phase0 --store-p-slot-index`。
+- [x] V124 自动访问序调度：`LiveETViewStore(access_order=True)` / `LiveETDataset(access_order=True)` / `run_phase0 --access-order`。
 
 ### 6. 未完成
 
-- V123 通用 rowid→slot 语义索引
-- V124 access-order 自动调度端到端
-- V125 完整模型 1M 三线实验
+- V125 完整模型 1M 三线实验（WSL/模型侧单独推进，已部分完成）
 - V126 WSL golden 漂移
 - V127 serving A/B
 - V128 懒加载门禁
@@ -1644,7 +1644,7 @@ WSL Store-P 1000 tokens, 6 windows, workers=2: wall 0.145s, fetch_total 0.039s
 
 ### 7. 下一阶段
 
-- P0：语义索引 + access-order + 真实模型 1M。
+- P0 剩余：真实模型 1M 三线实验。
 - P1：基准门禁 + WSL 复现 + golden。
 - P2：serving / Arrow / 连接池深化。
 - P3：全表 Store-P + 三仓同步 + 发布。

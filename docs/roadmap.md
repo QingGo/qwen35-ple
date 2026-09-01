@@ -245,14 +245,14 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 
 - 终极目标不变：磁盘优先的 PLE/Engram 记忆表基础设施。
 - Track A 已完成；Track B/C 完成了“读取基准”，但尚未完成“真实模型实验”。
-- 已确认 Store-P 是 WSL 随机 IO 的正确出路；但缺少 rowid→slot 语义映射和访问序调度。
+- 已确认 Store-P 是 WSL 随机 IO 的正确出路；已实现 rowid→slot 语义映射和访问序调度。
 - 已新增有限语料的 access-order Store-P builder：`scripts/build_corpus_store_p_view.py`。
-- 已让 `run_phase0.py --store-p-view` 可直接走 Store-P 训练路径。
+- 已让 `run_phase0.py --store-p-view` / `--store-p-slot-index` / `--access-order` 直接走 Store-P 训练路径。
 
 ### 9.2 新增技术债（V123–V132）
 
-- V123 rowid-tuple → Store-P slot 语义映射
-- V124 access-order 视图/调度
+- ~~V123 rowid-tuple → Store-P slot 语义映射~~ ✅ 已完成：`SlotIndex` + `--slot-index-out` + `run_phase0 --store-p-slot-index`
+- ~~V124 access-order 视图/调度~~ ✅ 已完成：`LiveETViewStore(access_order=True)` + `LiveETDataset(access_order=True)`
 - V125 真实模型 1M real/control/3-seed
 - V126 WSL golden 漂移
 - V127 serving A/B
@@ -264,7 +264,7 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 
 ### 9.3 下一阶段
 
-1. P0：语义映射 + access-order + 真实模型 1M 三线实验。
+1. P0 剩余：真实模型 1M 三线实验（WSL/模型侧单独推进，已部分完成）。
 2. P1：性能门禁 + WSL 复现 + golden 对齐。
 3. P2：serving / Arrow / 连接池深化。
 4. P3：全表 Store-P + 三仓同步 + 发布。

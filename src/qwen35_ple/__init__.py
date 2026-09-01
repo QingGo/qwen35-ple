@@ -14,6 +14,8 @@ from qwen35_ple.live_store import (
     LiveETViewStore,
 )
 
+from qwen35_ple.slot_index import SlotIndex
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -23,5 +25,6 @@ __all__ = [
     "LiveETStore",
     "LiveETView",
     "LiveETViewStore",
+    "SlotIndex",
     "__version__",
 ]

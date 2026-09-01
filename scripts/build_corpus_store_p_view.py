@@ -23,9 +23,10 @@ Usage:
 
 Outputs:
 
-    /tmp/corpus.view           Store-P view (2560-byte slots)
-    /tmp/corpus.keys           flat rowid keys used to build the view
-    /tmp/corpus.slot_indices.npy  arange(T), i.e. token -> view slot
+    /tmp/corpus.view                Store-P view (2560-byte slots)
+    /tmp/corpus.keys                flat rowid keys used to build the view
+    /tmp/corpus.slot_indices.npy    arange(T), i.e. token -> view slot
+    /tmp/corpus.slot_index.npz      generic rowid-tuple -> slot semantic index
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ from pathlib import Path
 import numpy as np
 
 from qwen35_ple.real_ple import resolve_ple_weight_scale, rowids_from_tokens
+from qwen35_ple.slot_index import SlotIndex
 
 
 def main() -> int:
@@ -52,6 +54,7 @@ def main() -> int:
     parser.add_argument("--output-view", required=True)
     parser.add_argument("--keys-out", default=None)
     parser.add_argument("--slot-indices-out", default=None)
+    parser.add_argument("--slot-index-out", default=None)
     parser.add_argument("--engramdb-bin", default="engramdb")
     parser.add_argument("--slot-bytes", type=int, default=2560)
     parser.add_argument("--verify", action="store_true")
@@ -125,14 +128,30 @@ def main() -> int:
         np.save(slot_out, np.arange(n, dtype=np.int64))
         print(f"[build-view] slot_indices -> {slot_out}")
 
+        # Generic rowid -> slot semantic index.  Even for an access-order view
+        # this makes the view usable by arbitrary later token streams (the
+        # same rowid tuple can be resolved to a representative physical slot).
+        slot_index_out = Path(args.slot_index_out) if args.slot_index_out else (
+            view_path.with_suffix(".slot_index.npz")
+        )
+        SlotIndex.from_rowids(rowids, np.arange(n, dtype=np.int64)).save(slot_index_out)
+        print(f"[build-view] slot_index -> {slot_index_out}")
+
         if args.keys_out:
             print(f"[build-view] keys_out -> {keys_out}")
 
         manifest_path = view_path.with_suffix(".manifest.json")
         if manifest_path.exists():
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["slot_index"] = str(slot_index_out)
+            manifest["slot_indices"] = str(slot_out)
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
             print(f"[build-view] manifest grans={manifest.get('grans')} "
-                  f"slot={manifest.get('slot_bytes')}")
+                  f"slot={manifest.get('slot_bytes')} "
+                  f"slot_index={slot_index_out.name}")
         else:
             print("[build-view] manifest not found")
 

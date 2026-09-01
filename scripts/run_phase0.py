@@ -427,6 +427,8 @@ def main() -> int:
     parser.add_argument("--live-store", action="store_true")
     parser.add_argument("--store-p-view", default=None)
     parser.add_argument("--store-p-slot-indices", default=None)
+    parser.add_argument("--store-p-slot-index", default=None)
+    parser.add_argument("--access-order", action="store_true", help="read Store-P slots in sorted physical order")
     parser.add_argument("--tokens-npy", default=None)
     parser.add_argument("--scale", type=float, default=None)
     parser.add_argument("--layer", type=int, default=8)
@@ -486,7 +488,18 @@ def main() -> int:
                 f"[phase0] live-store Store-P: {len(tokens)} tokens, "
                 f"view={args.store_p_view} (scale={applied_scale:.6g}) ..."
             )
-            if args.store_p_slot_indices:
+            if args.store_p_slot_index:
+                from qwen35_ple.real_ple import rowids_from_tokens
+                from qwen35_ple.slot_index import SlotIndex
+
+                slot_index = SlotIndex.load(args.store_p_slot_index)
+                rowids = rowids_from_tokens(tokens)
+                slot_indices = slot_index.to_slots(rowids)
+                print(
+                    f"[phase0] Store-P generic slot index: {len(slot_indices)} tokens "
+                    f"mapped to {len(slot_index)} view slots"
+                )
+            elif args.store_p_slot_indices:
                 slot_indices = np.load(args.store_p_slot_indices).astype(np.int64)
                 if len(slot_indices) < len(tokens):
                     raise SystemExit(
@@ -504,6 +517,7 @@ def main() -> int:
                 head_dim=160,
                 embedding_dim=2560,
                 view_path=args.store_p_view,
+                access_order=args.access_order,
             )
             live_store_handle = e_t
             print(
@@ -600,6 +614,10 @@ def main() -> int:
             "features": args.features,
             "rows_dir": args.rows_dir,
             "live_store": bool(args.live_store),
+            "store_p_view": args.store_p_view,
+            "store_p_slot_indices": args.store_p_slot_indices,
+            "store_p_slot_index": args.store_p_slot_index,
+            "access_order": bool(args.access_order),
             "layer": args.layer,
             "branches": args.branches,
             "reader": args.reader,

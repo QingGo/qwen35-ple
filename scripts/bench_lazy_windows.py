@@ -41,6 +41,7 @@ def main() -> int:
     parser.add_argument("--rows-dir", default="/Volumes/My Passport/qwen38-rows")
     parser.add_argument("--view", default=None)
     parser.add_argument("--slot-indices-npy", default=None)
+    parser.add_argument("--slot-index", default=None)
     parser.add_argument("--tokens-npy", default=None)
     parser.add_argument("--tokens", type=int, default=100_000)
     parser.add_argument("--seq-len", type=int, default=128)
@@ -48,6 +49,7 @@ def main() -> int:
     parser.add_argument("--max-batches", type=int, default=None)
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--control", action="store_true")
+    parser.add_argument("--access-order", action="store_true", help="schedule reads by physical slot order")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--shards", type=int, default=128)
     parser.add_argument("--rows-per-shard", type=int, default=2_500_012)
@@ -86,7 +88,13 @@ def main() -> int:
     try:
         if args.view is not None:
             view = engramdb.View(args.view)
-            if args.slot_indices_npy:
+            if args.slot_index:
+                from qwen35_ple.slot_index import SlotIndex
+
+                slot_index = SlotIndex.load(args.slot_index)
+                rowids = np.asarray(engramdb.rowids_for_seq(tokens.tolist()), dtype=np.int64)
+                slot_indices = slot_index.to_slots(rowids)
+            elif args.slot_indices_npy:
                 slot_indices = np.load(args.slot_indices_npy).astype(np.int64)
                 if len(slot_indices) < len(tokens):
                     raise ValueError(
@@ -103,6 +111,7 @@ def main() -> int:
                 head_dim=args.width,
                 embedding_dim=16 * args.width,
                 view_path=args.view,
+                access_order=args.access_order,
             )
             dataset = LiveETDataset(
                 tokens,
@@ -112,6 +121,7 @@ def main() -> int:
                 control=args.control,
                 seed=args.seed,
                 max_windows=args.max_batches,
+                access_order=args.access_order,
             )
         else:
             print("[lazy] building rowids ...")

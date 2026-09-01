@@ -254,6 +254,39 @@ python scripts/run_phase0.py --live-store \
 > 因此 1M token 也可以直接跑，只要单窗口内存足够（~seq_len × 2560 × 4B）。
 > 不需要先做全量 chunk npy，也不需要全量 `e_t` 常驻内存。
 
+#### P0 完成：通用 rowid→slot 语义索引 + 自动访问序调度
+
+**V123 通用语义索引**：
+
+构建器会在视图旁自动写出 `*.slot_index.npz`（也可用 `--slot-index-out` 指定）：
+
+```python
+from qwen35_ple.slot_index import SlotIndex
+
+index = SlotIndex.load("/tmp/corpus.slot_index.npz")
+slots = index.to_slots(rowids)  # 任意 token 流 -> 对应 Store-P 物理槽
+store_p = LiveETViewStore.from_slot_index(view, rowids, index, scale, access_order=True)
+```
+
+`run_phase0.py` 可直接用通用索引：
+
+```bash
+python scripts/run_phase0.py --live-store \
+    --store-p-view /tmp/corpus.view \
+    --store-p-slot-index /tmp/corpus.slot_index.npz \
+    --access-order \
+    --tokens-npy /path/to/tokens.npy \
+    --rows-dir "/Volumes/My Passport/qwen38-rows"
+```
+
+**V124 自动访问序调度**：
+
+- `LiveETViewStore(access_order=True)` 在每个窗口内按物理槽位排序读取，再散射回 token 顺序；
+- `LiveETDataset(access_order=True)` 还会按窗口最小物理槽位调度窗口顺序，使跨窗口 I/O 更接近顺序读；
+- `run_phase0.py --access-order` 与 `bench_lazy_windows.py --access-order` 均已接入。
+
+新增测试：`tests/test_slot_index.py`（SlotIndex 保存/加载、重复 rowid 代表槽、keys 文件构建、access-order 调度正确性）。
+
 #### LiveETDataset：通用懒加载数据流（Track A）
 
 任意实验脚本只需三行即可接入 live-store：
@@ -288,7 +321,7 @@ python scripts/run_live_et_dataset_smoke.py \
     --seq-len 128 --max-batches 4
 ```
 
-核心代码：`src/qwen35_ple/live_store.py`、`src/qwen35_ple/real_ple.py`。
+核心代码：`src/qwen35_ple/live_store.py`、`src/qwen35_ple/slot_index.py`、`src/qwen35_ple/real_ple.py`。
 
 ### 2. PLE 知识探针
 

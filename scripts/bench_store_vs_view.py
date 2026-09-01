@@ -62,6 +62,8 @@ def main() -> int:
     parser.add_argument("--rows-dir", default="/Volumes/My Passport/qwen38-rows")
     parser.add_argument("--view", default=None)
     parser.add_argument("--slot-indices-npy", default=None)
+    parser.add_argument("--slot-index", default=None)
+    parser.add_argument("--access-order", action="store_true", help="read Store-P slots in sorted physical order")
     parser.add_argument("--tokens", type=int, default=20_000)
     parser.add_argument("--reps", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=1)
@@ -77,8 +79,8 @@ def main() -> int:
     parser.add_argument("--max-view-s", type=float, default=None)
     args = parser.parse_args()
 
-    if args.view is not None and args.slot_indices_npy is None:
-        raise SystemExit("--view requires --slot-indices-npy")
+    if args.view is not None and args.slot_indices_npy is None and args.slot_index is None:
+        raise SystemExit("--view requires --slot-indices-npy or --slot-index")
 
     scale = resolve_ple_weight_scale(model_dir=args.model_dir, scale=args.scale)
     tokens = list(range(args.start_token, args.start_token + args.tokens))
@@ -123,11 +125,17 @@ def main() -> int:
 
         if args.view is not None:
             view = engramdb.View(args.view)
-            slot_indices = np.load(args.slot_indices_npy).astype(np.int64)
-            if len(slot_indices) < len(live):
-                raise ValueError(
-                    f"slot_indices length {len(slot_indices)} < tokens {len(live)}"
-                )
+            if args.slot_index:
+                from qwen35_ple.slot_index import SlotIndex
+
+                slot_index = SlotIndex.load(args.slot_index)
+                slot_indices = slot_index.to_slots(np.asarray(rowids, dtype=np.int64))
+            else:
+                slot_indices = np.load(args.slot_indices_npy).astype(np.int64)
+                if len(slot_indices) < len(live):
+                    raise ValueError(
+                        f"slot_indices length {len(slot_indices)} < tokens {len(live)}"
+                    )
             view_store = LiveETViewStore(
                 view,
                 slot_indices[: len(live)],
@@ -135,6 +143,7 @@ def main() -> int:
                 num_heads=16,
                 head_dim=args.width,
                 embedding_dim=16 * args.width,
+                access_order=args.access_order,
             )
             for i in range(args.warmup):
                 view_store.get(0, min(1000, len(view_store)))

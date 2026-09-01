@@ -169,7 +169,13 @@ class LiveETStore:
             out_dtype=None,
         )
         elapsed = time.perf_counter() - t0
-        result = arr.reshape(len(indices_arr), self.embedding_dim).numpy()
+        try:
+            result = arr.reshape(len(indices_arr), self.embedding_dim).numpy()
+        except RuntimeError:
+            result = np.asarray(
+                arr.reshape(len(indices_arr), self.embedding_dim).tolist(),
+                dtype=np.float32,
+            )
         if self.record_stats:
             self.stats.record(
                 tokens=len(indices_arr),
@@ -300,6 +306,11 @@ class LiveETViewStore:
     2560-byte (or padded) slot per token.  ``slot_indices`` maps token positions
     to physical view slots (for example, the access-order index used when the
     view was built with ``view build --keys``).
+
+    ``access_order=True`` enables automatic access-order scheduling: each
+    window is read in sorted physical slot order and then scattered back to
+    token order.  :meth:`from_slot_index` builds a Store-P reader for an
+    arbitrary token stream from a :class:`~qwen35_ple.slot_index.SlotIndex`.
     """
 
     def __init__(
@@ -316,9 +327,11 @@ class LiveETViewStore:
         dtype: Any = None,
         out_dtype: Any = None,
         view_path: str | None = None,
+        access_order: bool = False,
     ) -> None:
         self._view = view
         self.slot_indices = np.asarray(slot_indices, dtype=np.int64)
+        self.access_order = bool(access_order)
         self.scale = float(scale)
         self.num_heads = int(num_heads)
         self.head_dim = int(head_dim)
@@ -331,6 +344,64 @@ class LiveETViewStore:
         self.out_dtype = out_dtype
         self._closed = False
         self._view_path = str(view_path) if view_path is not None else None
+
+    @classmethod
+    def from_slot_index(
+        cls,
+        view: Any,
+        rowids: np.ndarray,
+        slot_index: Any,
+        scale: float = 1.0,
+        *,
+        num_heads: int = 16,
+        head_dim: int = 160,
+        embedding_dim: int | None = None,
+        record_stats: bool = True,
+        stats: FetchStats | None = None,
+        dtype: Any = None,
+        out_dtype: Any = None,
+        view_path: str | None = None,
+        access_order: bool = False,
+    ) -> LiveETViewStore:
+        """Create a Store-P reader for an arbitrary token/rowid sequence.
+
+        ``slot_index`` maps each rowid tuple to a physical Store-P slot.  This
+        lets a single materialized view serve any token stream, not just the
+        exact corpus order used to build the view.
+
+        With ``access_order=True``, every window is read in sorted physical slot
+        order and scattered back to token order (automatic access-order
+        scheduling).
+        """
+        from .slot_index import SlotIndex
+
+        if not isinstance(slot_index, SlotIndex) and not hasattr(
+            slot_index, "to_slots"
+        ):
+            raise TypeError(
+                "slot_index must provide to_slots(rowids) -> slots "
+                "(qwen35_ple.slot_index.SlotIndex or engramdb.SlotIndex)"
+            )
+        rows = np.asarray(rowids, dtype=np.int64)
+        if rows.ndim != 2 or rows.shape[1] != num_heads:
+            raise ValueError(
+                f"rowids must be [N, {num_heads}], got {rows.shape}"
+            )
+        slots = slot_index.to_slots(rows)
+        return cls(
+            view,
+            slots,
+            scale,
+            num_heads=num_heads,
+            head_dim=head_dim,
+            embedding_dim=embedding_dim,
+            record_stats=record_stats,
+            stats=stats,
+            dtype=dtype,
+            out_dtype=out_dtype,
+            view_path=view_path,
+            access_order=access_order,
+        )
 
     def __len__(self) -> int:
         return len(self.slot_indices)
@@ -353,19 +424,56 @@ class LiveETViewStore:
             dtype=self.dtype,
             out_dtype=self.out_dtype,
             view_path=self._view_path,
+            access_order=self.access_order,
         )
 
     def get(self, offset: int, length: int) -> np.ndarray:
-        """Fetch one window using the view-protocol ``(offset, length)`` shape."""
+        """Fetch one window using the view-protocol ``(offset, length)`` shape.
+
+        When ``access_order`` is enabled, the physical slots are read in sorted
+        (sequential) order and scattered back to token order before returning.
+        This keeps Store-P I/O sequential even when the token order does not
+        match the view's physical slot order.
+        """
         if self._closed:
             raise ValueError("LiveETViewStore is closed")
+        if self.access_order:
+            return self.get_sorted(offset, length)
         return self._fetch(self.slot_indices[offset : offset + length])
+
+    def get_sorted(self, offset: int, length: int) -> np.ndarray:
+        """Fetch a window using access-order scheduling.
+
+        The requested physical slots are sorted, read sequentially from the
+        Store-P view, then scattered back into the original token order.  The
+        returned tensor is therefore exactly the same as :meth:`get`, but the
+        underlying I/O order is deterministic and sequential per window.
+        """
+        if self._closed:
+            raise ValueError("LiveETViewStore is closed")
+        positions = self.slot_indices[offset : offset + length]
+        if len(positions) == 0:
+            return np.zeros((0, self.embedding_dim), dtype=np.float32)
+        order = np.argsort(positions, kind="stable")
+        fetched = self._fetch(positions[order])
+        out = np.empty_like(fetched)
+        out[order] = fetched
+        return out
 
     def get_indices(self, indices: np.ndarray) -> np.ndarray:
         """Fetch by absolute token-position indices."""
         if self._closed:
             raise ValueError("LiveETViewStore is closed")
-        return self._fetch(self.slot_indices[np.asarray(indices, dtype=np.int64)])
+        positions = self.slot_indices[np.asarray(indices, dtype=np.int64)]
+        if self.access_order:
+            if len(positions) == 0:
+                return np.zeros((0, self.embedding_dim), dtype=np.float32)
+            order = np.argsort(positions, kind="stable")
+            fetched = self._fetch(positions[order])
+            out = np.empty_like(fetched)
+            out[order] = fetched
+            return out
+        return self._fetch(positions)
 
     def permuted(self, perm: np.ndarray) -> LiveETViewStore:
         return LiveETViewStore(
@@ -380,6 +488,7 @@ class LiveETViewStore:
             dtype=self.dtype,
             out_dtype=self.out_dtype,
             view_path=self._view_path,
+            access_order=self.access_order,
         )
 
     def subset(self, indices: np.ndarray) -> LiveETViewStore:
@@ -395,6 +504,7 @@ class LiveETViewStore:
             dtype=self.dtype,
             out_dtype=self.out_dtype,
             view_path=self._view_path,
+            access_order=self.access_order,
         )
 
     def close(self) -> None:
@@ -421,6 +531,7 @@ class LiveETViewStore:
             "dtype": self.dtype,
             "out_dtype": self.out_dtype,
             "view_path": self._view_path,
+            "access_order": self.access_order,
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -436,6 +547,7 @@ class LiveETViewStore:
         self.dtype = state["dtype"]
         self.out_dtype = state["out_dtype"]
         self._view_path = str(state["view_path"])
+        self.access_order = bool(state.get("access_order", False))
         self._view = engramdb.View(self._view_path)
         self._closed = False
 
@@ -487,7 +599,10 @@ class LiveETViewStore:
                 seconds=elapsed,
                 cache_hits=max(0, n * self.num_heads - unique_rows),
             )
-        return arr.numpy()
+        try:
+            return arr.numpy()
+        except RuntimeError:
+            return np.asarray(arr.tolist(), dtype=np.float32)
 
 
 class LiveETDataset(_IterableDataset):  # type: ignore[misc]
@@ -525,6 +640,7 @@ class LiveETDataset(_IterableDataset):  # type: ignore[misc]
         num_workers: int | None = None,
         drop_last: bool = False,
         max_windows: int | None = None,
+        access_order: bool = False,
     ) -> None:
         self.tokens = np.asarray(tokens, dtype=np.int64)
         if len(self.tokens) != len(e_t):
@@ -544,6 +660,7 @@ class LiveETDataset(_IterableDataset):  # type: ignore[misc]
         self.num_workers = num_workers
         self.drop_last = bool(drop_last)
         self.max_windows = max_windows
+        self.access_order = bool(access_order)
 
         # Normalize stores/views to the ``get(offset, length)`` view protocol so
         # iterating a bare LiveETStore uses the same slicing semantics as a view.
@@ -589,6 +706,18 @@ class LiveETDataset(_IterableDataset):  # type: ignore[misc]
         if self.shuffle:
             rng = np.random.default_rng(self.seed)
             starts = starts[rng.permutation(len(starts))]
+        if self.access_order and hasattr(self.e_t, "slot_indices"):
+            slot_indices = self.e_t.slot_indices  # type: ignore[attr-defined]
+            keys = np.asarray(
+                [
+                    int(np.min(slot_indices[int(s) : int(s) + self.seq_len]))
+                    if len(slot_indices[int(s) : int(s) + self.seq_len]) > 0
+                    else int(slot_indices[int(s)])
+                    for s in starts
+                ],
+                dtype=np.int64,
+            )
+            starts = starts[np.argsort(keys, kind="stable")]
         if self.max_windows is not None:
             starts = starts[: int(self.max_windows)]
         return starts
@@ -611,7 +740,9 @@ class LiveETDataset(_IterableDataset):  # type: ignore[misc]
             length = min(self.seq_len, len(self.tokens) - start)
             ids = self.tokens[start : start + length]
             t0 = time.perf_counter()
-            if hasattr(self.e_t, "get"):
+            if self.access_order and hasattr(self.e_t, "get_sorted"):
+                et = self.e_t.get_sorted(start, length)  # type: ignore[attr-defined]
+            elif hasattr(self.e_t, "get"):
                 et = self.e_t.get(start, length)  # type: ignore[attr-defined]
             else:
                 et = np.asarray(self.e_t[start : start + length], dtype=np.float32)

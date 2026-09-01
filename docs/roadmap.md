@@ -279,7 +279,8 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 
 - ✅ v0.2.11 已发布。
 - ✅ V123/V124 P0 语义索引和访问序调度代码完成。
-- ✅ qwen35-ple 全量测试 25 passed / 11 skipped。
+- ✅ qwen35-ple 全量测试 34 passed / 7 skipped。
+- ✅ DiskSlotIndex / access-order CI / 全表批式构建工具已推进。
 - ⚠️ V125 真实模型实验仍是最大科学缺口。
 
 ### 10.2 本仓新增/关注技术债

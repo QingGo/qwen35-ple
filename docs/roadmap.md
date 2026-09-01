@@ -326,7 +326,7 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 | V143 | qwen 保留本地 SlotIndex fallback |
 | V144 | CLI 未原生生成 slot index |
 | V145 | Phase A 无 fetch timing |
-| V146 | WSL golden 漂移（已在 CI 临时固定 engram-peft v1.2.6） |
+| V146 | WSL golden 漂移（CI 已对官方前向 golden 使用 xfail，待主动重建） |
 | V147 | CI 只有合成门禁 |
 | V148 | 新功能未发布 |
 

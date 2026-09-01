@@ -593,6 +593,10 @@ def main() -> int:
         print(f"=== seed {seed} ===")
         for mode in args.modes:
             print(f"  mode={mode}")
+            if live_store_handle is not None and hasattr(
+                live_store_handle, "reset_stats"
+            ):
+                live_store_handle.reset_stats()
             res = _run_mode(
                 args,
                 model,
@@ -605,6 +609,25 @@ def main() -> int:
                 seed,
                 qa_items,
             )
+            if live_store_handle is not None:
+                stats = getattr(live_store_handle, "stats", None)
+                if hasattr(stats, "as_dict"):
+                    fetch = stats.as_dict()
+                elif isinstance(stats, dict):
+                    fetch = stats
+                else:
+                    fetch = None
+                if fetch is not None:
+                    res["fetch_stats"] = fetch
+                    windows = int(fetch.get("windows", 0))
+                    seconds = float(fetch.get("fetch_seconds", 0.0))
+                    res["fetch_ms_per_window"] = (
+                        seconds * 1000.0 / windows if windows else None
+                    )
+                    tokens = int(fetch.get("tokens", 0))
+                    res["fetch_ms_per_token"] = (
+                        seconds * 1000.0 / tokens if tokens else None
+                    )
             all_results.append(res)
 
     summary = _summarize(all_results, args.modes)

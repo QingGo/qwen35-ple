@@ -507,6 +507,10 @@ class LiveETViewStore:
             access_order=self.access_order,
         )
 
+    def reset_stats(self) -> None:
+        """Reset fetch telemetry before an experiment arm/seed."""
+        self.stats = FetchStats()
+
     def close(self) -> None:
         if not self._closed:
             close = getattr(self._view, "close", None)

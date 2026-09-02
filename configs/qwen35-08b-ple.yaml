@@ -1,7 +1,7 @@
 # qwen35-08b-ple 训练配置样例（初值，非可运行配置）
 #
 # 字段名遵循 engram-peft.EngramConfig（契约 C2）；`engine` / `table_spec` /
-# `table_source` 为契约 v1 新增字段（设计态，待 engram-peft 实现）。
+# `table_source` 为契约 v1 新增字段（engram-peft 1.2.7 已实现自动消费）。
 # 数值为文档化初值，最终以消融矩阵（docs/qwen35-ple-design.md §6）为准。
 
 project: qwen35-08b-ple

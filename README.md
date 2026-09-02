@@ -23,6 +23,13 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/integration-contract.md](docs/integration-contract.md) | **四仓库交互契约 v1**（存储/模型/推理/数据四条契约，冻结原则） |
 | [docs/roadmap.md](docs/roadmap.md) | 战略路线图：终极目标、技术债、借鉴矩阵、阶段计划 |
 | [docs/round-21-full-summary.md](docs/round-21-full-summary.md) | 本轮完整汇总：计划/发现/尝试/踩坑/完成/未完成/未来 |
+| [docs/round-23-upgrade-assessment.md](docs/round-23-upgrade-assessment.md) | engram-peft 1.2.7 / EngramDB 0.2.12 升级评估与后续计划 |
+| [docs/phase0-live1m-qa150-analysis.md](docs/phase0-live1m-qa150-analysis.md) | 1M 150 题三线结果、bad case、语料重叠分析 |
+| [docs/round-24-full-summary.md](docs/round-24-full-summary.md) | 本轮系统性思考、技术债、语料混比与后续计划 |
+| [docs/round-25-mix-corpus.md](docs/round-25-mix-corpus.md) | M1–M5 1M 混合语料构建、来源、比例、污染审计 |
+| [docs/round-26-systematic.md](docs/round-26-systematic.md) | 系统性思考：语义对齐证据、机制分析技术债、RL 门禁、借鉴矩阵 |
+| [docs/round-27-manifold-alignment.md](docs/round-27-manifold-alignment.md) | 流形/语义空间对齐调研、数学工具、机制验证与 case 分析计划 |
+| [docs/round-27-full-summary.md](docs/round-27-full-summary.md) | 本轮全量总结：计划、发现、尝试、踩坑、完成/未完成、未来计划 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）
@@ -136,7 +143,19 @@ tests/            一致性冒烟测试（golden 对拍）
 - [x] 1M token live-store 懒加载三线实验（real / control / no-reader）
 - [x] 1M QA exact-match（9题）三线评测完成（`outputs/phase0-live1m-qa.json`）
 - [x] 扩大 QA 集：50 TriviaQA-style + 50 NQ + 50 BoolQ（`assets/qa-expanded-150.json`）
-- [ ] target-side reader checkpoint 保存/加载与 vLLM/SGLang serving 适配
+- [x] 150 题三线 QA 完成（seed 0：no-reader 53.3% / real 42.0% / control 30.7%；bad case 与语料分析见 `docs/phase0-live1m-qa150-analysis.md`）
+- [x] M1–M5 1M 混合语料构建完成（`build_mix.py`，含 ModelScope chat/wiki/cot/tool 来源与 `--exclude-qa` 严格污染过滤；审计全部 low）
+- [x] 污染审计脚本与报告（`audit_contamination.py` + `outputs/contamination-M*.json`）
+- [x] 批处理入口：`scripts/run_mix_batch.sh`（WSL 批量跑 M1–M5 三线 QA）
+- [x] M1 三线 150 QA 已完成：real 50.7% / control 52.7% / no-reader 53.3%；机制分析见 `docs/round-26-systematic.md`
+- [x] 关键认知：混合语料 val loss 降低不等于能力提升；control 也会出现“知识型”good case
+- [ ] 机制分析：reader 参数有效性 / CKA / activation patch / logit lens / BoolQ 退化定位
+- [ ] 固定外部评测集与科学 mix 选择
+- [ ] RL 决策门禁（当前不提前做 RL）
+- [x] 依赖收口：engram-peft>=1.2.7、engramdb-python>=0.2.12（CI 同步固定正式 tag）
+- [x] target-side reader checkpoint 保存/加载（`--save-reader` / `--load-reader`）
+- [x] 通用 serving adapter（`QwenReaderServingAdapter`）
+- [ ] 真实 vLLM/SGLang 引擎 serving 适配与 A/B
 - [x] CI 改用 uv 管理依赖与测试（`uv sync --all-groups` + `uv run ruff/pytest`）
 - [x] pre-commit 已配置（ruff）
 - [ ] CP/后训练正式消融与 100 tok/s 推理闭环
@@ -177,18 +196,23 @@ Qwen3.5 backbone
 
 ### qwen35-ple 侧需要做的工程
 
-1. `run_phase0.py` 支持保存 / 加载训练后的 target-side reader checkpoint。
-2. 建立 `reader_registry`，以支持 reader 结构持续演进：
+1. ✅ `run_phase0.py` 已支持保存 / 加载训练后的 target-side reader checkpoint（`--save-reader` / `--load-reader`），并包含 `ShortConv` extra state。
+2. ✅ 已建立 `reader_registry`（`src/qwen35_ple/reader_registry.py`），基于 EngramDB `TargetReaderRegistry`：
    - `official_source_qwen_v1`
+   - `engram_v1`
+   - `simple_v1`
    - future：dual-layer / multi-layer / LoRA
-3. 定义统一 bundle：
+3. ✅ 已定义统一 bundle（`src/qwen35_ple/serving/bundle.py`）：
    - backbone 路径
    - PLE table 描述
    - reader config + checkpoint
-4. 写 vLLM / SGLang 薄适配层：
-   - 加载 bundle
-   - 包装 Qwen3.5 layer 8
-   - 从 EngramDB 公共 API 增量取 e_t
+   - 兼容 EngramDB `engramdb-bundle-v1`
+4. ✅ 已新增通用 serving adapter（`src/qwen35_ple/serving/adapter.py`）：
+   - `QwenReaderServingAdapter`
+   - `install_qwen_reader_adapter`
+   - `install_qwen_reader_adapter_from_bundle`
+   - `install_vllm_reader_from_bundle` / `install_sglang_reader_from_bundle`
+   - 待做：接入真实 vLLM / SGLang 引擎并做 A/B
 5. no-reader 基线可先直接用 vLLM / SGLang 加速。
 
 ### 已完成的后续数据准备
@@ -199,10 +223,40 @@ Qwen3.5 backbone
   50 TriviaQA-style + 50 NQ + 50 BoolQ
   ```
 
+### Reader checkpoint 用法（已落地）
+
+训练并保存 reader：
+
+```bash
+PYTHONPATH=src:../EngramDB/python:../engram-peft/src \
+python scripts/run_phase0.py \
+  --live-store --rows-dir /path/to/rows --model-dir /path/to/qwen38-ple \
+  --tokens-npy data/wet-1m-first.npy --reader official \
+  --modes real --seeds 0 \
+  --save-reader outputs/reader-{mode}-seed{seed}.pt \
+  --save-bundle outputs/bundle-{mode}-seed{seed}.json
+```
+
+后续 eval-only 直接加载，跳过训练：
+
+```bash
+PYTHONPATH=src:../EngramDB/python:../engram-peft/src \
+python scripts/run_phase0.py \
+  --live-store --rows-dir /path/to/rows --model-dir /path/to/qwen38-ple \
+  --tokens-npy data/wet-1m-first.npy --reader official \
+  --modes real --seeds 0 --load-reader outputs/reader-real-seed0.pt \
+  --qa-exact-match --qa-file assets/qa-expanded-150.json
+```
+
+
 ### 相关协调
 
-- EngramDB 内部改动由另一个 agent 独立开发。
-- engram-peft 1.2.7 发布由另一个 agent 负责，不阻塞 qwen35-ple 当前开发。
+- EngramDB v0.2.12 已发布：包含 `DiskSlotIndex` v3、`PleMemory` / `PleSequence`、
+  `BundleManifest` / `TargetReaderRegistry`、`PleMemoryAdapter` / `TargetReaderHook`。
+- engram-peft v1.2.7 已发布：`engine="qwen_ple"` + `table_source="engramdb:store"`
+  自动消费已正式可用。
+- qwen35-ple 已完成最低版本收口（`pyproject.toml` / `uv.lock` / CI tag / WSL 脚本），
+  后续按 `docs/round-23-upgrade-assessment.md` 接入统一 reader/bundle serving 协议。
 
 
 ## 实验方法与当前结论（2026-08-30）

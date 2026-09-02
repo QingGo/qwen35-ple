@@ -44,7 +44,16 @@ from qwen35_ple.reader import (
     ShortConv,
     install_reader_hook,
 )
+from qwen35_ple.reader_registry import (
+    ENGRAM_V1,
+    OFFICIAL_SOURCE_QWEN_V1,
+    SIMPLE_V1,
+    load_reader_with_extra,
+    reader_config_from_args,
+    save_reader,
+)
 from qwen35_ple.real_ple import resolve_ple_weight_scale
+from qwen35_ple.serving.bundle import make_bundle, save_bundle
 
 DEFAULT_QA = [
     {"task": "triviaqa", "question": "What is the capital of France?", "answer": "Paris"},
@@ -198,13 +207,18 @@ def _train_reader(
     seq_len: int,
     lr: float,
     seed: int,
-) -> list[float]:
+    val_tokens: np.ndarray | None = None,
+    val_e_t: np.ndarray | None = None,
+    val_every: int = 0,
+    max_val_windows: int = 4,
+) -> tuple[list[float], list[dict]]:
     assert len(tokens) > seq_len + 1
     params = [reader] + ([short_conv] if short_conv is not None else [])
     device = next(model.parameters()).device
     optimizer = torch.optim.AdamW(torch.nn.ModuleList(params).parameters(), lr=lr)
     rng = random.Random(seed)
     losses = []
+    val_curve: list[dict] = []
     for step in range(steps):
         start = rng.randint(0, len(tokens) - seq_len - 1)
         ids = torch.from_numpy(tokens[start : start + seq_len][None, :]).long().to(device)
@@ -223,7 +237,17 @@ def _train_reader(
         losses.append(float(loss.item()))
         if (step + 1) % 5 == 0 or step == 0:
             print(f"    step {step + 1}/{steps}: loss={loss.item():.4f}")
-    return losses
+        if val_every > 0 and (step + 1) % val_every == 0 and val_tokens is not None and val_e_t is not None:
+            vloss = _window_loss(
+                model,
+                val_tokens,
+                val_e_t,
+                seq_len,
+                max_windows=max_val_windows,
+            )
+            val_curve.append({"step": step + 1, "val_loss": float(vloss)})
+            print(f"    step {step + 1}/{steps}: val_loss={vloss:.4f}")
+    return losses, val_curve
 
 
 def _qa_inputs(
@@ -369,12 +393,56 @@ class _QAEtStore:
         self.store.close()
 
 
+_NUMBER_UNITS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+    "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+    "nineteen": 19,
+}
+_NUMBER_TENS = {
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+    "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+}
+
+
+def _expand_number_words(text: str) -> str:
+    """Convert English number words in a normalized phrase to digits."""
+    words = text.split()
+    out: list[str] = []
+    i = 0
+    while i < len(words):
+        if words[i] in _NUMBER_UNITS or words[i] in _NUMBER_TENS or words[i] in {"hundred", "thousand"}:
+            total = 0
+            current = 0
+            while i < len(words):
+                w = words[i]
+                if w in _NUMBER_UNITS:
+                    current += _NUMBER_UNITS[w]
+                elif w == "hundred":
+                    current *= 100
+                elif w in _NUMBER_TENS:
+                    current += _NUMBER_TENS[w]
+                elif w == "thousand":
+                    total += current * 1000
+                    current = 0
+                else:
+                    break
+                i += 1
+            total += current
+            out.append(str(total))
+        else:
+            out.append(words[i])
+            i += 1
+    return " ".join(out)
+
+
 def _normalize_answer(text: str) -> str:
-    """Lightweight SQuAD-style normalization for exact-match scoring."""
+    """SQuAD-style normalization with number-word canonicalization."""
     text = text.lower()
     text = re.sub(r"[^a-z0-9 ]", " ", text)
     words = [w for w in text.split() if w not in {"a", "an", "the"}]
-    return " ".join(words)
+    return _expand_number_words(" ".join(words))
 
 
 def _qa_exact_match(
@@ -398,6 +466,10 @@ def _qa_exact_match(
     per_task_correct: dict[str, list[bool]] = {}
 
     for idx, item in enumerate(items):
+        print(
+            f"    QA {idx + 1}/{len(items)} [{item['task']}] {item['question'][:90]}",
+            flush=True,
+        )
         qids = tokenizer.encode(item["question"], add_special_tokens=False)
         ids = list(qids)
         generated_ids: list[int] = []
@@ -443,6 +515,39 @@ def _qa_exact_match(
     return {"metrics": metrics, "answers": answers}
 
 
+def _format_reader_save_path(template: str, mode: str, seed: int) -> Path:
+    """Expand ``{mode}`` / ``{seed}`` placeholders in a checkpoint path."""
+    return Path(str(template).replace("{mode}", mode).replace("{seed}", str(seed)))
+
+
+def _bundle_memory_from_args(args: Any) -> dict[str, Any] | None:
+    """Build an EngramDB bundle memory section from Phase 0 CLI args."""
+    if getattr(args, "store_p_view", None):
+        memory: dict[str, Any] = {
+            "type": "view",
+            "view": {"path": str(Path(args.store_p_view).resolve())},
+        }
+        if getattr(args, "store_p_slot_index", None):
+            memory["slot_index"] = {
+                "type": "disk",
+                "path": str(Path(args.store_p_slot_index).resolve()),
+            }
+        else:
+            memory["sequential_view"] = True
+        return memory
+    if getattr(args, "live_store", False) and getattr(args, "rows_dir", None):
+        return {
+            "type": "store",
+            "store": {
+                "path": str(Path(args.rows_dir).resolve()),
+                "shards": 128,
+                "rows_per_shard": 2_500_012,
+                "width": 160,
+            },
+        }
+    return None
+
+
 def _run_mode(
     args,
     model,
@@ -482,37 +587,66 @@ def _run_mode(
 
     torch.manual_seed(seed)
     random.seed(seed)
+
     if args.reader == "official":
-        reader = OfficialSourceQwenReader.from_official_checkpoint(
-            args.official_reader_path,
-            d_target=model.config.hidden_size,
-            bridge_mlp=args.bridge_mlp,
-            bridge_hidden=args.bridge_hidden,
-            out_mlp=args.out_mlp,
-            out_hidden=args.out_hidden,
-        )
-        short_conv = None
+        reader_name = OFFICIAL_SOURCE_QWEN_V1
     elif args.reader == "engram":
-        reader = QwenEngramReader(
-            model.config.hidden_size,
-            d_mem=2560,
-            hc_mult=args.hc_mult,
-            kernel_size=args.kernel_size,
-            dilation=args.dilation,
-            zero_init=args.zero_init_v,
-        )
-        short_conv = None
+        reader_name = ENGRAM_V1
     else:
-        reader = EngramReader(
-            model.config.hidden_size,
-            num_branches=args.branches,
-            zero_init_v=args.zero_init_v,
+        reader_name = SIMPLE_V1
+
+    short_conv = None
+    if getattr(args, "load_reader", None):
+        reader, extra_state = load_reader_with_extra(
+            args.load_reader,
+            device=args.device,
         )
-        short_conv = ShortConv(model.config.hidden_size) if args.short_conv else None
-    if args.device != "cpu":
-        reader = reader.to(args.device)
-        if short_conv is not None:
-            short_conv = short_conv.to(args.device)
+        if args.reader == "simple" and args.short_conv:
+            if "short_conv" not in extra_state:
+                raise SystemExit(
+                    "--load-reader checkpoint does not contain --short-conv state; "
+                    "train again with --save-reader to include it"
+                )
+            short_conv = ShortConv(model.config.hidden_size)
+            short_conv.load_state_dict(extra_state["short_conv"])
+            if args.device != "cpu":
+                short_conv = short_conv.to(args.device)
+        train_losses: list[float] = []
+        print(f"  [{mode}] seed={seed} loaded reader from {args.load_reader}")
+    else:
+        if args.reader == "official":
+            reader = OfficialSourceQwenReader.from_official_checkpoint(
+                args.official_reader_path,
+                d_target=model.config.hidden_size,
+                bridge_mlp=args.bridge_mlp,
+                bridge_hidden=args.bridge_hidden,
+                out_mlp=args.out_mlp,
+                out_hidden=args.out_hidden,
+            )
+            short_conv = None
+        elif args.reader == "engram":
+            reader = QwenEngramReader(
+                model.config.hidden_size,
+                d_mem=2560,
+                hc_mult=args.hc_mult,
+                kernel_size=args.kernel_size,
+                dilation=args.dilation,
+                zero_init=args.zero_init_v,
+            )
+            short_conv = None
+        else:
+            reader = EngramReader(
+                model.config.hidden_size,
+                num_branches=args.branches,
+                zero_init_v=args.zero_init_v,
+            )
+            short_conv = ShortConv(model.config.hidden_size) if args.short_conv else None
+
+        if args.device != "cpu":
+            reader = reader.to(args.device)
+            if short_conv is not None:
+                short_conv = short_conv.to(args.device)
+
     handle = install_reader_hook(model, args.layer, reader, short_conv)
 
     e_t = train_e_t
@@ -521,25 +655,34 @@ def _run_mode(
         perm = rng.permutation(len(e_t))
         e_t = e_t.permuted(perm) if hasattr(e_t, "permuted") else e_t[perm]
 
-    print(f"  [{mode}] seed={seed} training ...")
-    train_losses = _train_reader(
-        model,
-        reader,
-        short_conv,
-        args.layer,
-        train_tokens,
-        e_t,
-        steps=args.steps,
-        seq_len=args.seq_len,
-        lr=args.lr,
-        seed=seed,
-    )
-
     val_eval_e_t = val_e_t
     if mode == "control":
         rng = np.random.default_rng(seed)
         perm = rng.permutation(len(val_e_t))
         val_eval_e_t = val_e_t.permuted(perm) if hasattr(val_e_t, "permuted") else val_e_t[perm]
+
+    if getattr(args, "load_reader", None):
+        # Loaded-checkpoint evaluation mode: no training, only eval/QA below.
+        val_curve: list[dict] = []
+        pass
+    else:
+        print(f"  [{mode}] seed={seed} training ...")
+        train_losses, val_curve = _train_reader(
+            model,
+            reader,
+            short_conv,
+            args.layer,
+            train_tokens,
+            e_t,
+            steps=args.steps,
+            seq_len=args.seq_len,
+            lr=args.lr,
+            seed=seed,
+            val_tokens=val_tokens if getattr(args, "val_every", 0) else None,
+            val_e_t=val_eval_e_t if getattr(args, "val_every", 0) else None,
+            val_every=getattr(args, "val_every", 0),
+        )
+
     val_loss = _window_loss(model, val_tokens, val_eval_e_t, args.seq_len)
     qa = None
     if args.qa:
@@ -564,6 +707,56 @@ def _run_mode(
             max_new_tokens=args.qa_max_new_tokens,
         )
 
+    if getattr(args, "save_reader", None) and not getattr(args, "load_reader", None):
+        save_path = _format_reader_save_path(args.save_reader, mode, seed)
+        extra_state = None
+        if args.reader == "simple" and short_conv is not None:
+            extra_state = {"short_conv": short_conv.state_dict()}
+        save_reader(
+            reader,
+            save_path,
+            name=reader_name,
+            version="1",
+            config=reader_config_from_args(args, model.config.hidden_size, reader_name),
+            extra_state=extra_state,
+        )
+        print(f"  [{mode}] saved reader -> {save_path}")
+
+        if getattr(args, "save_bundle", None):
+            bundle_path = _format_reader_save_path(args.save_bundle, mode, seed)
+            memory = _bundle_memory_from_args(args)
+            if memory is None:
+                print(
+                    f"  [{mode}] warning: --save-bundle requires --live-store "
+                    "or --store-p-view; skipping bundle"
+                )
+            else:
+                reader_config = reader_config_from_args(
+                    args,
+                    model.config.hidden_size,
+                    reader_name,
+                )
+                bundle = make_bundle(
+                    backbone_path=args.model,
+                    memory=memory,
+                    ple={
+                        "ple_embed_dim": 2560,
+                        "num_heads": 16,
+                        "head_dim": 160,
+                        "scale": float(getattr(args, "applied_scale", 1.0)),
+                    },
+                    readers=[
+                        {
+                            "name": reader_name,
+                            "version": "1",
+                            "path": str(save_path.resolve()),
+                            "options": reader_config,
+                        }
+                    ],
+                )
+                save_bundle(bundle, bundle_path)
+                print(f"  [{mode}] saved bundle -> {bundle_path}")
+
     handle.remove()
     return {
         "mode": mode,
@@ -572,6 +765,7 @@ def _run_mode(
         "val_ppl": math.exp(val_loss) if math.isfinite(val_loss) else None,
         "train_losses": train_losses,
         "train_final_loss": train_losses[-1] if train_losses else None,
+        "val_curve": val_curve,
         "qa": qa,
         "qa_exact": qa_exact,
     }
@@ -628,7 +822,32 @@ def main() -> int:
     parser.add_argument("--kernel-size", type=int, default=4)
     parser.add_argument("--dilation", type=int, default=3)
     parser.add_argument("--zero-init-v", action="store_true")
+    parser.add_argument(
+        "--save-reader",
+        default=None,
+        help=(
+            "save the trained reader checkpoint; supports {mode} and {seed} "
+            "placeholders, e.g. outputs/reader-{mode}-seed{seed}.pt"
+        ),
+    )
+    parser.add_argument(
+        "--load-reader",
+        default=None,
+        help=(
+            "load a reader checkpoint saved by --save-reader and skip training; "
+            "intended for QA/eval-only reruns"
+        ),
+    )
+    parser.add_argument(
+        "--save-bundle",
+        default=None,
+        help=(
+            "also write an EngramDB-compatible bundle manifest; supports "
+            "{mode} and {seed} placeholders"
+        ),
+    )
     parser.add_argument("--steps", type=int, default=20)
+    parser.add_argument("--val-every", type=int, default=0, help="compute validation loss every N training steps (0=only final)")
     parser.add_argument("--seq-len", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--val-frac", type=float, default=0.1)
@@ -795,6 +1014,7 @@ def main() -> int:
             qa_store = _QAEtStore(args.rows_dir, applied_scale)
 
     all_results = []
+    args.applied_scale = applied_scale
     for seed in args.seeds:
         print(f"=== seed {seed} ===")
         for mode in args.modes:
@@ -852,6 +1072,9 @@ def main() -> int:
             "layer": args.layer,
             "branches": args.branches,
             "reader": args.reader,
+            "save_reader": args.save_reader,
+            "load_reader": args.load_reader,
+            "save_bundle": args.save_bundle,
             "hc_mult": args.hc_mult,
             "kernel_size": args.kernel_size,
             "dilation": args.dilation,

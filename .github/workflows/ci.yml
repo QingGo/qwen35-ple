@@ -21,11 +21,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: QingGo/EngramDB
+          ref: v0.2.12
           path: EngramDB
       - uses: actions/checkout@v4
         with:
           repository: QingGo/engram-peft
-          ref: master
+          ref: v1.2.7
           path: engram-peft
 
       - uses: astral-sh/setup-uv@v5

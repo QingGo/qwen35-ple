@@ -13,6 +13,10 @@ from qwen35_ple.live_store import (
     LiveETView,
     LiveETViewStore,
 )
+from qwen35_ple.reader_registry import (
+    load_reader,
+    save_reader,
+)
 from qwen35_ple.slot_index import DiskSlotIndex, SlotIndex
 
 __version__ = "0.1.0"
@@ -26,5 +30,7 @@ __all__ = [
     "LiveETView",
     "LiveETViewStore",
     "SlotIndex",
+    "load_reader",
+    "save_reader",
     "__version__",
 ]

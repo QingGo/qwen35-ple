@@ -26,6 +26,15 @@
 | `run_live_vs_precomputed.py` | Phase 1 gate：live DiskPleNGramEmbedding 与当前 fetch_e_t 数值一致性 |
 | `qwen4_ple_custom_loader.py` | Phase B：官方 Qwen4Exp 模型加载时跳过 ngram shard，并安装磁盘 PLE adapter（支持 dry-run） |
 | `run_real_fp8_e2e.py` | 真实 FP8 Store-I + 配置驱动 engram-peft 自动注入的 CPU forward/generate e2e |
+| `download_mix_sources.py` | 可复现下载 M1–M5 使用的 ModelScope 语料来源（alpaca/wiki/cot/msagent） |
+| `build_mix.py` | 可复现 1M token 混合语料构建：general/chat/wiki/cot/tool 按比例采样、Qwen tokenizer 产出 `tokens.npy`、manifest + 污染过滤 |
+| `audit_contamination.py` | 严格 QA 污染审计：答案/问题/QA n-gram 重叠，输出逐题和汇总报告 |
+| `run_mix_batch.sh` | WSL 批量跑 M1–M5：`run_phase0.py --live-store` + 150 QA exact-match 三线 |
+| `run_mix_one_wrapper.sh` | 单 mix 后台 wrapper：配合 Windows Scheduled Task 长任务托管 |
+| `summarize_mix_results.py` | 汇总多份 Phase 0 JSON：各 mix 的 real/control/no-reader EM、val loss、分任务 EM |
+| `export_phase0_metrics.py` | 将 Phase 0 JSON 导出为文章可用的 train_loss / summary / per_question CSV |
+| `plot_phase0_metrics.py` | 从 CSV 生成 QA EM、val loss、train loss 曲线等论文图 |
+| `analyze_qa_lines.py` | 三线 QA JSON 逐题对比：new correct/wrong、语料命中 |
 
 ## 预期脚本（与设计文档里程碑对应）
 

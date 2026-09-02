@@ -11,8 +11,8 @@ requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "qwen35-ple authors" }]
 dependencies = [
-    "engram-peft>=1.2.6",
-    "engramdb-python>=0.2.0",
+    "engram-peft>=1.2.7",
+    "engramdb-python>=0.2.12",
     "modelscope>=1.32",
     "pyyaml>=6.0",
 ]

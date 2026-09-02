@@ -337,3 +337,133 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 3. Phase C2：真表性能门禁 + golden 修复。
 4. Phase D2：Arrow / serving / 全表实际构建。
 5. Phase E2：v0.2.12 发布。
+
+
+---
+
+## 12. 2026-09-02 第二十三轮：上游版本收口与后续计划
+
+> 详细评估见 `docs/round-23-upgrade-assessment.md`。
+
+### 12.1 坐标
+
+- ✅ engram-peft v1.2.7 发布：Qwen PLE engine + `table_source="engramdb:store"` 自动消费。
+- ✅ EngramDB v0.2.12 发布：DiskSlotIndex v3、PleMemory / Bundle / TargetReader、通用 Engine Adapter。
+- ✅ qwen35-ple 最低版本收口：pyproject / uv.lock / CI tag / WSL 脚本。
+- ✅ reader_registry / bundle / checkpoint / serving adapter 第一版落地：`TargetReaderRegistry` 薄封装 + `BundleManifest` 兼容 bundle + `run_phase0 --save-reader/--load-reader` + `QwenReaderServingAdapter`；`ShortConv` 也已纳入 checkpoint。
+- ⚠️ 剩余：真实 vLLM/SGLang 引擎适配、Phase A2 收尾。
+
+### 12.2 下一阶段
+
+1. ✅ 接入 EngramDB `TargetReaderRegistry` / `BundleManifest`，qwen35 只做具体 reader 注册与实验逻辑。
+2. ✅ `run_phase0.py` 增加 reader 保存/加载；下一步用于跑完 150 题 QA。
+3. Phase A2 Store-P/access-order 结果收尾。
+4. 5M 三线 Go/No-Go；随后再进入 vLLM/SGLang/CompileForge serving 闭环。
+
+
+
+---
+
+## 13. 2026-09-02 第二十四轮：三线 QA、语料混比与系统性收口
+
+> 详细总结见 `docs/round-24-full-summary.md`。
+
+### 13.1 坐标
+
+- ✅ 工程闭环：reader checkpoint / bundle / serving adapter / 三线 QA 已完成。
+- ✅ 150 题三线结果：no-reader 53.3% / real 42.0% / control 30.7%。
+- ✅ val loss：real 2.7892 < control 2.9159 < no-reader 2.9895。
+- ⚠️ 科学结论：PLE 有信号，但当前未跑赢 no-reader。
+- ⚠️ 当前语料不是 Qwen3.5 任务格式，需要构建 chat/CoT/tool/agent + Wikipedia 混比语料。
+
+### 13.2 下一阶段
+
+1. 构建 1M token 混比实验：通用 / chat / wiki / CoT+tool。
+2. 跑 M1–M5，每组 real / no-reader / control。
+3. 做严格污染审计，确保评测题不在语料中。
+4. 选最优 mix 跑 3 seeds；如果 positive，再进入 5M–20M。
+5. 真实 vLLM / SGLang / CompileForge 产品化放在科学确认之后。
+
+
+---
+
+## 14. 2026-09-02 第二十五轮：M1–M5 混合语料与严格污染审计
+
+> 详细见 `docs/round-25-mix-corpus.md`。
+
+### 14.1 坐标
+
+- ✅ `build_mix.py`：五类来源按 token 比例混合，支持 Qwen tokenizer、manifest、`--exclude-qa`。
+- ✅ 本地 ModelScope 语料已落地：alpaca-cleaned / wikitext / Opus CoT / MSAgent-Bench dev。
+- ✅ M1–M5 1M token 混合语料已生成，均在 `data/mixes/`（gitignore）。
+- ✅ 严格污染审计：150 题全部 low，无 critical/high。
+- ✅ `run_phase0.py`：数字归一化 + 逐题 QA 进度日志。
+- ✅ `run_mix_batch.sh`：WSL 批量三线 QA 入口。
+
+### 14.2 下一步
+
+1. WSL 跑 `scripts/run_mix_batch.sh --mixes M1 M2 M3 M4 M5 --seeds 0`。
+2. 对比各 mix 的 real / control / no-reader 150 QA EM。
+3. 选择最优 mix 后跑 3 seeds。
+4. 只有在新做对题目仍不在语料中（污染审计已保证）且 real 稳定 > no-reader 时，才进入 5M–20M。
+
+---
+
+## 15. 2026-09-03 第二十六轮：机制分析优先与语义对齐证据
+
+> 详细见 `docs/round-26-systematic.md`。
+
+### 15.1 坐标
+
+- ✅ M1 三线 150 QA 已完成：real 50.7% / control 52.7% / no-reader 53.3%。
+- ✅ val loss 上 real < control < no-reader，但任务级 PLE 无净收益。
+- ✅ control 证明“注入扰动”本身会伤害 BoolQ。
+- ✅ 发现 control 也能做对 Newton/Shakespeare 等“知识型”题，单纯“答案不在语料中”不足以证明 PLE 语义对齐。
+- 🔄 M2–M5 后台运行中。
+- ⚠️ 下一阶段从“继续堆 mix”转向“机制与可解释性分析”。
+
+### 15.2 阶段调整
+
+1. Phase A：机制分析（最高优先）
+   - reader 参数有效性；
+   - CKA / probe / activation patch / logit lens；
+   - BoolQ 退化定位；
+   - 语义对齐证据报告。
+2. Phase B：固定外部评测
+   - 固定 LM probe；
+   - 固定 QA/BoolQ；
+   - 不再用各自语料 val loss 选 mix。
+3. Phase C：训练与门控修正
+   - 调整注入层/scale/gate；
+   - 增加 BoolQ/QA 格式数据；
+   - 确认后再进入 5M–20M。
+4. Phase D：RL 门禁
+   - 必须满足 real > control、real > no-reader、有 real 独有非记忆新做对、BoolQ 不退化，才做 RL。
+5. Phase E：产品化
+   - serving A/B + CPU 100 tok/s。
+
+---
+
+## 16. 2026-09-03 第二十七轮：暂停 M2–M5，转向流形对齐与机制验证
+
+> 详细见 `docs/round-27-manifold-alignment.md`。
+
+### 16.1 坐标
+
+- ✅ M2–M5 已暂停，不再继续混比微调。
+- ✅ 方向调整：优先机制验证和 case 分析。
+- ✅ 完成流形/语义空间对齐调研：
+  - Procrustes / CCA；
+  - Manifold alignment；
+  - Gromov-Wasserstein / Optimal Transport；
+  - Contrastive / InfoNCE / MMD；
+  - CKA / local neighbor overlap / intrinsic dimension。
+- ⚠️ 下一步先测 PLE e_t 与 Qwen hidden 的可对齐性。
+
+### 16.2 下一步
+
+1. CKA / Procrustes / kNN overlap 诊断。
+2. reader 参数有效性与 activation patching。
+3. BoolQ 错误分类与 logit lens。
+4. layer/scale/gate 扫描。
+5. 设计 manifold alignment / contrastive / KL 约束 loss。

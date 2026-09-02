@@ -19,7 +19,7 @@ ENGRAMDB_DIR="${ENGRAMDB_DIR:-/home/zeng/EngramDB}"
 ROWS_DIR="${ROWS_DIR:-/home/zeng/qwen38-rows}"
 VENV="${VENV:-$QWEEN_DIR/.venv}"
 PY_VER="${PY_VER:-3.12}"
-ENGRAMDB_VERSION="${ENGRAMDB_VERSION:-0.2.11}"
+ENGRAMDB_VERSION="${ENGRAMDB_VERSION:-0.2.12}"
 
 echo "[wsl-repro] qwen35-ple = $QWEEN_DIR"
 echo "[wsl-repro] engramdb   = $ENGRAMDB_DIR"

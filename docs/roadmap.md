@@ -890,3 +890,33 @@ P0 评测 → P1 reader 增强 → P2 backbone 适配 → P3 SFT/RL → P4 混�
 
 - 抛弃 val loss 作为任务代理；
 - 改用 ΔR²、条件互信息、real-control task accuracy 作为决策指标。
+- 改用 ΔR²、条件互信息、real-control task accuracy 作为决策指标。
+
+---
+
+## 34. 2026-09-03 第四十七轮：系统性战略复盘
+
+> 详细见 `docs/round-47-systematic-strategy.md`。
+
+### 34.1 终极目标
+
+- 可复现、可审计、可产品化地提升 0.8B+PLE 端到端智能；
+- CPU 100 tok/s。
+
+### 34.2 技术债
+
+- 没有 rare-task 评测；
+- 没有任务级条件互信息；
+- h_to_e 退化未根治；
+- 没有 backbone adaptation；
+- 没有稳定 contrastive；
+- 没有 RAG 对照；
+- 缺少 3 seeds。
+
+### 34.3 借鉴
+
+Memory Grafting / Engram / NGM / RAG / Hierarchical Memory / Selective Memory / SR-TTT / Storage-Retrieval Gap / EngramDB / CompileForge。
+
+### 34.4 计划
+
+Phase A 任务与指标 → Phase B Reader 稳定 → Phase C Backbone 适配与规模 → Phase D RL/混合记忆 → Phase E 产品化。

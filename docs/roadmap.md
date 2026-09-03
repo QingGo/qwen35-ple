@@ -850,3 +850,24 @@ P0 评测 → P1 reader 增强 → P2 backbone 适配 → P3 SFT/RL → P4 混�
 - 需要稀有知识评测；
 - 需要真实任务 SFT/RL；
 - 如果 PLE 不足，考虑 RAG / 教师蒸馏 / 更语义化记忆。
+- 如果 PLE 不足，考虑 RAG / 教师蒸馏 / 更语义化记忆。
+
+---
+
+## 32. 2026-09-03 第四十五轮：数学有效性论证
+
+> 详细见 `docs/round-45-math-validity.md`。
+
+### 32.1 已论证
+
+- 信息论上界：任何记忆注入收益 ≤ I(Y;E|H)；
+- 冻结 backbone 下，J_F Δ≈0 会阻断注入；
+- differential/E-specific 更合理：当前 v_E 占比约 3%；
+- rare gate 有数据支持：稀有 ΔR² 高于常见；
+- SFT/RL 需要 I(Y;E|H)>0 才有意义。
+
+### 32.2 待验证
+
+- 真实知识任务上的条件互信息；
+- LoRA/backbone adaptation 是否真能提升；
+- RAG vs PLE 同口径对比。

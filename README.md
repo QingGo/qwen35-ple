@@ -45,6 +45,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-40-mlp-reader-theory.md](docs/round-40-mlp-reader-theory.md) | MLP Value Reader 数学理论：线性容量瓶颈、E⊥ 去相关、PLS 非线性次优、残差监督 |
 | [docs/round-41-mlp-residual-reader.md](docs/round-41-mlp-residual-reader.md) | MLP Value 原型：残差监督可达 Oracle R²，但 real/control/random 几乎无差异 |
 | [docs/round-42-mlp-reader-experiments.md](docs/round-42-mlp-reader-experiments.md) | MLP Reader 深入：h_to_e 退化、E⊥ 需与 H 联合、differential 注入信号太弱 |
+| [docs/round-43-research-directions.md](docs/round-43-research-directions.md) | 下一步研究方向：rare-token 评测/条件 gate/稳定对比损失/大规模训练/记忆表示学习 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

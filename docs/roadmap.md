@@ -811,3 +811,23 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - 正确 value 结构应是 MLP(H,E_perp)；
 - E 特有信号目前太弱；
 - 下一步应做 rare-token gate / 更大数据 / 真实任务训练。
+- 下一步应做 rare-token gate / 更大数据 / 真实任务训练。
+
+---
+
+## 30. 2026-09-03 第四十三轮：下一步研究方向
+
+> 详细见 `docs/round-43-research-directions.md`。
+
+### 30.1 外部研究整合
+
+- XMemTransfer / Memory Grafting：需要 5M–20M 训练量；
+- Storage–Retrieval Gap：adapter 可能学到输出条件化而非真正检索；
+- NGM / MLP Memory：可提供训练无关或更语义化的记忆表示；
+- Selective Memory / SR-TTT：支持稀有/高不确定性条件门控。
+
+### 30.2 最优先实验
+
+1. Rare-token cloze/QA 评测；
+2. Rare-token gate + differential value；
+3. 稳定 contrastive loss + 更大训练集。

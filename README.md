@@ -31,6 +31,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-27-manifold-alignment.md](docs/round-27-manifold-alignment.md) | 流形/语义空间对齐调研、数学工具、机制验证与 case 分析计划 |
 | [docs/round-27-full-summary.md](docs/round-27-full-summary.md) | 本轮全量总结：计划、发现、尝试、踩坑、完成/未完成、未来计划 |
 | [docs/round-28-mechanism.md](docs/round-28-mechanism.md) | 第一批机制验证：CKA/Procrustes/kNN/reader 参数/activation patch |
+| [docs/round-29-alignment-math.md](docs/round-29-alignment-math.md) | 数学推导：条件增量可解释性、gate/value 分工、正交化注入、实验指导 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

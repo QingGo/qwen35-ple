@@ -510,3 +510,35 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 2. 设计并验证 contrastive / neighbor / KL 约束 loss 是否能提高对齐指标。
 3. 完成 BoolQ logit lens 与错误分类。
 4. 在此之前不进入 5M–20M 和 RL。
+
+---
+
+## 18. 2026-09-03 第二十九轮：数学推导“最有效对齐”
+
+> 详细见 `docs/round-29-alignment-math.md`。
+
+### 18.1 核心观点
+
+- 不应以 CKA / Procrustes 高为目标；
+- 应以 **条件增量可解释性** 为目标：
+
+\[
+\Delta R^2(Y; E \mid H) = R^2(Y; H,E) - R^2(Y; H)
+\]
+
+- 任意 reader 的增益上界是 \(I(Y; E \mid H)\)；
+- 最优 reader 应逼近 \(\mathbb{E}[R \mid H,E]\)，其中 \(R = Y - \mathbb{E}[Y \mid H]\)。
+
+### 18.2 建议实验
+
+1. 测量 \(R^2(Y;H)\)、\(R^2(Y;H,E)\)、\(R^2(Y;H,E_\perp)\)；
+2. 将 reader 拆成：
+   - Key/gate：与 H 局部对齐；
+   - Value：与 H 去相关、与任务残差可解码。
+3. 增加 loss：
+   - \(L_{\text{align}}(K(E), Q(H))\)
+   - \(L_{\text{task}}(V(E), R)\)
+   - \(\|\mathrm{Corr}(V(E),H)\|^2\)
+   - gate 稀疏度 / entropy
+   - KL(reader_on || reader_off)
+4. 只有看到明确的正 \(\Delta R^2\) 与 real-specific 新正确题，才进入 5M–20M / RL。

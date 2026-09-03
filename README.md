@@ -42,6 +42,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-37-preregistered.md](docs/round-37-preregistered.md) | 预注册：PLS 监督压缩与稀有 token 实验判读 |
 | [docs/round-38-results-pls-rare.md](docs/round-38-results-pls-rare.md) | 实测：PLS 低秩有效、稀有 token 增量约为常见 token 两倍 |
 | [docs/round-39-oracle-mlp-results.md](docs/round-39-oracle-mlp-results.md) | Oracle MLP：非线性可将增量 R² 提升约 3–4 倍，E⊥ 在非线性下最好 |
+| [docs/round-40-mlp-reader-theory.md](docs/round-40-mlp-reader-theory.md) | MLP Value Reader 数学理论：线性容量瓶颈、E⊥ 去相关、PLS 非线性次优、残差监督 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

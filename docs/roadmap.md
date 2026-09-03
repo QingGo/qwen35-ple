@@ -740,3 +740,36 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - 非线性可将记忆增量提高约 3–4 倍；
 - E⊥ 在非线性下表现最好；
 - 当前 reader 容量不足，应实现非线性 Value 路径。
+- 当前 reader 容量不足，应实现非线性 Value 路径。
+
+---
+
+## 27. 2026-09-03 第四十轮：MLP Value Reader 数学理论
+
+> 详细见 `docs/round-40-mlp-reader-theory.md`。
+
+### 27.1 核心数学
+
+\[
+\Delta R^2_{	ext{mlp}} / \Delta R^2_{	ext{lin}}
+pprox
+\|g\|^2 / \|g_{	ext{lin}}\|^2
+\]
+
+- 实验比值 3.55，说明线性只提取约 28% 信号；
+- E⊥ 与 R 正交补相关，去冗余且不损失信息；
+- PLS 优化线性相关，对非线性模型次优。
+
+### 27.2 设计指导
+
+\[
+\Delta=g(h,e)\cdot \mathrm{MLP}(E_\perp)
+\]
+
+建议加 aux loss：
+
+\[
+\|\mathrm{MLP}(E_\perp)-\widehat R\|^2
+\]
+
+并用稀有 token / 高不确定性 gate。

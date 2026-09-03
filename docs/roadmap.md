@@ -701,3 +701,23 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - 不能直接无监督 PCA 压缩；
 - 需要 PLS / 监督方向或重新定义记忆任务；
 - 当前证据仍不足以进入 5M–20M / RL。
+
+---
+
+## 25. 2026-09-03 第三十七/三十八轮：PLS 与稀有 token
+
+> 预注册：`docs/round-37-preregistered.md`
+> 实测：`docs/round-38-results-pls-rare.md`
+
+### 25.1 结果
+
+- PLS r=64 时 ΔR²=+0.0074，超过全维度 +0.0058；
+- 稀有 token ΔR²=+0.0152，约为常见 token +0.0079 的两倍；
+- 说明记忆信号可用监督低秩方向提取，且更偏向长尾 token。
+
+### 25.2 决策
+
+- 放弃无监督 PCA；
+- 改用 PLS/有监督低秩记忆瓶颈；
+- 用稀有 token 子集重测 real vs control；
+- 当前仍不足以进入 5M–20M / RL。

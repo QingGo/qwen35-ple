@@ -831,3 +831,22 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 1. Rare-token cloze/QA 评测；
 2. Rare-token gate + differential value；
 3. 稳定 contrastive loss + 更大训练集。
+3. 稳定 contrastive loss + 更大训练集。
+
+---
+
+## 31. 2026-09-03 第四十四轮：端到端智能提升路线
+
+> 详细见 `docs/round-44-end-to-end-plan.md`。
+
+### 31.1 总路线
+
+P0 评测 → P1 reader 增强 → P2 backbone 适配 → P3 SFT/RL → P4 混合记忆/蒸馏 → P5 CPU serving → P6 迭代。
+
+### 31.2 核心转变
+
+- 不能只训 target-side reader；
+- 需要 LoRA / 部分解冻让 backbone 学会使用记忆；
+- 需要稀有知识评测；
+- 需要真实任务 SFT/RL；
+- 如果 PLE 不足，考虑 RAG / 教师蒸馏 / 更语义化记忆。

@@ -542,3 +542,30 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
    - gate 稀疏度 / entropy
    - KL(reader_on || reader_off)
 4. 只有看到明确的正 \(\Delta R^2\) 与 real-specific 新正确题，才进入 5M–20M / RL。
+
+---
+
+## 19. 2026-09-03 第三十轮：多视角数学推导
+
+> 详细见 `docs/round-30-multimath-alignment.md`。
+
+### 19.1 核心
+
+从 8 个数学视角重新定义“最有效对齐”：
+
+- 信息论：最优 reader 逼近条件期望，增益上界是 \(I(Y;E\mid H)\)；
+- 线性代数/谱：Value 用 \(E_\perp\)，Gate 用共享子空间；
+- 随机矩阵/高维统计：高维 E 噪声会稀释信号，需 ridge/PCA/PLS；
+- 最优传输/度量几何：应该做加权/条件对齐，而不是全局对齐；
+- RKHS/核方法：测条件 HSIC，判断是否需要非线性 reader；
+- 图谱/谱聚类：Gate 需要局部图对齐，可测 SpecAlign；
+- 优化动力学：检查 reader 输出是否真的与任务残差相关；
+- 流形假设：先压缩到低维记忆流形，再对齐。
+
+### 19.2 后续实验排序
+
+1. 增量 R² 诊断；
+2. PCA/PLS 噪声压缩诊断；
+3. 高残差子集上的条件对齐诊断；
+4. gate/value 分工商；
+5. 正信号确认后才进入 5M–20M / RL。

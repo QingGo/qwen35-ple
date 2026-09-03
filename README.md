@@ -48,6 +48,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-43-research-directions.md](docs/round-43-research-directions.md) | 下一步研究方向：rare-token 评测/条件 gate/稳定对比损失/大规模训练/记忆表示学习 |
 | [docs/round-44-end-to-end-plan.md](docs/round-44-end-to-end-plan.md) | 最大化端到端智能：评测集/reader增强/backbone适配/SFT-RL/混合记忆/CPU推理 |
 | [docs/round-45-math-validity.md](docs/round-45-math-validity.md) | 数学论证：信息上界、backbone适配必要性、differential注入、rare gate、SFT/RL边界 |
+| [docs/round-46-loss-vs-intelligence.md](docs/round-46-loss-vs-intelligence.md) | 为什么 Loss 在 Scaling Law 中可作代理，但 PLE 场景失效：分布偏移/style/条件互信息/EM不敏感性 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

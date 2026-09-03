@@ -871,3 +871,22 @@ P0 评测 → P1 reader 增强 → P2 backbone 适配 → P3 SFT/RL → P4 混�
 - 真实知识任务上的条件互信息；
 - LoRA/backbone adaptation 是否真能提升；
 - RAG vs PLE 同口径对比。
+- RAG vs PLE 同口径对比。
+
+---
+
+## 33. 2026-09-03 第四十六轮：Loss 代理为何失效
+
+> 详细见 `docs/round-46-loss-vs-intelligence.md`。
+
+### 33.1 核心
+
+- Scaling Law 中 Loss 代理有效，依赖“训练分布≈任务分布”等假设；
+- PLE 场景中 Loss 下降主要来自 style/局部 n-gram/格式效应；
+- control 也能降低 Loss，说明下降不依赖真实 token 顺序；
+- 任务智能需要的是 ΔI(Y;E|H)，而不是 val loss。
+
+### 33.2 策略
+
+- 抛弃 val loss 作为任务代理；
+- 改用 ΔR²、条件互信息、real-control task accuracy 作为决策指标。

@@ -50,10 +50,29 @@ def _load_reader(reader_path: str):
     return load_reader_with_extra(reader_path, device="cpu")
 
 
-def _install_reader(model, reader, layer: int):
+def _install_reader(model, reader, layer: int, inject_scale: float = 1.0):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-    from qwen35_ple.reader import install_reader_hook
-    return install_reader_hook(model, layer, reader)
+    if inject_scale == 1.0:
+        from qwen35_ple.reader import install_reader_hook
+        return install_reader_hook(model, layer, reader)
+
+    layer_module = model.model.layers[layer]
+
+    def post_hook(module, input, output):
+        if isinstance(output, tuple):
+            hidden = output[0]
+        else:
+            hidden = output
+        current = getattr(model, "_current_ple_e_t", None)
+        if current is not None and current.shape[1] == hidden.shape[1]:
+            contribution = reader(hidden, current)
+            new_hidden = hidden + contribution * inject_scale
+            if isinstance(output, tuple):
+                return (new_hidden,) + output[1:]
+            return new_hidden
+        return output
+
+    return layer_module.register_forward_hook(post_hook)
 
 
 def _load_qa(path: str, limit: int | None, tasks: list[str] | None):
@@ -121,6 +140,7 @@ def main() -> int:
     parser.add_argument("--reader", default="outputs/reader-real-seed0.pt")
     parser.add_argument("--rows-dir", default="/home/zeng/qwen38-rows")
     parser.add_argument("--layer", type=int, default=8)
+    parser.add_argument("--inject-scale", type=float, default=1.0, help="multiplier on reader output contribution")
     parser.add_argument("--scale", type=float, default=0.0002)
     parser.add_argument("--qa-file", default="data/qa-expanded-150.json")
     parser.add_argument("--tasks", nargs="+", default=None, choices=["triviaqa", "nq", "boolq"])
@@ -135,7 +155,7 @@ def main() -> int:
     print(f"loaded model in {time.time()-t0:.1f}s", flush=True)
 
     reader, _ = _load_reader(args.reader)
-    handle = _install_reader(model, reader, args.layer)
+    handle = _install_reader(model, reader, args.layer, args.inject_scale)
     qa_store = QAEtStore(args.rows_dir, args.scale)
     items = _load_qa(args.qa_file, args.limit, args.tasks)
     device = next(model.parameters()).device

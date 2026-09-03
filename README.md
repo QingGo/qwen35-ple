@@ -30,6 +30,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-26-systematic.md](docs/round-26-systematic.md) | 系统性思考：语义对齐证据、机制分析技术债、RL 门禁、借鉴矩阵 |
 | [docs/round-27-manifold-alignment.md](docs/round-27-manifold-alignment.md) | 流形/语义空间对齐调研、数学工具、机制验证与 case 分析计划 |
 | [docs/round-27-full-summary.md](docs/round-27-full-summary.md) | 本轮全量总结：计划、发现、尝试、踩坑、完成/未完成、未来计划 |
+| [docs/round-28-mechanism.md](docs/round-28-mechanism.md) | 第一批机制验证：CKA/Procrustes/kNN/reader 参数/activation patch |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）
@@ -149,7 +150,7 @@ tests/            一致性冒烟测试（golden 对拍）
 - [x] 批处理入口：`scripts/run_mix_batch.sh`（WSL 批量跑 M1–M5 三线 QA）
 - [x] M1 三线 150 QA 已完成：real 50.7% / control 52.7% / no-reader 53.3%；机制分析见 `docs/round-26-systematic.md`
 - [x] 关键认知：混合语料 val loss 降低不等于能力提升；control 也会出现“知识型”good case
-- [ ] 机制分析：reader 参数有效性 / CKA / activation patch / logit lens / BoolQ 退化定位
+- [x] 第一批机制分析：reader 参数 / CKA / Procrustes / kNN / intrinsic dimension / logit-level patching（详见 `docs/round-28-mechanism.md`）
 - [ ] 固定外部评测集与科学 mix 选择
 - [ ] RL 决策门禁（当前不提前做 RL）
 - [x] 依赖收口：engram-peft>=1.2.7、engramdb-python>=0.2.12（CI 同步固定正式 tag）
@@ -189,19 +190,52 @@ tests/            一致性冒烟测试（golden 对拍）
 5. **当前真正属于 real 独有且不在语料中的增益很弱**
    例如 Leonardo da Vinci；其余主要是 BoolQ 上的 yes/no 差异。
 
+### 机制验证第一批结果（2026-09-03）
+
+在 `data/ple-books-160k` 上采样 2048 token，测量 PLE e_t 与 Qwen hidden：
+
+| layer | CKA | Procrustes alignment | kNN overlap (k=10) | hidden PR |
+|---|---:|---:|---:|---:|
+| 1 | 0.222 | 0.051 | 0.079 | 77.9 |
+| 8 | 0.151 | 0.034 | 0.075 | 41.2 |
+| 16 | 0.192 | 0.023 | 0.084 | 58.1 |
+| 23 | 0.151 | 0.010 | 0.068 | 37.5 |
+
+- PLE intrinsic dimension ≈ 765.6，Qwen ≈ 37–78。
+- 随机 kNN baseline ≈ 0.039，实际仅 0.068–0.084。
+- 结论：两个空间全局线性对齐弱、局部邻域接近随机；当前 reader 更像可训练投影，尚不是稳定流形对齐记忆读取器。
+
+Logit-level activation patching（BoolQ 8 题 / Trivia 10 题）：
+
+| 条件 | BoolQ answer logprob | BoolQ next entropy | Trivia answer logprob |
+|---|---:|---:|---:|
+| no-reader | -9.35 | 1.19 | -10.24 |
+| real | -7.47 | 2.57 | -10.21 |
+| control | -7.54 | 2.83 | -10.02 |
+| random | -9.16 | 1.26 | -10.28 |
+| zero | -9.35 | 1.19 | -10.24 |
+
+- real/control 都显著增加 next entropy，random/zero 接近 no-reader。
+- 说明当前效应主要来自“注入 PLE 类向量”，而不是“真实 token 顺序的语义内容”。
+- 详细报告：`docs/round-28-mechanism.md`。
+
 ### 当前状态
 
 - M2–M5 已暂停，不再继续混比微调。
-- 下一阶段以机制验证和 case 分析为主：
-  - reader 参数有效性；
-  - CKA / Procrustes / activation patch；
-  - BoolQ logit lens；
-  - PLE 检索忠实度；
-  - 流形 / 语义空间对齐。
+- 已完成第一批机制验证工具与结果：
+  - reader 参数 / gate 统计；
+  - CKA / Procrustes / kNN / intrinsic dimension；
+  - logit-level activation patching。
+- 下一阶段：
+  - 扩大到完整 150 题的 logit-patch 分层分析；
+  - 增加 zero/random reader 对照；
+  - layer / scale / gate 扫描；
+  - 设计 contrastive / neighbor / KL 约束 loss。
 - 详细分析见：
   - `docs/round-26-systematic.md`
   - `docs/round-27-manifold-alignment.md`
   - `docs/round-27-full-summary.md`
+  - `docs/round-28-mechanism.md`
 
 
 

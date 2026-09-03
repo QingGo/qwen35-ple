@@ -467,3 +467,28 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 3. BoolQ 错误分类与 logit lens。
 4. layer/scale/gate 扫描。
 5. 设计 manifold alignment / contrastive / KL 约束 loss。
+
+---
+
+## 17. 2026-09-03 第二十八轮：第一批机制验证结果
+
+> 详细见 `docs/round-28-mechanism.md`。
+
+### 17.1 已完成
+
+- ✅ 新增 `mechanism_alignment.py`：CKA / Procrustes / kNN overlap / intrinsic dimension / reader 参数与 gate 统计。
+- ✅ 新增 `mechanism_logit_patch.py`：logit-level activation patching，no-reader / real / control / random / zero。
+- ✅ PLE e_t 与 Qwen hidden 的全局线性对齐和局部邻域对齐都很弱：
+  - CKA 约 0.15–0.22；
+  - Procrustes alignment 约 0.01–0.05；
+  - kNN overlap 约 0.068–0.084，随机基线 0.039；
+  - PLE intrinsic dimension 约 766，Qwen 约 37–78。
+- ✅ real 与 control 都会提高 next-token entropy；random/zero 接近 no-reader。
+- ✅ 当前效应主要来自“注入 PLE 类向量”，而不是“真实 token 顺序的语义内容”。
+
+### 17.2 下一步
+
+1. 扩大到完整 150 题 logit-patch 分层分析。
+2. 增加 zero/random reader、scale/gate/layer 扫描。
+3. 设计并验证 contrastive / neighbor / KL 约束 loss 是否能提高对齐指标。
+4. 在此之前不进入 5M–20M 和 RL。

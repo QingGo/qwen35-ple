@@ -101,7 +101,10 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden", type=int, default=256)
     parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--contrastive-lambda", type=float, default=1.0, help="weight for real-vs-control hinge loss")
+    parser.add_argument("--contrastive-margin", type=float, default=0.01)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--freeze-h-to-e", action="store_true", help="freeze h_to_e to a fixed ridge projection from H to E")
     parser.add_argument("--output-reader", default="outputs/reader-mlp-residual.pt")
     parser.add_argument("--output-metrics", default="outputs/train-mlp-residual.json")
     args = parser.parse_args()
@@ -141,13 +144,29 @@ def main() -> int:
     with torch.no_grad():
         reader.gate_bias.fill_(10.0)
 
-    opt = torch.optim.AdamW(reader.parameters(), lr=args.lr, weight_decay=1e-4)
+    if getattr(args, "freeze_h_to_e", False):
+        # Fit a fixed ridge projection from H to E on the training split.
+        lam = 1.0
+        H_np = H_tr.numpy()
+        E_np = E_tr.numpy()
+        beta = np.linalg.solve(
+            H_np.T @ H_np + lam * np.eye(H_np.shape[1]),
+            H_np.T @ E_np,
+        )  # (m, d)
+        with torch.no_grad():
+            reader.h_to_e.weight.copy_(torch.from_numpy(beta.T).float())
+            reader.h_to_e.weight.requires_grad_(False)
+        print("froze h_to_e using fixed ridge projection", flush=True)
+
+    trainable_params = [p for p in reader.parameters() if p.requires_grad]
+    opt = torch.optim.AdamW(trainable_params, lr=args.lr, weight_decay=1e-4)
 
     def eval_r2():
         reader.eval()
         with torch.no_grad():
             e_perp_te = E_te - reader.h_to_e(H_te)
-            pred = reader.value_mlp(e_perp_te).numpy()
+            value_input_te = torch.cat([H_te, e_perp_te], dim=-1)
+            pred = reader.value_mlp(value_input_te).numpy()
         ss_res = float(np.sum((G_te.numpy() - pred) ** 2))
         ss_tot = float(np.sum(G_te.numpy() ** 2))
         return 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
@@ -163,8 +182,22 @@ def main() -> int:
             g = G_tr[idx]
             e = E_tr[idx]
             e_perp = e - reader.h_to_e(h)
-            pred = reader.value_mlp(e_perp)
-            loss = F.mse_loss(pred, g)
+            value_input = torch.cat([h, e_perp], dim=-1)
+            pred = reader.value_mlp(value_input)
+            loss_real = F.mse_loss(pred, g)
+
+            if getattr(args, "contrastive_lambda", 0.0) > 0.0:
+                perm_batch = torch.randperm(e.shape[0])
+                e_control = e[perm_batch]
+                e_perp_control = e_control - reader.h_to_e(h)
+                value_input_control = torch.cat([h, e_perp_control], dim=-1)
+                pred_control = reader.value_mlp(value_input_control)
+                loss_control = F.mse_loss(pred_control, g)
+                hinge = F.relu(loss_real - loss_control + args.contrastive_margin)
+                loss = loss_real + args.contrastive_lambda * hinge
+            else:
+                loss = loss_real
+
             opt.zero_grad()
             loss.backward()
             opt.step()

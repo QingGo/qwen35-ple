@@ -792,3 +792,22 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - 需要训练 value 对 E 特有信息的响应；
 - 需要恢复 gate 训练；
 - 需要 real-vs-control 判别损失或条件化耦合。
+
+---
+
+## 29. 2026-09-03 第四十二轮：MLP Reader 深入实验
+
+> 详细见 `docs/round-42-mlp-reader-experiments.md`。
+
+### 29.1 关键结果
+
+- 可训练 h_to_e 会把 H 走私进 E_perp，导致 value 不响应 E；
+- 固定 h_to_e 后，MLP(E_perp) 几乎无法预测 R（R²≈0）；
+- 只有 MLP(H,E_perp) 恢复 Oracle 水平（R²≈0.275）；
+- differential 注入 real/control 差异很小，random 反而最好。
+
+### 29.2 结论
+
+- 正确 value 结构应是 MLP(H,E_perp)；
+- E 特有信号目前太弱；
+- 下一步应做 rare-token gate / 更大数据 / 真实任务训练。

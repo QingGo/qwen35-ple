@@ -321,9 +321,10 @@ class MLPValueReader(torch.nn.Module):
         self.h_to_e = torch.nn.Linear(d_model, d_mem, bias=False)
         torch.nn.init.zeros_(self.h_to_e.weight)
 
-        # Nonlinear value path.
+        # Nonlinear value path.  It sees both H and E_perp, matching the
+        # oracle MLP which used H+E_perp as input.
         self.value_mlp = torch.nn.Sequential(
-            torch.nn.Linear(d_mem, hidden, bias=False),
+            torch.nn.Linear(d_mem + d_model, hidden, bias=False),
             torch.nn.GELU(),
             torch.nn.Linear(hidden, hidden, bias=False),
             torch.nn.GELU(),
@@ -341,13 +342,22 @@ class MLPValueReader(torch.nn.Module):
 
     def forward(self, h, e_t):
         e_perp = e_t - self.h_to_e(h)
-        v = self.value_mlp(e_perp)
+        value_input = torch.cat([h, e_perp], dim=-1)
+        v = self.value_mlp(value_input)
+
+        # Differential / E-specific value: subtract the value that would be
+        # produced with no E content, so we inject only memory-specific info.
+        zero_e_perp = torch.zeros_like(e_perp)
+        base_input = torch.cat([h, zero_e_perp], dim=-1)
+        v_base = self.value_mlp(base_input)
+        v_diff = v - v_base
+
         k = self.key_proj(e_t)
         norm_h = self.norm_h(h)
         norm_k = self.norm_k(k)
         gate_logit = (norm_h * norm_k).sum(-1, keepdim=True) / math.sqrt(self.d_model)
         gate = torch.sigmoid(gate_logit + self.gate_bias)
-        return gate * v
+        return gate * v_diff
 
 
 class OfficialSourceQwenReader(torch.nn.Module):

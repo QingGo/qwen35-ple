@@ -920,3 +920,26 @@ Memory Grafting / Engram / NGM / RAG / Hierarchical Memory / Selective Memory / 
 ### 34.4 计划
 
 Phase A 任务与指标 → Phase B Reader 稳定 → Phase C Backbone 适配与规模 → Phase D RL/混合记忆 → Phase E 产品化。
+Phase A 任务与指标 → Phase B Reader 稳定 → Phase C Backbone 适配与规模 → Phase D RL/混合记忆 → Phase E 产品化。
+
+---
+
+## 35. 2026-09-03 第四十八轮：本轮完整总结
+
+> 详细见 `docs/round-48-full-summary.md`。
+
+### 35.1 已完成
+
+- 机制验证/数学证明/PLS/rare-token/Oracle MLP/MLPValueReader；
+- CI 修复与扩展；
+- 20 份 round 文档。
+
+### 35.2 未完成
+
+- rare-task benchmark；
+- task-level conditional MI；
+- backbone adaptation；
+- 稳定 contrastive；
+- RAG 对照；
+- 3 seeds；
+- serving/perf。

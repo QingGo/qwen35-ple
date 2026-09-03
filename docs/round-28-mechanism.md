@@ -87,43 +87,51 @@ real 与 control 的对比：
 
 ---
 
-## 4. Activation / Logit-level patching 初步结果
+## 4. Activation / Logit-level patching 结果
 
-### 4.1 BoolQ（前 8 题，单次 forward + answer span CE）
+### 4.1 完整 150 题（50 BoolQ + 50 NQ + 50 TriviaQA）
 
-| 条件 | mean answer logprob | mean next entropy |
-|---|---:|---:|
-| no-reader | -9.35 | 1.19 |
-| real | **-7.47** | 2.57 |
-| control | -7.54 | 2.83 |
-| random | -9.16 | 1.26 |
-| zero | -9.35 | 1.19 |
+| 条件 | BoolQ logprob | BoolQ entropy | NQ logprob | NQ entropy | Trivia logprob | Trivia entropy | 总体 logprob | 总体 entropy |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| no-reader | -10.01 | 0.84 | -6.90 | 4.02 | -9.57 | 2.49 | -8.83 | 2.45 |
+| real | **-7.62** | 2.23 | -6.80 | 4.69 | -9.39 | 2.83 | **-7.94** | 3.25 |
+| control | -8.09 | 2.33 | **-6.76** | 4.79 | **-9.26** | 2.96 | -8.04 | 3.36 |
+| random | -9.74 | 0.91 | -6.90 | 4.05 | -9.58 | 2.51 | -8.74 | 2.49 |
+| zero | -10.01 | 0.84 | -6.90 | 4.02 | -9.57 | 2.49 | -8.83 | 2.45 |
 
-### 4.2 TriviaQA（前 10 题）
+### 4.2 real vs control 逐题差值
 
-| 条件 | mean answer logprob | mean next entropy |
-|---|---:|---:|
-| no-reader | -10.24 | 2.51 |
-| real | -10.21 | 2.72 |
-| control | **-10.02** | 2.90 |
-| random | -10.28 | 2.58 |
-| zero | -10.24 | 2.51 |
+- 150 题中 real 更优 76 题，control 更优 74 题——接近抛硬币。
+- 总体 mean(real - control) = **+0.10 logprob**，说明真实 e_t 有轻微优势，但远不足以称为稳定的语义对齐。
+- BoolQ 上 real 优势最明显：-7.62 vs -8.09 (≈ +0.47 logprob)。
+- NQ / Trivia 上 control 略优，说明真实顺序在小样本 logprob 上仍未形成稳定正效应。
 
 ### 4.3 解读
 
 1. **real 和 control 都显著提高 next-token entropy**，而 random/zero 基本保持 no-reader 水平。
    - 说明 reader 会放行“PLE 形状的 e_t”（real 或 shuffled），但会抑制随机高斯向量。
-   - 也就是说：**当前差异主要来自“是否注入 e_t 类向量”，而不是“e_t 的具体 token 顺序/语义内容”。**
-2. **在这两个小样本上 real 没有稳定优于 control**：
-   - BoolQ：real 略优于 control；
-   - TriviaQA：control 略优于 real。
-3. 这说明 M1 中 real 与 control 的 QA 差异还不能归因于“真实 PLE 语义对齐”。
+   - 也就是说：**当前主要效应来自“是否注入 e_t 类向量”，而不是“e_t 的具体 token 顺序/语义内容”。**
+2. **完整 150 题上 real 相对 control 只有极微弱优势**：
+   - 总体 logprob +0.10；
+   - 逐题胜负 76:74；
+   - 仅在 BoolQ 上 real 优势较明显。
+3. 这说明 M1 中 real 与 control 的 QA 差异尚不能归因于“真实 PLE 语义对齐”，更可能是局部格式/分布差异。
+
+### 4.4 小样本早期结果（保留）
+
+| 条件 | BoolQ 8 题 logprob | BoolQ 8 题 entropy | Trivia 10 题 logprob | Trivia 10 题 entropy |
+|---|---:|---:|---:|---:|
+| no-reader | -9.35 | 1.19 | -10.24 | 2.51 |
+| real | -7.47 | 2.57 | -10.21 | 2.72 |
+| control | -7.54 | 2.83 | -10.02 | 2.90 |
+| random | -9.16 | 1.26 | -10.28 | 2.58 |
+| zero | -9.35 | 1.19 | -10.24 | 2.51 |
 
 ---
 
 ## 5. 下一步
 
-1. 扩大 logit-patch 到完整 150 题，按 task 分层，重点看 BoolQ 的 yes/no 倾向。
+1. ✅ 已完成完整 150 题 logit-level patching，并已按 task 分层。
 2. 加入 `zero-init reader` / `random reader` / `无 reader 但注入零` 等更高分辨率对照。
 3. 做 layer/scale/gate 扫描，寻找注入强度最低但仍能提供真实信号的配置。
 4. 设计 contrastive / neighbor-preserving / KL-to-no-reader loss，先在小语料上验证是否提高 CKA/kNN overlap。
@@ -139,4 +147,5 @@ outputs/mechanism-control-smoke.json
 outputs/mechanism-real-layers2048.json
 outputs/mechanism-logit-patch-boolq8.json
 outputs/mechanism-logit-patch-trivia10.json
+outputs/mechanism-logit-patch-full150.json
 ```

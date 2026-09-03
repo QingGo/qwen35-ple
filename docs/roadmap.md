@@ -486,9 +486,14 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - ✅ real 与 control 都会提高 next-token entropy；random/zero 接近 no-reader。
 - ✅ 当前效应主要来自“注入 PLE 类向量”，而不是“真实 token 顺序的语义内容”。
 
-### 17.2 下一步
+### 17.2 已完成后续补充
 
-1. 扩大到完整 150 题 logit-patch 分层分析。
-2. 增加 zero/random reader、scale/gate/layer 扫描。
-3. 设计并验证 contrastive / neighbor / KL 约束 loss 是否能提高对齐指标。
+- ✅ 完整 150 题 logit-level patching 已完成：real 总体 logprob -7.94，control -8.04，real 仅 +0.10，逐题 76:74。
+- ✅ BoolQ 上 real 优势较明显（+0.47），NQ/Trivia 上 control 略优。
+
+### 17.3 下一步
+
+1. 增加 zero/random reader、scale/gate/layer 扫描。
+2. 设计并验证 contrastive / neighbor / KL 约束 loss 是否能提高对齐指标。
+3. 完成 BoolQ logit lens 与错误分类。
 4. 在此之前不进入 5M–20M 和 RL。

@@ -205,17 +205,18 @@ tests/            一致性冒烟测试（golden 对拍）
 - 随机 kNN baseline ≈ 0.039，实际仅 0.068–0.084。
 - 结论：两个空间全局线性对齐弱、局部邻域接近随机；当前 reader 更像可训练投影，尚不是稳定流形对齐记忆读取器。
 
-Logit-level activation patching（BoolQ 8 题 / Trivia 10 题）：
+Logit-level activation patching（完整 150 题：50 BoolQ + 50 NQ + 50 TriviaQA）：
 
-| 条件 | BoolQ answer logprob | BoolQ next entropy | Trivia answer logprob |
-|---|---:|---:|---:|
-| no-reader | -9.35 | 1.19 | -10.24 |
-| real | -7.47 | 2.57 | -10.21 |
-| control | -7.54 | 2.83 | -10.02 |
-| random | -9.16 | 1.26 | -10.28 |
-| zero | -9.35 | 1.19 | -10.24 |
+| 条件 | BoolQ logprob | BoolQ entropy | NQ logprob | Trivia logprob | 总体 logprob | 总体 entropy |
+|---|---:|---:|---:|---:|---:|---:|
+| no-reader | -10.01 | 0.84 | -6.90 | -9.57 | -8.83 | 2.45 |
+| real | **-7.62** | 2.23 | -6.80 | -9.39 | **-7.94** | 3.25 |
+| control | -8.09 | 2.33 | **-6.76** | **-9.26** | -8.04 | 3.36 |
+| random | -9.74 | 0.91 | -6.90 | -9.58 | -8.74 | 2.49 |
+| zero | -10.01 | 0.84 | -6.90 | -9.57 | -8.83 | 2.45 |
 
 - real/control 都显著增加 next entropy，random/zero 接近 no-reader。
+- real 相对 control 仅 +0.10 总体 logprob，逐题胜负 76:74，接近抛硬币；仅 BoolQ 上 real 优势较明显（+0.47）。
 - 说明当前效应主要来自“注入 PLE 类向量”，而不是“真实 token 顺序的语义内容”。
 - 详细报告：`docs/round-28-mechanism.md`。
 
@@ -227,10 +228,10 @@ Logit-level activation patching（BoolQ 8 题 / Trivia 10 题）：
   - CKA / Procrustes / kNN / intrinsic dimension；
   - logit-level activation patching。
 - 下一阶段：
-  - 扩大到完整 150 题的 logit-patch 分层分析；
   - 增加 zero/random reader 对照；
   - layer / scale / gate 扫描；
-  - 设计 contrastive / neighbor / KL 约束 loss。
+  - 设计 contrastive / neighbor / KL 约束 loss；
+  - 完成 BoolQ logit lens 与错误分类。
 - 详细分析见：
   - `docs/round-26-systematic.md`
   - `docs/round-27-manifold-alignment.md`

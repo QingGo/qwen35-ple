@@ -160,6 +160,51 @@ tests/            一致性冒烟测试（golden 对拍）
 - [x] pre-commit 已配置（ruff）
 - [ ] CP/后训练正式消融与 100 tok/s 推理闭环
 
+## 最新实验结果（2026-09-03）
+
+### M1 混合语料 1M token 三线 150 QA
+
+| 线 | val loss | PPL | QA EM | TriviaQA | NQ | BoolQ |
+|---|---:|---:|---:|---:|---:|---:|
+| no-reader | 2.4563 | 11.66 | **53.3%** | 70% | 0% | **90%** |
+| real | **2.3949** | **10.97** | 50.7% | **76%** | 0% | 76% |
+| control | 2.4391 | 11.46 | 52.7% | 84% | 4% | 70% |
+
+### 核心结论
+
+1. **val loss：real < control < no-reader**
+   PLE 对语言建模仍有正信号。
+
+2. **QA EM：no-reader > control > real**
+   PLE 当前没有带来任务级净收益。
+
+3. **control 不是原版模型**
+   control = Qwen3.5 + 训练后 reader + 随机打乱的 PLE e_t。
+   control 也退化，说明“注入扰动 + 训练 reader”本身就会干扰 BoolQ。
+
+4. **control 也有“知识型”good case**
+   control 也能做对 Shakespeare / Newton / Rome / Poseidon，
+   因此“答案不在语料中”不能单独证明 PLE 语义对齐。
+
+5. **当前真正属于 real 独有且不在语料中的增益很弱**
+   例如 Leonardo da Vinci；其余主要是 BoolQ 上的 yes/no 差异。
+
+### 当前状态
+
+- M2–M5 已暂停，不再继续混比微调。
+- 下一阶段以机制验证和 case 分析为主：
+  - reader 参数有效性；
+  - CKA / Procrustes / activation patch；
+  - BoolQ logit lens；
+  - PLE 检索忠实度；
+  - 流形 / 语义空间对齐。
+- 详细分析见：
+  - `docs/round-26-systematic.md`
+  - `docs/round-27-manifold-alignment.md`
+  - `docs/round-27-full-summary.md`
+
+
+
 ## 推理 / Serving 现状与规划（2026-09-01）
 
 ### 当前推理现状

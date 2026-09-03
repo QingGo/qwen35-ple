@@ -609,3 +609,33 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 3. 分层梯度范数 \(c_l\)；
 4. real−control 的 CATE；
 5. 新 reader：低维瓶颈 + 局部窗口 gate + 去相关 value + 稀疏门控。
+
+---
+
+## 21. 2026-09-03 第三十二轮：第一性原理——对齐的本质
+
+> 详细见 `docs/round-32-first-principles-alignment.md`。
+
+### 21.1 核心
+
+- 对齐的本质是**条件充分性**，不是 CKA / Procrustes 几何相似；
+- 最优 reader 应逼近：
+  \[
+  \Delta^*(H,E)=E[Y|H,E]-E[Y|H]
+  \]
+- 几何相似既不充分也不必要。
+
+### 21.2 四命题
+
+- A：任意 reader 增益上界是条件互信息；
+- B：线性 reader 增益上界是线性增量 R²；
+- C：在线性残差意义下，Value 去相关不损失增量信息；
+- D：几何对齐既不充分也不必要。
+
+### 21.3 下一步
+
+1. 定义记忆任务族；
+2. 训练 oracle reader 得到上界；
+3. 测线性/核增量 R²；
+4. 测 E_perp 增量；
+5. 若 oracle 也无法提升，则记录为负面证据。

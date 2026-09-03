@@ -34,6 +34,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-29-alignment-math.md](docs/round-29-alignment-math.md) | 数学推导：条件增量可解释性、gate/value 分工、正交化注入、实验指导 |
 | [docs/round-30-multimath-alignment.md](docs/round-30-multimath-alignment.md) | 多视角数学推导：信息论/谱方法/随机矩阵/最优传输/核方法/图谱/优化动力学/流形假设 |
 | [docs/round-31-deeper-math.md](docs/round-31-deeper-math.md) | 更深数学分支：统计决策/因果推断/贝叶斯GP/微分几何/最优控制/拓扑/信息几何 |
+| [docs/round-32-first-principles-alignment.md](docs/round-32-first-principles-alignment.md) | 第一性原理：对齐的本质是条件充分性，不是几何相似；含命题 A-D 证明草图 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

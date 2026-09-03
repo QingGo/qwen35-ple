@@ -17,6 +17,7 @@ CHECKPOINT_FORMAT = "qwen35-ple-reader-v1"
 OFFICIAL_SOURCE_QWEN_V1 = "official_source_qwen_v1"
 ENGRAM_V1 = "engram_v1"
 SIMPLE_V1 = "simple_v1"
+MLP_VALUE_V1 = "mlp_value_v1"
 
 DEFAULT_VERSION = "1"
 
@@ -296,6 +297,42 @@ def get_registry() -> Any:
             **kwargs,
         )
 
+
+    @registry.register(MLP_VALUE_V1, version=DEFAULT_VERSION)
+    def _mlp_value(
+        d_model: int,
+        *,
+        d_mem: int = 2560,
+        hidden: int = 256,
+        gate_bias_init: float = -2.0,
+        zero_init_v: bool = True,
+        path: str | Path | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        from qwen35_ple.reader import MLPValueReader
+
+        if path is not None:
+            loaded = _load_path_payload(path)
+            if loaded["state_dict"] is not None:
+                reader = MLPValueReader(
+                    d_model=d_model,
+                    d_mem=d_mem,
+                    hidden=hidden,
+                    gate_bias_init=gate_bias_init,
+                    zero_init_v=zero_init_v,
+                )
+                reader.load_state_dict(loaded["state_dict"])
+                return reader
+
+        return MLPValueReader(
+            d_model=d_model,
+            d_mem=d_mem,
+            hidden=hidden,
+            gate_bias_init=gate_bias_init,
+            zero_init_v=zero_init_v,
+            **kwargs,
+        )
+
     _REGISTRY = registry
     return registry
 
@@ -432,5 +469,13 @@ def reader_config_from_args(
             "gate_bias_init": -2.0,
             "num_branches": int(getattr(args, "branches", 1) or 1),
             "zero_init_v": bool(getattr(args, "zero_init_v", False)),
+        }
+    if reader_name == MLP_VALUE_V1:
+        return {
+            "d_model": d_target,
+            "d_mem": 2560,
+            "hidden": int(getattr(args, "mlp_hidden", 256) or 256),
+            "gate_bias_init": float(getattr(args, "gate_bias_init", -2.0) or -2.0),
+            "zero_init_v": bool(getattr(args, "zero_init_v", True)),
         }
     raise ValueError(f"unknown reader name: {reader_name}")

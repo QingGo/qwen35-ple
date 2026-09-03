@@ -773,3 +773,22 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 \]
 
 并用稀有 token / 高不确定性 gate。
+
+---
+
+## 28. 2026-09-03 第四十一轮：MLP Value Reader 原型实验
+
+> 详细见 `docs/round-41-mlp-residual-reader.md`。
+
+### 28.1 结果
+
+- 新增 MLPValueReader / `--reader mlp` / 残差监督训练脚本；
+- 残差监督 best val R² = 0.288，接近 Oracle；
+- BoolQ 8 题：real/control/random/zero 几乎无差异；
+- 说明“value 能预测 R”不等于“value 会针对真实 PLE 内容选择性注入”。
+
+### 28.2 结论
+
+- 需要训练 value 对 E 特有信息的响应；
+- 需要恢复 gate 训练；
+- 需要 real-vs-control 判别损失或条件化耦合。

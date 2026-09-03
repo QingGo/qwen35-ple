@@ -39,6 +39,7 @@ import torch.nn.functional as F
 from qwen35_ple.live_store import LiveETStore, LiveETViewStore
 from qwen35_ple.reader import (
     EngramReader,
+    MLPValueReader,
     OfficialSourceQwenReader,
     QwenEngramReader,
     ShortConv,
@@ -46,6 +47,7 @@ from qwen35_ple.reader import (
 )
 from qwen35_ple.reader_registry import (
     ENGRAM_V1,
+    MLP_VALUE_V1,
     OFFICIAL_SOURCE_QWEN_V1,
     SIMPLE_V1,
     load_reader_with_extra,
@@ -592,6 +594,8 @@ def _run_mode(
         reader_name = OFFICIAL_SOURCE_QWEN_V1
     elif args.reader == "engram":
         reader_name = ENGRAM_V1
+    elif args.reader == "mlp":
+        reader_name = MLP_VALUE_V1
     else:
         reader_name = SIMPLE_V1
 
@@ -634,6 +638,14 @@ def _run_mode(
                 zero_init=args.zero_init_v,
             )
             short_conv = None
+        elif args.reader == "mlp":
+            reader = MLPValueReader(
+                model.config.hidden_size,
+                d_mem=2560,
+                hidden=int(getattr(args, "mlp_hidden", 256) or 256),
+                zero_init_v=getattr(args, "zero_init_v", True),
+            )
+            short_conv = None
         else:
             reader = EngramReader(
                 model.config.hidden_size,
@@ -664,7 +676,6 @@ def _run_mode(
     if getattr(args, "load_reader", None):
         # Loaded-checkpoint evaluation mode: no training, only eval/QA below.
         val_curve: list[dict] = []
-        pass
     else:
         print(f"  [{mode}] seed={seed} training ...")
         train_losses, val_curve = _train_reader(
@@ -811,8 +822,9 @@ def main() -> int:
     parser.add_argument("--scale", type=float, default=None)
     parser.add_argument("--layer", type=int, default=8)
     parser.add_argument("--branches", type=int, default=1)
-    parser.add_argument("--reader", choices=["simple", "engram", "official"], default="simple")
+    parser.add_argument("--reader", choices=["simple", "engram", "official", "mlp"], default="simple")
     parser.add_argument("--official-reader-path", default="data/official_ple_reader.pt")
+    parser.add_argument("--mlp-hidden", type=int, default=256, help="MLP value reader hidden width")
     parser.add_argument("--bridge-mlp", action="store_true")
     parser.add_argument("--bridge-hidden", type=int, default=None)
     parser.add_argument("--out-mlp", action="store_true")

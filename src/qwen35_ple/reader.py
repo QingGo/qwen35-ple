@@ -289,6 +289,67 @@ class OfficialQwenRMSNorm(torch.nn.Module):
         return out.to(orig_dtype)
 
 
+class MLPValueReader(torch.nn.Module):
+    """Nonlinear target-side reader with E_perp value path.
+
+    This is the theory-guided prototype:
+
+        E_perp = E - W_he H
+        v      = MLP(E_perp)
+        g      = sigmoid(gate)
+        output = g * v
+
+    Unlike the official reader, the value path is a trainable MLP (nonlinear),
+    and the value input is orthogonalized against H to avoid injecting
+    redundant information.
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        d_mem: int = 2560,
+        hidden: int = 256,
+        gate_bias_init: float = -2.0,
+        zero_init_v: bool = True,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.d_mem = d_mem
+        self.hidden = hidden
+
+        # H -> E projection used to estimate E_parallel and form E_perp.
+        self.h_to_e = torch.nn.Linear(d_model, d_mem, bias=False)
+        torch.nn.init.zeros_(self.h_to_e.weight)
+
+        # Nonlinear value path.
+        self.value_mlp = torch.nn.Sequential(
+            torch.nn.Linear(d_mem, hidden, bias=False),
+            torch.nn.GELU(),
+            torch.nn.Linear(hidden, hidden, bias=False),
+            torch.nn.GELU(),
+            torch.nn.Linear(hidden, d_model, bias=False),
+        )
+        if zero_init_v:
+            torch.nn.init.zeros_(self.value_mlp[-1].weight)
+
+        # Simple gate.
+        self.key_proj = torch.nn.Linear(d_mem, d_model, bias=False)
+        torch.nn.init.normal_(self.key_proj.weight, mean=0.0, std=0.02)
+        self.norm_h = RMSNorm(d_model)
+        self.norm_k = RMSNorm(d_model)
+        self.gate_bias = torch.nn.Parameter(torch.full((1,), gate_bias_init))
+
+    def forward(self, h, e_t):
+        e_perp = e_t - self.h_to_e(h)
+        v = self.value_mlp(e_perp)
+        k = self.key_proj(e_t)
+        norm_h = self.norm_h(h)
+        norm_k = self.norm_k(k)
+        gate_logit = (norm_h * norm_k).sum(-1, keepdim=True) / math.sqrt(self.d_model)
+        gate = torch.sigmoid(gate_logit + self.gate_bias)
+        return gate * v
+
+
 class OfficialSourceQwenReader(torch.nn.Module):
     """Best-effort reuse of the official Qwen3.8 PLE reader.
 

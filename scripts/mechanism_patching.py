@@ -77,6 +77,7 @@ class QAEtStore:
 
     def __init__(self, rows_dir: str, scale: float):
         import engramdb
+
         from qwen35_ple.real_ple import real_spec
 
         spec = real_spec()
@@ -90,6 +91,7 @@ class QAEtStore:
 
     def fetch(self, ids: list[int] | np.ndarray) -> np.ndarray:
         import engramdb
+
         from qwen35_ple.real_ple import rowids_from_tokens
 
         rowids = rowids_from_tokens(np.asarray(ids, dtype=np.int64))

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import sys
 import time
@@ -69,6 +68,7 @@ def _load_qa(path: str, limit: int | None, tasks: list[str] | None):
 class QAEtStore:
     def __init__(self, rows_dir: str, scale: float):
         import engramdb
+
         from qwen35_ple.real_ple import real_spec
 
         spec = real_spec()
@@ -82,6 +82,7 @@ class QAEtStore:
 
     def fetch(self, ids: list[int] | np.ndarray) -> np.ndarray:
         import engramdb
+
         from qwen35_ple.real_ple import rowids_from_tokens
 
         rowids = rowids_from_tokens(np.asarray(ids, dtype=np.int64))
@@ -139,7 +140,6 @@ def main() -> int:
     items = _load_qa(args.qa_file, args.limit, args.tasks)
     device = next(model.parameters()).device
     results = []
-    eos_id = tokenizer.eos_token_id
 
     try:
         for idx, item in enumerate(items):
@@ -191,7 +191,7 @@ def main() -> int:
                 probs = F.softmax(next_logits, dim=-1)
                 eps = 1e-12
                 entropy = float(-(probs * torch.log(probs + eps)).sum().item())
-                top_ids, top_vals = _topk(next_logits, k=5)
+                top_ids, _ = _topk(next_logits, k=5)
                 top_text = [tokenizer.decode([i], skip_special_tokens=True) for i in top_ids]
 
                 if baseline_logits is None:

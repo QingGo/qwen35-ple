@@ -30,7 +30,7 @@ __all__ = [
     "LiveETView",
     "LiveETViewStore",
     "SlotIndex",
+    "__version__",
     "load_reader",
     "save_reader",
-    "__version__",
 ]

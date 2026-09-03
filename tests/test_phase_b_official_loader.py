@@ -17,18 +17,18 @@ import pytest
 torch = pytest.importorskip("torch")
 engramdb = pytest.importorskip("engramdb")
 
-from engramdb.official_loader import (  # noqa: E402
+from engramdb.official_loader import (
     install_disk_ple_in_official_model,
     patch_official_ngram_embedding_for_disk_load,
 )
-from engramdb.ple_adapter import (  # noqa: E402
+from engramdb.ple_adapter import (
     DiskPleNGramEmbedding,
     head_offsets,
     head_vocab_sizes,
     padded_vocab_size,
 )
 
-from qwen35_ple.official_ple_snapshot import (  # noqa: E402
+from qwen35_ple.official_ple_snapshot import (
     Qwen4ExpTextNGramEmbedding,
     Qwen4ExpTextPLELayer,
 )

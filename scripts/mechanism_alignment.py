@@ -253,7 +253,7 @@ def main() -> int:
     args = parser.parse_args()
 
     t0 = time.time()
-    tokenizer, model = _load_model(args.model)
+    _, model = _load_model(args.model)
     print(f"loaded model in {time.time()-t0:.1f}s", flush=True)
 
     tokens, e_t = _load_features(args.features, args.max_tokens)
@@ -267,7 +267,7 @@ def main() -> int:
     for layer in layers:
         hidden = hidden_map[layer]
         align_entry = {
-            "n_tokens": int(len(tokens)),
+            "n_tokens": len(tokens),
             "layer": layer,
             "linear_cka": _linear_cka(e_t, hidden),
             "procrustes": _procrustes_score(e_t, hidden, k=min(256, e_t.shape[1], hidden.shape[1], len(hidden))),

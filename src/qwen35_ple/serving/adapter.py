@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from typing_extensions import Self
+
 try:
     import torch
 except ImportError:  # pragma: no cover - optional dependency
@@ -61,7 +63,7 @@ class QwenReaderServingAdapter:
             e_t = e_t.flatten(2)
         self.model._current_ple_e_t = e_t
 
-    def install(self) -> "QwenReaderServingAdapter":
+    def install(self) -> QwenReaderServingAdapter:
         if self._pre_handle is not None or self._post_handle is not None:
             return self
         self._pre_handle = self.model.register_forward_pre_hook(self._pre_hook)
@@ -85,10 +87,10 @@ class QwenReaderServingAdapter:
         if hasattr(self.model, "_current_ple_e_t"):
             self.model._current_ple_e_t = None
 
-    def __enter__(self) -> "QwenReaderServingAdapter":
+    def __enter__(self) -> Self:
         return self.install()
 
-    def __exit__(self, *exc_info: Any) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         self.remove()
 
 

@@ -41,6 +41,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-36-experiment-results.md](docs/round-36-experiment-results.md) | 实际结果：信号分散高维、高梯度 token 反而负增益、低梯度 token 正增益 |
 | [docs/round-37-preregistered.md](docs/round-37-preregistered.md) | 预注册：PLS 监督压缩与稀有 token 实验判读 |
 | [docs/round-38-results-pls-rare.md](docs/round-38-results-pls-rare.md) | 实测：PLS 低秩有效、稀有 token 增量约为常见 token 两倍 |
+| [docs/round-39-oracle-mlp-results.md](docs/round-39-oracle-mlp-results.md) | Oracle MLP：非线性可将增量 R² 提升约 3–4 倍，E⊥ 在非线性下最好 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

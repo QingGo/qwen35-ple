@@ -721,3 +721,22 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - 改用 PLS/有监督低秩记忆瓶颈；
 - 用稀有 token 子集重测 real vs control；
 - 当前仍不足以进入 5M–20M / RL。
+
+---
+
+## 26. 2026-09-03 第三十九轮：Oracle MLP 非线性上界
+
+> 详细见 `docs/round-39-oracle-mlp-results.md`。
+
+### 26.1 结果
+
+- 线性 H+E：ΔR²=+0.0058；
+- MLP H+E：ΔR²=+0.0206；
+- MLP H+E⊥：ΔR²=+0.0228；
+- MLP H+PLS64：ΔR²=+0.0122。
+
+### 26.2 结论
+
+- 非线性可将记忆增量提高约 3–4 倍；
+- E⊥ 在非线性下表现最好；
+- 当前 reader 容量不足，应实现非线性 Value 路径。

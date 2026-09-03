@@ -220,6 +220,19 @@ Logit-level activation patching（完整 150 题：50 BoolQ + 50 NQ + 50 TriviaQ
 - 说明当前效应主要来自“注入 PLE 类向量”，而不是“真实 token 顺序的语义内容”。
 - 详细报告：`docs/round-28-mechanism.md`。
 
+额外 BoolQ scale sweep（50 题，`--inject-scale`）：
+
+| scale | real logprob | control logprob | real-control | real entropy |
+|---:|---:|---:|---:|---:|
+| 0.25 | -9.51 | -9.64 | +0.14 | 0.89 |
+| 0.5 | -8.78 | -9.16 | +0.38 | 1.20 |
+| 1.0 | -7.62 | -8.21 | +0.59 | 2.23 |
+| 2.0 | -7.46 | **-7.19** | -0.27 | 3.95 |
+
+- real 优势在 scale=1.0 附近最大；2.0 时 control 反超且 entropy 大幅上升。
+- 低强度 0.25/0.5 可降低扰动，但 real-control 优势也缩小。
+- 初步认为 0.5 附近是“低破坏 + 仍有真实信号”的候选区间，但优势仍不够强。
+
 ### 当前状态
 
 - M2–M5 已暂停，不再继续混比微调。
@@ -229,7 +242,7 @@ Logit-level activation patching（完整 150 题：50 BoolQ + 50 NQ + 50 TriviaQ
   - logit-level activation patching。
 - 下一阶段：
   - 增加 zero/random reader 对照；
-  - layer / scale / gate 扫描；
+  - layer / gate 扫描（scale sweep 已完成）；
   - 设计 contrastive / neighbor / KL 约束 loss；
   - 完成 BoolQ logit lens 与错误分类。
 - 详细分析见：

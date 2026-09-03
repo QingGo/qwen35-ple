@@ -491,9 +491,22 @@ LLM-CompileForge 教我们“契约驱动与性能验证”，Qwen/DeepSeek 教�
 - ✅ 完整 150 题 logit-level patching 已完成：real 总体 logprob -7.94，control -8.04，real 仅 +0.10，逐题 76:74。
 - ✅ BoolQ 上 real 优势较明显（+0.47），NQ/Trivia 上 control 略优。
 
+### 17.2.5 Scale sweep 结果（BoolQ 50 题）
+
+| scale | real logprob | control logprob | real-control | real entropy |
+|---:|---:|---:|---:|---:|
+| 0.25 | -9.51 | -9.64 | +0.14 | 0.89 |
+| 0.5 | -8.78 | -9.16 | +0.38 | 1.20 |
+| 1.0 | -7.62 | -8.21 | +0.59 | 2.23 |
+| 2.0 | -7.46 | -7.19 | -0.27 | 3.95 |
+
+- real 优势在 1.0 附近最大，2.0 时 control 反超。
+- 0.5 是“低破坏 + 仍有真实信号”的候选，但优势仍不足。
+- 结论：单纯加大注入强度不是正解，需要 layer/gate/训练目标层面的改进。
+
 ### 17.3 下一步
 
-1. 增加 zero/random reader、scale/gate/layer 扫描。
+1. 增加 zero/random reader、gate/layer 扫描（scale sweep 已完成）。
 2. 设计并验证 contrastive / neighbor / KL 约束 loss 是否能提高对齐指标。
 3. 完成 BoolQ logit lens 与错误分类。
 4. 在此之前不进入 5M–20M 和 RL。

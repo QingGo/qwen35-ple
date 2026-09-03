@@ -129,6 +129,23 @@ real 与 control 的对比：
 
 ---
 
+### 4.5 Scale sweep（BoolQ 50 题，注入强度扫描）
+
+通过 `mechanism_logit_patch.py --inject-scale` 扫描：
+
+| scale | real logprob | control logprob | real-control | real entropy | control entropy |
+|---:|---:|---:|---:|---:|---:|
+| 0.25 | -9.51 | -9.64 | +0.14 | 0.89 | 0.86 |
+| 0.5 | -8.78 | -9.16 | +0.38 | 1.20 | 1.10 |
+| 1.0 | -7.62 | -8.21 | **+0.59** | 2.23 | 2.30 |
+| 2.0 | -7.46 | **-7.19** | -0.27 | 3.95 | 4.34 |
+
+- real 相对 control 的优势在 **scale=1.0 附近最大**（+0.59），到 2.0 反转为 control 更优。
+- 低强度 0.25/0.5 会保留部分 real 优势，同时 entropy 扰动显著低于 1.0。
+- 2.0 的 entropy 大幅上升，说明过强注入会让 reader 的扰动压过真实语义内容。
+- 初步判断：如果要做“低破坏 + 真实 PLE 信号”，**0.5 附近可能是更值得研究的区间**；
+  但 0.5 的 real-control 优势（+0.38）仍不够强，不足以单独支持进入 5M–20M/RL。
+
 ## 5. 下一步
 
 1. ✅ 已完成完整 150 题 logit-level patching，并已按 task 分层。

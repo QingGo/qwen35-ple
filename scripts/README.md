@@ -36,7 +36,7 @@
 | `plot_phase0_metrics.py` | 从 CSV 生成 QA EM、val loss、train loss 曲线等论文图 |
 | `analyze_qa_lines.py` | 三线 QA JSON 逐题对比：new correct/wrong、语料命中 |
 | `mechanism_alignment.py` | 机制验证：PLE e_t 与 Qwen hidden 的 CKA / Procrustes / kNN overlap / intrinsic dimension，以及 reader 参数和 gate 统计 |
-| `mechanism_logit_patch.py` | 快速 logit-level activation patching：no-reader / real / control / random / zero 五条件 |
+| `mechanism_logit_patch.py` | 快速 logit-level activation patching：no-reader / real / control / random / zero 五条件；支持 `--inject-scale` 做注入强度扫描 |
 | `mechanism_patching.py` | 逐 token 生成的 activation patching / 条件生成对比脚本 |
 
 ## 预期脚本（与设计文档里程碑对应）

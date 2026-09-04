@@ -59,6 +59,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-54-rag-baseline.md](docs/round-54-rag-baseline.md) | RAG 同口径 baseline：BM25 top-3 显著提升 rare/common，支持转向 RAG/蒸馏 |
 | [docs/round-55-theory-revision.md](docs/round-55-theory-revision.md) | 理论修正：条件互信息是必要不充分，需补可实现通道/任务信息分解/评测协议 |
 | [docs/round-56-tighter-bounds.md](docs/round-56-tighter-bounds.md) | 更紧的 PLE 上下界：完整信息/低秩/backbone可见/logit-space 分层界与实现 |
+| [docs/round-57-optimal-memory-method.md](docs/round-57-optimal-memory-method.md) | 相关工作调研 + 最优记忆注入推导：logit 层条件对数似然比是最优修正 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

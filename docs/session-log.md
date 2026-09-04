@@ -1929,3 +1929,18 @@ lazy-window gate        ✅
 - 新增 `scripts/estimate_ple_bounds.py`：可计算 B0、B1(r)；
 - CI lint 纳入新脚本。
 
+
+## Session 57：相关工作调研与最优方法推导
+
+- 完成多轮检索：
+  - XMemTransfer / TokenMem / MemSFT / DeepSeek Engram / ReAugKD / Purified OPSD / MoRA；
+- 核心数学结论：
+  - 最优 logit 修正 = 条件对数似然比：
+    \[
+    \delta^*(y)=\log P(y|h,m)-\log q(y|h)
+    \]
+  - 如果 base 已校准，最大 log-loss 改善精确等于 \(I(Y;M|H)\)；
+  - Hidden 注入最多只能实现 \(P_{\mathrm{col}(J)}\delta^*\)，会丢失不可见方向；
+  - Router 融合的最优权重由逐 token 凸优化决定；
+- 新增 `docs/round-57-optimal-memory-method.md`。
+

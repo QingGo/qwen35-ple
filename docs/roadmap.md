@@ -1130,3 +1130,26 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 
 - `scripts/estimate_ple_bounds.py`：计算 B0 和 B1(r)；
 - 完整实现方案见 round-56 文档。
+
+---
+
+## 43. 2026-09-04 第五十七轮：最优记忆注入方法推导
+
+> 详细见 `docs/round-57-optimal-memory-method.md`。
+
+### 43.1 调研
+
+借鉴 XMemTransfer、TokenMem、MemSFT、Engram、ReAugKD、Purified OPSD、MoRA。
+
+### 43.2 核心定理
+
+1. 最优 logit 修正是条件对数似然比；
+2. 最优 log-loss 改善精确等于 \(I(Y;M|H)\)；
+3. hidden 注入最多实现 \(P_{\mathrm{col}(J)}\delta^*\)；
+4. Router 融合是逐 token 凸优化。
+
+### 43.3 实施结论
+
+- 主路径应为 RAG/教师分布 + logit-level 融合；
+- PLE 若要继续，必须实现 log-likelihood-ratio head，而不是 hidden reader；
+- 如果 logit-level 仍无法放大 PLE，则确定 PLE 信息不足。

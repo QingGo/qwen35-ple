@@ -36,6 +36,7 @@ scripts/run_multi_task_eval.py
 
 - answer-token average logprob；
 - first-token hit；
+- greedy decoding exact-match；
 - 可选：knowledge 的 RAG 条件。
 
 ## 3. 烟测结果
@@ -57,7 +58,7 @@ scripts/run_multi_task_eval.py
 ## 4. 后续完善
 
 1. 接入真实 GSM8K / MATH / HumanEval / MBPP 格式；
-2. 使用 greedy/beam decoding 统计 exact-match；
+2. 已加入 greedy decoding exact-match，后续可扩展 beam/search；
 3. 每个方法跑 3 seeds；
 4. 加入 real/control / RAG / distilled 四条件；
 5. 污染审计。

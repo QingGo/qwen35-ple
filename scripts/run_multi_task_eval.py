@@ -197,6 +197,37 @@ def _first_hit(logits: torch.Tensor, ids: np.ndarray, answer_start: int) -> bool
     return int(torch.argmax(logits[t])) == int(ids[t + 1])
 
 
+
+def _greedy_generate(
+    model,
+    tokenizer,
+    input_ids: list[int],
+    *,
+    max_new_tokens: int = 16,
+    device: str,
+) -> str:
+    generated = list(input_ids)
+    for _ in range(max_new_tokens):
+        ids = torch.tensor([generated], dtype=torch.long, device=device)
+        with torch.no_grad():
+            logits = model(input_ids=ids, use_cache=False).logits[0, -1]
+        nxt = int(torch.argmax(logits))
+        if nxt == tokenizer.eos_token_id:
+            break
+        generated.append(nxt)
+    return tokenizer.decode(generated[len(input_ids):], skip_special_tokens=True).strip()
+
+
+def _normalize_answer(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"[^a-z0-9]+", " ", text).strip()
+    return text
+
+
+def _exact_match(pred: str, gold: str) -> bool:
+    return _normalize_answer(pred) == _normalize_answer(gold)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="data/models/Qwen3.5-0.8B")
@@ -208,6 +239,7 @@ def main() -> int:
     parser.add_argument("--n-arith", type=int, default=20)
     parser.add_argument("--n-code", type=int, default=20)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--max-new-tokens", type=int, default=16)
     parser.add_argument("--output", default="outputs/multi-task-eval.json")
     args = parser.parse_args()
 
@@ -250,14 +282,21 @@ def main() -> int:
             base_lp = _answer_logprob(out.logits[0], np.asarray(full_ids), len(qids))
             base_hit = _first_hit(out.logits[0], np.asarray(full_ids), len(qids))
 
+        base_greedy = _greedy_generate(
+            model, tokenizer, qids, max_new_tokens=args.max_new_tokens, device=args.device
+        )
         entry = {
             "id": item["id"],
             "task": item["task"],
             "is_rare": item.get("is_rare", False),
             "no_context_answer_logprob": base_lp,
             "no_context_first_hit": bool(base_hit),
+            "no_context_greedy": base_greedy,
+            "no_context_exact": _exact_match(base_greedy, answer),
             "rag_answer_logprob": None,
             "rag_first_hit": None,
+            "rag_greedy": None,
+            "rag_exact": None,
         }
 
         if index is not None and item["task"] == "knowledge":
@@ -265,17 +304,23 @@ def main() -> int:
             context = "\n\n".join(index.docs[i] for i in ctx_ids)
             if context:
                 ctx_tok = tokenizer.encode(context, add_special_tokens=False)
-                rag_ids = ctx_tok + qids + ans_ids
+                rag_input = ctx_tok + qids
                 rag_start = len(ctx_tok) + len(qids)
-                rag_t = torch.tensor([rag_ids], dtype=torch.long, device=args.device)
+                rag_full = rag_input + ans_ids
+                rag_t = torch.tensor([rag_full], dtype=torch.long, device=args.device)
                 with torch.no_grad():
                     out_rag = model(input_ids=rag_t, use_cache=False)
                 entry["rag_answer_logprob"] = _answer_logprob(
-                    out_rag.logits[0], np.asarray(rag_ids), rag_start
+                    out_rag.logits[0], np.asarray(rag_full), rag_start
                 )
                 entry["rag_first_hit"] = _first_hit(
-                    out_rag.logits[0], np.asarray(rag_ids), rag_start
+                    out_rag.logits[0], np.asarray(rag_full), rag_start
                 )
+                rag_greedy = _greedy_generate(
+                    model, tokenizer, rag_input, max_new_tokens=args.max_new_tokens, device=args.device
+                )
+                entry["rag_greedy"] = rag_greedy
+                entry["rag_exact"] = _exact_match(rag_greedy, answer)
 
         results.append(entry)
         if (idx + 1) % 25 == 0:
@@ -290,11 +335,13 @@ def main() -> int:
             "n": len(group),
             "no_context_answer_logprob": float(np.mean([r["no_context_answer_logprob"] for r in group])),
             "no_context_first_hit": float(np.mean([1.0 if r["no_context_first_hit"] else 0.0 for r in group])),
+            "no_context_exact": float(np.mean([1.0 if r["no_context_exact"] else 0.0 for r in group])),
         }
         rag_lps = [r["rag_answer_logprob"] for r in group if r["rag_answer_logprob"] is not None]
         if rag_lps:
             row["rag_answer_logprob"] = float(np.mean(rag_lps))
             row["rag_first_hit"] = float(np.mean([1.0 if r["rag_first_hit"] else 0.0 for r in group if r["rag_first_hit"] is not None]))
+            row["rag_exact"] = float(np.mean([1.0 if r["rag_exact"] else 0.0 for r in group if r["rag_exact"] is not None]))
             row["rag_minus_no_context"] = row["rag_answer_logprob"] - row["no_context_answer_logprob"]
         summary[task] = row
     # knowledge rare/common if present
@@ -306,10 +353,12 @@ def main() -> int:
             "n": len(group),
             "no_context_answer_logprob": float(np.mean([r["no_context_answer_logprob"] for r in group])),
             "no_context_first_hit": float(np.mean([1.0 if r["no_context_first_hit"] else 0.0 for r in group])),
+            "no_context_exact": float(np.mean([1.0 if r["no_context_exact"] else 0.0 for r in group])),
         }
         rag_lps = [r["rag_answer_logprob"] for r in group if r["rag_answer_logprob"] is not None]
         if rag_lps:
             row["rag_answer_logprob"] = float(np.mean(rag_lps))
+            row["rag_exact"] = float(np.mean([1.0 if r["rag_exact"] else 0.0 for r in group if r["rag_exact"] is not None]))
             row["rag_minus_no_context"] = row["rag_answer_logprob"] - row["no_context_answer_logprob"]
         summary[f"knowledge_{sub}"] = row
 

@@ -1990,7 +1990,11 @@ lazy-window gate        ✅
   - knowledge：rare-kb
   - arithmetic：生成式四则运算
   - code-output：简单 Python 表达式求值
+- 指标：
+  - answer logprob
+  - first-token hit
+  - greedy decoding exact-match
 - 烟测：50 knowledge + 10 arithmetic + 10 code；
-- 结果：当前 frozen 0.8B 在生成式短答案上 first-token hit 很低；
-- 下一步：接入真实 GSM8K/MATH/HumanEval/MBPP，改为生成式 exact-match，加入 3-seed。
+- 结果：当前 frozen 0.8B 在生成式短答案上 exact-match 和 first-token hit 都很低；
+- 下一步：接入真实 GSM8K/MATH/HumanEval/MBPP，加入 3-seed。
 

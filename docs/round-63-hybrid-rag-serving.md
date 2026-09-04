@@ -70,7 +70,10 @@
 
 - `run_rag_demo.py --mode hybrid` 可运行；
 - 对 50 docs 小语料可完成分块、dense embedding、RRF、生成；
-- HTTP server 代码已提供，可在 WSL 启动后通过 `/health` 和 `/answer` 访问。
+- `scripts/smoke_rag_http.py` 已通过：
+  - `/health` 返回 `{"ok": true, "chunks": 32}`；
+  - `/answer?q=...` 返回 `question/contexts/prompt/answer/latency_seconds`；
+  - 生成回答成功。
 
 ## 3. 已知限制
 

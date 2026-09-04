@@ -2031,7 +2031,8 @@ lazy-window gate        ✅
   - `RAGServingAdapter`（prompt/stopping + answer）
   - `scripts/serve_rag_http.py`（标准库 HTTP /health + /answer）
 - 更新 `scripts/run_rag_demo.py` 支持 hybrid；
+- 新增 `scripts/smoke_rag_http.py`；
 - 测试：`tests/test_rag.py` 扩展到分块/RRF/hybrid；
-- 烟测：hybrid demo 可运行，HTTP server 代码可启动；
+- 烟测：hybrid demo 可运行，HTTP smoke 通过 `/health` 和 `/answer`；
 - 已知限制：dense 目前是 token embedding mean-pool，非 sota sentence embedding；生产 transport 需替换。
 

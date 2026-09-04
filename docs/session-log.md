@@ -1944,3 +1944,23 @@ lazy-window gate        ✅
   - Router 融合的最优权重由逐 token 凸优化决定；
 - 新增 `docs/round-57-optimal-memory-method.md`。
 
+
+## Session 58：系统性复盘、技术债与后续计划
+
+- 新增 `docs/round-58-systematic-rethink.md`；
+- 重新校准终极目标：
+  - 不是“必须让 PLE 成功”；
+  - 而是“低资源、可复现、可部署地提升 0.8B 实际能力”；
+- 主要技术债：
+  - 缺少多任务/多 seed/污染审计；
+  - 缺少 B2/B3 精确界；
+  - RAG 只是 BM25；
+  - 没有 OPD/Purified OPSD；
+  - 没有 CPU serving 闭环；
+- 后续计划：
+  1. R1：把证据做硬（多任务评测 + B2/B3）
+  2. D1：RAG 产品化原型
+  3. D2：教师蒸馏/OPD/Purified OPSD
+  4. D3：CPU 100 tok/s serving
+  5. PLE-Final：仅在 B3 出现正信号时低优先级继续。
+

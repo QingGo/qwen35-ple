@@ -1153,3 +1153,30 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 - 主路径应为 RAG/教师分布 + logit-level 融合；
 - PLE 若要继续，必须实现 log-likelihood-ratio head，而不是 hidden reader；
 - 如果 logit-level 仍无法放大 PLE，则确定 PLE 信息不足。
+
+---
+
+## 44. 2026-09-04 第五十八轮：系统性复盘与重新定轨
+
+> 详细见 `docs/round-58-systematic-rethink.md`。
+
+### 44.1 终极目标重述
+
+- 不是“让 PLE 成功”；
+- 而是“低资源、可复现、可部署地提升 0.8B 实际能力”。
+
+### 44.2 主要技术债
+
+- 缺少多任务/多 seed/污染审计；
+- 缺少 B2/B3 精确界；
+- RAG 仅 BM25；
+- 无 OPD/Purified OPSD；
+- 无 CPU serving 闭环。
+
+### 44.3 后续优先级
+
+1. R1：把证据做硬；
+2. D1：RAG 产品化原型；
+3. D2：教师蒸馏/OPD；
+4. D3：CPU 100 tok/s；
+5. PLE-Final：仅 B3 正信号时继续。

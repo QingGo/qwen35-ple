@@ -972,3 +972,36 @@ Phase A 任务与指标 → Phase B Reader 稳定 → Phase C Backbone 适配与
 - 构建只含知识题的 rare-kb v2；
 - Phase B reader 稳定性；
 - 若改进后 rare real−control 仍非正，则转向 RAG/蒸馏并记录负结果。
+
+---
+
+## 37. 2026-09-04 第五十轮：系统性复盘与低资源方案
+
+> 详细见 `docs/round-50-systematic-plan.md`。
+
+### 37.1 核心判断
+
+- PLE 有微弱条件信息，但当前 reader/backbone 没有转化为下游收益；
+- 原论文收益来自联合训练和架构级容量重分配，不能靠冻结嫁接直接复现；
+- 最优路线应切换到：exact memory bank + cross-attention + distribution-level memory/router + MoRA/GaLore + OPD/Purified OPSD。
+
+### 37.2 技术债
+
+- 没有真正的 memory interface；
+- 没有 independent cross-attention；
+- 没有 MoRA/GaLore/ReLoRA 实验；
+- 没有 OPD/OPSD 蒸馏流程；
+- 没有推理/代码/长上下文 real-vs-control 评测；
+- 没有 RAG 对照。
+
+### 37.3 下一步优先
+
+1. 构建 exact longest-match PLE bank + TokenMem 式 cross-attention + MLP Memory 式 router fusion；
+2. 冻结 backbone 先验证 rare real>control；
+3. 再 MoRA/GaLore；
+4. 再 OPD/Purified OPSD；
+5. 最后对照 RAG/蒸馏并决定是否转向。
+
+### 37.4 停止条件
+
+若改进 memory interface 后 rare real−control 仍非正，则转 RAG/蒸馏/更语义化记忆，不进入大规模 RL。

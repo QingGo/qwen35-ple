@@ -1774,3 +1774,28 @@ lazy-window gate        ✅
 - 不进入大规模训练；
 - 下一步 Phase B 窄口径验证，否则转向 RAG/蒸馏。
 
+
+## Session 50：系统性复盘、低资源记忆接口与蒸馏线路
+
+### 1. 完成
+
+- 调研 Memory Grafting / MLP Memory / MemSFT / TokenMem / PERK / GaLore / MoRA / ReLoRA / sMuon / OPD / OPSD；
+- 确认 Qwen PLE 只有 2/3-gram，无原生 4-gram；
+- 形成低资源最优路线：exact bank + cross-attention + distribution memory + MoRA/GaLore + OPD/Purified OPSD；
+- 写入 `docs/round-50-systematic-plan.md`。
+
+### 2. 关键结论
+
+- 不能直接用冻结 PLE + 小 reader 复现原论文收益；
+- 应先做 memory interface，再解冻 backbone；
+- MoRA 最适合 memory/continual pretraining；
+- OPD 适合，OPSD 对推理需要谨慎，使用 Purified OPSD。
+
+### 3. 下一步
+
+- 构建 exact longest-match PLE bank + TokenMem cross-attention + router fusion；
+- 冻结 backbone 验证 rare real>control；
+- 然后 MoRA/GaLore；
+- 然后 OPD/Purified OPSD；
+- 最后 RAG 对照。
+

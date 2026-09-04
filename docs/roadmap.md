@@ -1087,3 +1087,21 @@ Phase A 任务与指标 → Phase B Reader 稳定 → Phase C Backbone 适配与
 1. OPD / Purified OPSD；
 2. 蒸馏 student 与 RAG 对比；
 3. 若能力提升不依赖 PLE，则停止 PLE backbone adaptation，只保留低优先级探索。
+
+---
+
+## 41. 2026-09-04 第五十五轮：理论修正
+
+> 详细见 `docs/round-55-theory-revision.md`。
+
+### 41.1 核心判断
+
+- P1/RAG 结果与条件互信息上界一致；
+- 但证明该上界是必要不充分条件；
+- 需要补充：可实现通道容量、输入 vs hidden 注入通道、任务相关信息分解。
+
+### 41.2 后续理论使用方式
+
+- 任务级 real−control 是门禁；
+- 绝对 logprob / loss 不能作为 PLE 有效性证据；
+- RAG/蒸馏优先于大规模 PLE backbone adaptation。

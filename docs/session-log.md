@@ -1903,3 +1903,16 @@ lazy-window gate        ✅
 - 蒸馏 student 与 RAG 同口径对比；
 - 若不依赖 PLE，则不再进入大规模 PLE backbone adaptation。
 
+
+## Session 55：理论修正
+
+- 结论：实验结果与核心信息论上界一致；
+- 但证明该上界是必要不充分条件；
+- 新增理论修正文档：`docs/round-55-theory-revision.md`；
+- 修正点：
+  1. 增加“可实现通道容量”；
+  2. 区分输入通道与 hidden 注入通道；
+  3. 增加任务相关信息分解；
+  4. 明确正 CMI 不是充分条件；
+  5. 修改评测证据标准为 paired real−control + 离散指标。
+

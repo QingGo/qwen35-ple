@@ -11,6 +11,7 @@ import json
 import math
 import re
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -107,9 +108,183 @@ def build_rag_prompt(context: str, question: str) -> str:
     )
 
 
+@dataclass(frozen=True)
+class Chunk:
+    """A chunked retrieval unit with lightweight provenance metadata."""
+
+    text: str
+    doc_id: int
+    chunk_index: int
+    source: str | None = None
+
+
+def chunk_text(
+    text: str,
+    *,
+    doc_id: int = 0,
+    chunk_size: int = 800,
+    overlap: int = 100,
+    source: str | None = None,
+) -> list[Chunk]:
+    """Split a document into character-based chunks with metadata."""
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= chunk_size:
+        return [Chunk(text=text, doc_id=doc_id, chunk_index=0, source=source)]
+    chunks: list[Chunk] = []
+    start = 0
+    idx = 0
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        # Try to break at a newline/space near the boundary.
+        if end < len(text):
+            cut = max(text.rfind("\n", start, end), text.rfind(" ", start, end))
+            if cut > start + chunk_size // 2:
+                end = cut + 1
+        chunks.append(
+            Chunk(
+                text=text[start:end].strip(),
+                doc_id=doc_id,
+                chunk_index=idx,
+                source=source,
+            )
+        )
+        if end >= len(text):
+            break
+        start = max(end - overlap, start + 1)
+        idx += 1
+    return chunks
+
+
+def chunk_corpus(
+    docs: list[str],
+    *,
+    chunk_size: int = 800,
+    overlap: int = 100,
+    sources: list[str] | None = None,
+) -> list[Chunk]:
+    """Chunk all documents, preserving document provenance."""
+    chunks: list[Chunk] = []
+    for i, doc in enumerate(docs):
+        src = sources[i] if sources is not None else None
+        chunks.extend(
+            chunk_text(doc, doc_id=i, chunk_size=chunk_size, overlap=overlap, source=src)
+        )
+    return chunks
+
+
+def reciprocal_rank_fusion(
+    rankings: list[list[int]],
+    *,
+    k: int = 60,
+    weights: list[float] | None = None,
+) -> list[int]:
+    """Combine multiple ranked lists by Reciprocal Rank Fusion."""
+    if not rankings:
+        return []
+    weights = weights or [1.0] * len(rankings)
+    scores: dict[int, float] = {}
+    for ranking, weight in zip(rankings, weights, strict=True):
+        for rank, doc_idx in enumerate(ranking):
+            scores[doc_idx] = scores.get(doc_idx, 0.0) + weight / (k + rank + 1)
+    return sorted(scores, key=scores.get, reverse=True)
+
+
+class HybridRetriever:
+    """Combine BM25 lexical scores with dense embedding cosine scores.
+
+    The dense vectors are provided externally (for example computed from the
+    backbone's token embeddings).  This class only handles fusion and rerank.
+    """
+
+    def __init__(
+        self,
+        bm25: BM25Index,
+        dense_vectors: np.ndarray | None = None,
+        *,
+        dense_weight: float = 1.0,
+        rrf_k: int = 60,
+    ) -> None:
+        self.bm25 = bm25
+        self.dense_vectors = dense_vectors
+        self.dense_weight = dense_weight
+        self.rrf_k = rrf_k
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 3,
+        *,
+        query_vector: np.ndarray | None = None,
+        candidate_pool: int = 50,
+    ) -> list[int]:
+        bm25_ranking = self.bm25.search(query, top_k=candidate_pool)
+        rankings = [bm25_ranking]
+        weights = [1.0]
+        if self.dense_vectors is not None and query_vector is not None:
+            dense_scores = self.dense_vectors @ query_vector
+            # Normalize each vector to unit length for cosine.
+            dense_norms = np.linalg.norm(self.dense_vectors, axis=1)
+            q_norm = np.linalg.norm(query_vector)
+            if dense_norms.size and q_norm > 0:
+                dense_scores = dense_scores / (dense_norms * q_norm)
+            dense_ranking = np.argsort(dense_scores)[::-1][:candidate_pool].tolist()
+            rankings.append(dense_ranking)
+            weights.append(self.dense_weight)
+        fused = reciprocal_rank_fusion(rankings, k=self.rrf_k, weights=weights)
+        return fused[:top_k]
+
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 3,
+        *,
+        query_vector: np.ndarray | None = None,
+        candidate_pool: int = 50,
+    ) -> list[Chunk | str]:
+        results = self.search(
+            query,
+            top_k=top_k,
+            query_vector=query_vector,
+            candidate_pool=candidate_pool,
+        )
+        return [self.bm25.docs[i] for i in results]
+
+
+def mean_pool_embeddings(
+    token_ids: list[list[int]],
+    embedding_matrix: np.ndarray,
+) -> np.ndarray:
+    """Mean-pool token embeddings into document/query vectors.
+
+    This is a lightweight static dense embedding baseline.  For production,
+    replace it with a sentence-transformer or a contextual encoder.
+    """
+    vectors: list[np.ndarray] = []
+    for ids in token_ids:
+        if not ids:
+            vectors.append(np.zeros(embedding_matrix.shape[1], dtype=np.float32))
+            continue
+        vectors.append(embedding_matrix[ids].mean(axis=0))
+    return np.asarray(vectors, dtype=np.float32)
+
+
+def normalize_vectors(vectors: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    return vectors / np.maximum(norms, 1e-12)
+
+
 __all__ = [
     "BM25Index",
+    "Chunk",
+    "HybridRetriever",
     "build_rag_prompt",
+    "chunk_corpus",
+    "chunk_text",
     "load_corpus",
+    "mean_pool_embeddings",
+    "normalize_vectors",
+    "reciprocal_rank_fusion",
     "tokenize",
 ]

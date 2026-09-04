@@ -2022,3 +2022,16 @@ lazy-window gate        ✅
 - 烟测：RAG 路径可运行，但当前 BM25 检索质量和 0.8B 生成格式仍需改进；
 - 下一步：混合检索、语料分块、prompt 控制、serving 接入。
 
+
+## Session 63：混合检索+RAG serving
+
+- 新增：
+  - `Chunk` / `chunk_text` / `chunk_corpus`（分块 + metadata）
+  - `HybridRetriever` / `reciprocal_rank_fusion`（BM25 + dense + RRF rerank）
+  - `RAGServingAdapter`（prompt/stopping + answer）
+  - `scripts/serve_rag_http.py`（标准库 HTTP /health + /answer）
+- 更新 `scripts/run_rag_demo.py` 支持 hybrid；
+- 测试：`tests/test_rag.py` 扩展到分块/RRF/hybrid；
+- 烟测：hybrid demo 可运行，HTTP server 代码可启动；
+- 已知限制：dense 目前是 token embedding mean-pool，非 sota sentence embedding；生产 transport 需替换。
+

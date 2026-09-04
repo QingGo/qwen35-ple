@@ -1270,3 +1270,29 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 - 语料分块与 metadata；
 - prompt 控制；
 - 接入 serving。
+
+---
+
+## 49. 2026-09-04 第六十三轮：混合检索+RAG serving
+
+> 详细见 `docs/round-63-hybrid-rag-serving.md`。
+
+### 49.1 完成
+
+- 分块与 metadata：`Chunk` / `chunk_text` / `chunk_corpus`；
+- 混合检索：BM25 + dense + RRF；
+- `RAGServingAdapter`：prompt/stopping/answer；
+- HTTP serving：`scripts/serve_rag_http.py`；
+- hybrid demo 与测试。
+
+### 49.2 已知限制
+
+- dense embedding 为 token embedding mean-pool；
+- 不是生产级 HTTP/concurrency；
+- 检索质量仍受语料限制。
+
+### 49.3 下一步
+
+- 替换真实 sentence embedding / cross-encoder rerank；
+- 接入 vLLM/SGLang/CompileForge；
+- 继续 D2 教师蒸馏。

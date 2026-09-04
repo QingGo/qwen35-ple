@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Minimal RAG demo: retrieve context and generate an answer with frozen 0.8B.
-
-This is a small productization step: a single CLI that shows the full RAG path
-without any PLE/memory machinery.
+"""Hybrid RAG demo: chunked corpus, BM25 + dense embedding, RRF rerank, generate.
 
 Usage::
 
     python scripts/run_rag_demo.py \
         --model data/models/Qwen3.5-0.8B \
         --corpus data/sources/wikitext.jsonl \
-        --question "What is the capital of France?"
+        --question "Who is Nikola Tesla?" \
+        --mode hybrid
 """
 
 from __future__ import annotations
@@ -17,9 +15,17 @@ from __future__ import annotations
 import argparse
 import time
 
+import numpy as np
 import torch
 
-from qwen35_ple.rag import BM25Index, build_rag_prompt, load_corpus
+from qwen35_ple.rag import (
+    BM25Index,
+    HybridRetriever,
+    chunk_corpus,
+    load_corpus,
+    mean_pool_embeddings,
+)
+from qwen35_ple.serving.rag import RAGServingAdapter
 
 
 def _load_model(model_path: str, device: str):
@@ -38,18 +44,13 @@ def _load_model(model_path: str, device: str):
     return tokenizer, model
 
 
-def _generate(model, tokenizer, prompt: str, max_new_tokens: int, device: str) -> str:
-    ids = tokenizer.encode(prompt, add_special_tokens=False)
-    generated = list(ids)
-    for _ in range(max_new_tokens):
-        input_ids = torch.tensor([generated], dtype=torch.long, device=device)
-        with torch.no_grad():
-            logits = model(input_ids=input_ids, use_cache=False).logits[0, -1]
-        nxt = int(torch.argmax(logits))
-        if nxt == tokenizer.eos_token_id:
-            break
-        generated.append(nxt)
-    return tokenizer.decode(generated[len(ids):], skip_special_tokens=True).strip()
+def _embed_texts(
+    tokenizer,
+    embedding_matrix: np.ndarray,
+    texts: list[str],
+) -> np.ndarray:
+    ids = [tokenizer.encode(t, add_special_tokens=False) for t in texts]
+    return mean_pool_embeddings(ids, embedding_matrix)
 
 
 def main() -> int:
@@ -57,8 +58,12 @@ def main() -> int:
     parser.add_argument("--model", default="data/models/Qwen3.5-0.8B")
     parser.add_argument("--corpus", required=True)
     parser.add_argument("--question", required=True)
+    parser.add_argument("--mode", choices=["hybrid", "bm25"], default="hybrid")
     parser.add_argument("--top-k", type=int, default=3)
+    parser.add_argument("--candidate-pool", type=int, default=50)
     parser.add_argument("--max-docs", type=int, default=20000)
+    parser.add_argument("--chunk-size", type=int, default=800)
+    parser.add_argument("--overlap", type=int, default=100)
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
@@ -66,20 +71,45 @@ def main() -> int:
     t0 = time.time()
     tokenizer, model = _load_model(args.model, args.device)
     docs = load_corpus(args.corpus, args.max_docs)
-    index = BM25Index(docs)
-    ctx_docs = index.retrieve(args.question, args.top_k)
-    context = "\n\n".join(ctx_docs)
-    prompt = build_rag_prompt(context, args.question)
-    answer = _generate(model, tokenizer, prompt, args.max_new_tokens, args.device)
+    chunks = chunk_corpus(docs, chunk_size=args.chunk_size, overlap=args.overlap)
+    chunk_texts = [c.text for c in chunks]
+    print(f"[demo] chunks={len(chunk_texts)}", flush=True)
+    bm25 = BM25Index(chunk_texts)
+
+    dense_vectors = None
+    query_vector = None
+    if args.mode == "hybrid":
+        emb = model.get_input_embeddings().weight.detach().cpu().numpy()
+        dense_vectors = _embed_texts(tokenizer, emb, chunk_texts)
+        dense_vectors = dense_vectors / np.maximum(
+            np.linalg.norm(dense_vectors, axis=1, keepdims=True), 1e-12
+        )
+        query_vector = _embed_texts(tokenizer, emb, [args.question])[0]
+        qn = np.linalg.norm(query_vector)
+        if qn > 0:
+            query_vector = query_vector / qn
+
+    retriever = HybridRetriever(bm25, dense_vectors)
+    adapter = RAGServingAdapter(
+        model,
+        tokenizer,
+        retriever,
+        max_new_tokens=args.max_new_tokens,
+        top_k=args.top_k,
+        candidate_pool=args.candidate_pool,
+        concise=True,
+        device=args.device,
+    )
+    result = adapter.answer(args.question)
     elapsed = time.time() - t0
 
     print("== Query ==")
-    print(args.question)
+    print(result["question"])
     print("\n== Retrieved contexts ==")
-    for i, d in enumerate(ctx_docs, 1):
+    for i, d in enumerate(result["contexts"], 1):
         print(f"[{i}] {d[:200]}")
     print("\n== Answer ==")
-    print(answer)
+    print(result["answer"])
     print(f"\n[elapsed {elapsed:.2f}s]")
     return 0
 

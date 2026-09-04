@@ -61,6 +61,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-56-tighter-bounds.md](docs/round-56-tighter-bounds.md) | 更紧的 PLE 上下界：完整信息/低秩/backbone可见/logit-space 分层界与实现 |
 | [docs/round-57-optimal-memory-method.md](docs/round-57-optimal-memory-method.md) | 相关工作调研 + 最优记忆注入推导：logit 层条件对数似然比是最优修正 |
 | [docs/round-58-systematic-rethink.md](docs/round-58-systematic-rethink.md) | 系统性复盘：终极目标、技术债、借鉴矩阵、RAG/蒸馏优先开发计划 |
+| [docs/round-59-b3-logit-results.md](docs/round-59-b3-logit-results.md) | B3 logit-space 直接记忆下界：连绕开 Jacobian 也得不到 real>control，PLE 信息不足 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）
@@ -189,6 +190,7 @@ tests/            一致性冒烟测试（golden 对拍）
 - [x] P1 记忆接口原型代码：exact n-gram bank + TokenMem cross-attention + distribution memory/router（`docs/round-52-p1-memory-prototype.md`）
 - [x] P1 真表实测：rare real−control 不显著，门禁未通过，转向 RAG/蒸馏/语义记忆（`docs/round-53-p1-results.md`）
 - [x] RAG 同口径 baseline：BM25 top-3 在 rare/common 上显著提升（`docs/round-54-rag-baseline.md`）
+- [x] B3 logit-space 直接记忆下界：无 real>control，进一步确认 PLE 信息不足（`docs/round-59-b3-logit-results.md`）
 - [ ] 真实 vLLM/SGLang 引擎 serving 适配与 A/B
 - [x] CI 改用 uv 管理依赖与测试（`uv sync --all-groups` + `uv run ruff/pytest`）
 - [x] pre-commit 已配置（ruff）

@@ -66,3 +66,15 @@ def test_p1_memory_module_shape() -> None:
     assert fused.shape == base.shape
     assert mem_logits.shape == base.shape
     assert alpha.shape == (1, 5, 1)
+
+
+def test_pure_logit_memory_shape_and_zero_scale() -> None:
+    from qwen35_ple.memory.token_mem import PureLogitMemoryModule
+
+    module = PureLogitMemoryModule(d_mem=8, vocab_size=11, hidden=8)
+    mem = torch.randn(2, 5, 8)
+    base = torch.randn(2, 5, 11)
+    out = module(mem, base)
+    assert out.shape == base.shape
+    # With zero-initialized scale, initial output equals base logits.
+    assert float((out - base).abs().max()) < 1e-6

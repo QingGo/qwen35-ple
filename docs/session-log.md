@@ -1964,3 +1964,21 @@ lazy-window gate        ✅
   4. D3：CPU 100 tok/s serving
   5. PLE-Final：仅在 B3 出现正信号时低优先级继续。
 
+
+## Session 59：B3 logit-space 直接记忆下界实测
+
+- 实现 `PureLogitMemoryModule`：不经过 hidden，直接把 PLE 映射为 logit 偏移；
+- 训练 200 steps，评估 rare-kb 270 题；
+- 结果：
+  - rare real−control = −0.00101，t=−0.73；
+  - common real−control = −0.00578；
+  - first-hit 微弱提升，但 real 与 control 无差异；
+- 结论：
+  - 连 logit-space 也无法放大 PLE real>control；
+  - PLE 信息不足的结论进一步加强；
+  - PLE-Final 启动条件收紧为“B3 logit-space 显著为正”。
+- 新增：
+  - `scripts/train_b3_logit_memory.py`
+  - `scripts/eval_b3_logit_memory.py`
+  - `docs/round-59-b3-logit-results.md`
+

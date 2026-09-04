@@ -243,10 +243,53 @@ class P1MemoryModule(torch.nn.Module):
         return fused, memory_logits, alpha
 
 
+class PureLogitMemoryModule(torch.nn.Module):
+    """B3 lower-bound prototype: direct logit-space memory correction.
+
+    This is deliberately simpler than :class:`P1MemoryModule`:
+
+    * no hidden cross-attention;
+    * no hidden-state router;
+    * memory feature is mapped directly to a vocabulary logit offset;
+    * the final logits are ``base_logits + scale * memory_logits``.
+
+    It isolates whether a PLE/logit-level memory head can produce any
+    task-level real-vs-control signal.  If this cannot, the bottleneck is
+    almost certainly the information content of the memory source itself.
+    """
+
+    def __init__(
+        self,
+        d_mem: int,
+        vocab_size: int,
+        *,
+        hidden: int = 256,
+        zero_init: bool = True,
+    ) -> None:
+        super().__init__()
+        self.head = MemoryLogitHead(
+            d_mem,
+            vocab_size,
+            d_model=hidden,
+            hidden=hidden,
+            zero_init=zero_init,
+        )
+        self.scale = torch.nn.Parameter(torch.tensor(1.0))
+
+    def forward(
+        self, mem: torch.Tensor, base_logits: torch.Tensor
+    ) -> torch.Tensor:
+        memory_logits = self.head(mem) * self.scale
+        return base_logits + memory_logits
+
+
+
+
 __all__ = [
     "MemoryLogitFusion",
     "MemoryLogitHead",
     "MemoryRouter",
     "P1MemoryModule",
+    "PureLogitMemoryModule",
     "TokenMemCrossAttention",
 ]

@@ -1180,3 +1180,26 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 3. D2：教师蒸馏/OPD；
 4. D3：CPU 100 tok/s；
 5. PLE-Final：仅 B3 正信号时继续。
+
+---
+
+## 45. 2026-09-04 第五十九轮：B3 logit-space 下界
+
+> 详细见 `docs/round-59-b3-logit-results.md`。
+
+### 45.1 结果
+
+- rare real−control = −0.00101，t=−0.73；
+- common real−control = −0.00578；
+- first-hit 有轻微提升但 real/control 无差异。
+
+### 45.2 结论
+
+- 绕过 hidden Jacobian 的 logit-space 直接记忆也无法产生 real>control；
+- PLE 信息不足结论加强；
+- PLE-Final 启动条件收紧为“B3 logit-space 显著为正”。
+
+### 45.3 下一步
+
+- 继续 R1：补多任务评测、B2、3-seed；
+- 主路径进入 D1/D2：RAG 产品化 + 教师蒸馏。

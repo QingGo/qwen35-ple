@@ -20,6 +20,7 @@ _LAZY = {
     "MemoryLogitHead",
     "MemoryRouter",
     "P1MemoryModule",
+    "PureLogitMemoryModule",
     "TokenMemCrossAttention",
 }
 
@@ -38,5 +39,6 @@ __all__ = [
     "MemoryLogitHead",
     "MemoryRouter",
     "P1MemoryModule",
+    "PureLogitMemoryModule",
     "TokenMemCrossAttention",
 ]

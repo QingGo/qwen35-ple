@@ -45,7 +45,7 @@ jobs:
         run: uv sync --all-groups --frozen
 
       - name: Lint
-        run: uv run ruff check src tests scripts/mechanism_alignment.py scripts/mechanism_logit_patch.py scripts/mechanism_patching.py scripts/mechanism_incremental_r2.py scripts/mechanism_gradient_r2.py scripts/mechanism_gradient_sweep.py scripts/mechanism_advanced_sweep.py scripts/mechanism_oracle_mlp.py scripts/train_mlp_value_reader.py scripts/mechanism_mlp_dependence.py scripts/build_rare_kb.py scripts/mechanism_rare_task_r2.py scripts/analyze_rare_kb_logit.py scripts/build_exact_ple_bank.py scripts/train_p1_memory.py scripts/eval_p1_memory.py scripts/run_rag_baseline.py scripts/estimate_ple_bounds.py scripts/train_b3_logit_memory.py scripts/eval_b3_logit_memory.py
+        run: uv run ruff check src tests scripts/mechanism_alignment.py scripts/mechanism_logit_patch.py scripts/mechanism_patching.py scripts/mechanism_incremental_r2.py scripts/mechanism_gradient_r2.py scripts/mechanism_gradient_sweep.py scripts/mechanism_advanced_sweep.py scripts/mechanism_oracle_mlp.py scripts/train_mlp_value_reader.py scripts/mechanism_mlp_dependence.py scripts/build_rare_kb.py scripts/mechanism_rare_task_r2.py scripts/analyze_rare_kb_logit.py scripts/build_exact_ple_bank.py scripts/train_p1_memory.py scripts/eval_p1_memory.py scripts/run_rag_baseline.py scripts/estimate_ple_bounds.py scripts/train_b3_logit_memory.py scripts/eval_b3_logit_memory.py scripts/run_multi_task_eval.py
 
       - name: Test
         run: uv run pytest -q

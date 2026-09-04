@@ -1203,3 +1203,27 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 
 - 继续 R1：补多任务评测、B2；
 - 主路径进入 D1/D2：RAG 产品化 + 教师蒸馏。
+
+---
+
+## 46. 2026-09-04 第六十轮：多任务评测 harness
+
+> 详细见 `docs/round-60-multitask-harness.md`。
+
+### 46.1 完成
+
+- `scripts/run_multi_task_eval.py`；
+- 任务：knowledge / arithmetic / code-output；
+- 烟测已跑通。
+
+### 46.2 当前短板
+
+- 只有 logprob/first-hit；
+- 尚无真实 GSM8K/MATH/HumanEval/MBPP；
+- 尚无生成式 exact-match；
+- 后续需补 3-seed 和污染审计。
+
+### 46.3 下一步
+
+- 接入真实任务集；
+- 将多任务评测作为 RAG/蒸馏统一 gate。

@@ -1982,3 +1982,15 @@ lazy-window gate        ✅
   - `scripts/eval_b3_logit_memory.py`
   - `docs/round-59-b3-logit-results.md`
 
+
+## Session 60：多任务评测 harness 初步搭建
+
+- 新增 `scripts/run_multi_task_eval.py`；
+- 任务：
+  - knowledge：rare-kb
+  - arithmetic：生成式四则运算
+  - code-output：简单 Python 表达式求值
+- 烟测：50 knowledge + 10 arithmetic + 10 code；
+- 结果：当前 frozen 0.8B 在生成式短答案上 first-token hit 很低；
+- 下一步：接入真实 GSM8K/MATH/HumanEval/MBPP，改为生成式 exact-match，加入 3-seed。
+

@@ -2105,3 +2105,23 @@ lazy-window gate        ✅
   - 与 RAG（语义）+ base（推理）形成三级记忆；
 - 下一步：用低熵/代码/专名任务验证 real vs control。
 
+
+## Session 69：10+ 轮 PLE 使用路径调研
+
+- 确认：Qwen PLE 原生 2/3-gram，无 4-gram；但 2/3-gram 已足够作为 n-gram 记忆主力；
+- 新增 `docs/round-69-ple-paths-10plus-searches.md`；
+- 调研出多条 PLE 使用路径：
+  - 训练无关 n-gram LM
+  - 代码补全
+  - 专名/实体拼写
+  - 数字/日期格式
+  - 混合检索词法 key
+  - 约束解码
+  - 稀疏前缀缓存
+  - 训练辅助信号
+  - 无训练域适应
+  - 长尾外部记忆
+  - MoE/多专家
+  - rerank/ak审计/安全 等；
+- 下一步：先验证低熵/代码/专名 real vs control。
+

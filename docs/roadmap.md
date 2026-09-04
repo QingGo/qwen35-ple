@@ -1356,3 +1356,20 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 - 高 RAM 机器或云导出 teacher logits；
 - 本地只训练 0.8B student；
 - 若无高 RAM，先跑 RAG self-distillation。
+
+---
+
+## 53. 2026-09-04 第六十七轮：有限资源技术路线全景
+
+> 详细见 `docs/round-67-research-routes-limited-resources.md`。
+
+### 53.1 优先级
+
+- P0：RAG self-distillation、数据筛选 + QLoRA/MoRA；
+- P1：Qwen3.8 离线 teacher 蒸馏、自生成+过滤+自我训练；
+- P2：PERK、多 LoRA 合并、PLE 局部专家；
+- P3：量化/CPU serving。
+
+### 53.2 推荐组合
+
+数据筛选 → RAG/teacher 蒸馏 → LoRA/MoRA → 多 LoRA 合并 → RAG + optional PLE → 量化 serving。

@@ -2078,3 +2078,15 @@ lazy-window gate        ✅
   - 本地只跑 0.8B student 训练；
 - 新增 `docs/round-66-running-qwen38-teacher.md`。
 
+
+## Session 67：有限资源技术路线调研
+
+- 新增 `docs/round-67-research-routes-limited-resources.md`；
+- 汇总路线：
+  - P0：RAG self-distillation、高质量数据筛选 + QLoRA/MoRA
+  - P1：Qwen3.8 离线 teacher 蒸馏、自生成+过滤+自我训练
+  - P2：PERK/test-time LoRA、多 LoRA 合并、PLE 局部专家
+  - P3：量化/CPU 推理
+- 推荐组合：
+  - 数据筛选 → RAG/teacher 蒸馏 → LoRA/MoRA → 多 LoRA 合并 → RAG+PLE optional → 量化 serving。
+

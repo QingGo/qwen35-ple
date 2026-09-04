@@ -1338,3 +1338,21 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 - 扩大 LoRA 蒸馏数据；
 - 跑 RAG self-distillation；
 - 用多任务评测验证效果。
+
+---
+
+## 52. 2026-09-04 第六十六轮：Qwen3.8-Flash-Next 本地运行
+
+> 详细见 `docs/round-66-running-qwen38-teacher.md`。
+
+### 52.1 结论
+
+- Qwen3.8-Flash-Next = 176B/6B MoE；
+- 8GB GPU + ~48GB RAM 可运行；
+- 当前 WSL 15GB RAM 不足以直接跑。
+
+### 52.2 推荐路径
+
+- 高 RAM 机器或云导出 teacher logits；
+- 本地只训练 0.8B student；
+- 若无高 RAM，先跑 RAG self-distillation。

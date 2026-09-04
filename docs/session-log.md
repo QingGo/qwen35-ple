@@ -2065,3 +2065,16 @@ lazy-window gate        ✅
   2. RAG-augmented self-distillation（推荐下一步）
   3. 真 logit/OPD 蒸馏（需要 teacher 模型）
 
+
+## Session 66：Qwen3.8-Flash-Next 本地运行调研
+
+- 确认 Qwen3.8-Flash-Next 约 176B 总参数 / 6B active MoE / 256K ctx；
+- 8GB GPU 可行方案：
+  - llama.cpp/GGUF + CPU offload；
+  - 参考 `flash-next-8gb`：6.6GiB VRAM + ~47.8GiB RAM + 34–35 tok/s；
+- 当前 WSL 约 15GB RAM，不足以直接跑完整模型；
+- 推荐解耦方案：
+  - 在高 RAM 机器/云服务导出 teacher logits/text；
+  - 本地只跑 0.8B student 训练；
+- 新增 `docs/round-66-running-qwen38-teacher.md`。
+

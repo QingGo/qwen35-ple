@@ -1315,3 +1315,26 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 - 局部 n-gram/低熵先验；
 - 新门禁：低熵 token、代码补全、专名接续等；
 - 通过则作为可选专家，不通过则降级归档。
+
+---
+
+## 51. 2026-09-04 第六十五轮：现有资源教师蒸馏
+
+> 详细见 `docs/round-65-teacher-distillation-with-current-resources.md`。
+
+### 51.1 已完成
+
+- `scripts/run_lora_distill.py`；
+- 离线 teacher-text LoRA 蒸馏 smoke 跑通（30 条、10 步、540k trainable）。
+
+### 51.2 当前可行路线
+
+1. 离线 teacher-text LoRA——已跑通；
+2. RAG-augmented self-distillation——推荐下一步；
+3. 真 logit/OPD 蒸馏——需要 teacher 模型。
+
+### 51.3 下一步
+
+- 扩大 LoRA 蒸馏数据；
+- 跑 RAG self-distillation；
+- 用多任务评测验证效果。

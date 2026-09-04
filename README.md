@@ -67,6 +67,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-62-rag-product-prototype.md](docs/round-62-rag-product-prototype.md) | RAG 产品化原型：可复用 BM25 模块 + 单条查询 demo |
 | [docs/round-63-hybrid-rag-serving.md](docs/round-63-hybrid-rag-serving.md) | 混合检索：分块+metadata+BM25+dense+RRF+prompt/stopping+HTTP serving |
 | [docs/round-64-end-to-end-routes-and-ple-usage.md](docs/round-64-end-to-end-routes-and-ple-usage.md) | 0.8B 提升路线与 PLE 正确定位：RAG/蒸馏为主，PLE 改为局部低熵先验 |
+| [docs/round-65-teacher-distillation-with-current-resources.md](docs/round-65-teacher-distillation-with-current-resources.md) | 现有资源怎么跑教师蒸馏：离线 teacher-text LoRA 已跑通，下一步 RAG self-distill |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

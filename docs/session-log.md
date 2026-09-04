@@ -2050,3 +2050,18 @@ lazy-window gate        ✅
   - 需要新的局部任务门禁（低熵 token、代码补全、专名接续等）；
   - 不通过则正式降级/归档。
 
+
+## Session 65：现有资源跑教师蒸馏
+
+- 新增 `scripts/run_lora_distill.py`；
+- 已跑通离线 teacher-text LoRA 蒸馏 smoke：
+  - 30 条 math/code CoT；
+  - trainable params = 540,672；
+  - 10 步 loss ≈ 1.76；
+  - 保存 `outputs/lora-distill-smoke`；
+- 新增 `docs/round-65-teacher-distillation-with-current-resources.md`；
+- 当前资源下三条路线：
+  1. 离线 teacher-text LoRA（已跑通）
+  2. RAG-augmented self-distillation（推荐下一步）
+  3. 真 logit/OPD 蒸馏（需要 teacher 模型）
+

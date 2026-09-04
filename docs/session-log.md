@@ -1748,3 +1748,29 @@ lazy-window gate        ✅
 
 
 
+
+## Session 49：Phase A rare-token 评测与门禁
+
+### 1. 完成
+
+- 新增 rare-kb v1 构建脚本与 270 条评测集；
+- 新增任务级 ΔR² 探针；
+- 新增 logit-patch 分层汇总；
+- 完成 5 条件 270 题 logit patch；
+- 完成一次 Phase A 门禁判定并写入 `docs/round-49-phase-a.md`。
+
+### 2. 结果摘要
+
+- 纯特征 ΔR²：real > control（rare/common），但量级约 1e-4；
+- 总体 logprob：real > control；
+- qa-expanded rare：real ≈ control；
+- qa-expanded common：real > control 明显；
+- 10 条生成 EM：三线相同。
+
+### 3. 结论
+
+- 纯 PLE 有极弱因果信号；
+- 当前 reader 不能把 rare 信号转为任务收益；
+- 不进入大规模训练；
+- 下一步 Phase B 窄口径验证，否则转向 RAG/蒸馏。
+

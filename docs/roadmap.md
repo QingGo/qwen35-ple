@@ -943,3 +943,32 @@ Phase A 任务与指标 → Phase B Reader 稳定 → Phase C Backbone 适配与
 - RAG 对照；
 - 3 seeds；
 - serving/perf。
+
+
+---
+
+## 36. 2026-09-04 第四十九轮：Phase A rare-token 评测与门禁
+
+> 详细见 `docs/round-49-phase-a.md`。
+
+### 36.1 完成
+
+- 新增 `build_rare_kb.py` / `mechanism_rare_task_r2.py` / `analyze_rare_kb_logit.py`；
+- 构建 270 条 rare/common QA 评测集；
+- 纯特征任务级 ΔR²：real 在 rare/common 均 > control，但绝对值很小；
+- 5 条件 logit patch：总体 real > control，但 rare 知识子集 real≈control；
+- 完成第一次 Phase A 门禁判定。
+
+### 36.2 判定
+
+- 纯 PLE 有极弱因果增量信息；
+- 当前 simple reader 未能在 rare 知识任务上把信号转为 real−control 优势；
+- 不进入大规模训练；
+- 先做窄口径 Phase B：rare gate + fixed E⊥ + MLP(H,E⊥) + differential，再决定是否停止。
+
+### 36.3 下一步
+
+- 3-seed 验证纯特征 ΔR²；
+- 构建只含知识题的 rare-kb v2；
+- Phase B reader 稳定性；
+- 若改进后 rare real−control 仍非正，则转向 RAG/蒸馏并记录负结果。

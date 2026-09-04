@@ -51,6 +51,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-46-loss-vs-intelligence.md](docs/round-46-loss-vs-intelligence.md) | 为什么 Loss 在 Scaling Law 中可作代理，但 PLE 场景失效：分布偏移/style/条件互信息/EM不敏感性 |
 | [docs/round-47-systematic-strategy.md](docs/round-47-systematic-strategy.md) | 系统性战略：终极目标、技术债、借鉴矩阵、Phase A-E 开发计划、停止条件 |
 | [docs/round-48-full-summary.md](docs/round-48-full-summary.md) | 本轮完整总结：计划/发现/尝试/踩坑/完成/未完成/技术债/未来计划 |
+| [docs/round-49-phase-a.md](docs/round-49-phase-a.md) | Phase A：rare-token 知识评测集、任务级 ΔR²、logit-patch 分层结果与门禁判定 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

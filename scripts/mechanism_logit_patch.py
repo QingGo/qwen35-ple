@@ -29,7 +29,7 @@ import torch.nn.functional as F
 CONDITIONS = ["no-reader", "real", "control", "random", "zero"]
 
 
-def _load_model(model_path: str):
+def _load_model(model_path: str, device: str = "cpu"):
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -40,14 +40,16 @@ def _load_model(model_path: str):
     )
     if next(model.parameters()).dtype != torch.float32:
         model = model.to(torch.float32)
+    if device != "cpu":
+        model = model.to(device)
     model.eval()
     return tokenizer, model
 
 
-def _load_reader(reader_path: str):
+def _load_reader(reader_path: str, device: str = "cpu"):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
     from qwen35_ple.reader_registry import load_reader_with_extra
-    return load_reader_with_extra(reader_path, device="cpu")
+    return load_reader_with_extra(reader_path, device=device)
 
 
 def _install_reader(model, reader, layer: int, inject_scale: float = 1.0):
@@ -144,17 +146,18 @@ def main() -> int:
     parser.add_argument("--scale", type=float, default=0.0002)
     parser.add_argument("--qa-file", default="data/qa-expanded-150.json")
     parser.add_argument("--tasks", nargs="+", default=None, choices=["triviaqa", "nq", "boolq"])
-    parser.add_argument("--limit", type=int, default=12)
+    parser.add_argument("--limit", type=int, default=None, help="limit number of QA items (default: all)")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
     parser.add_argument("--conditions", nargs="+", default=CONDITIONS, choices=CONDITIONS)
     parser.add_argument("--output", default="outputs/mechanism-logit-patch.json")
     args = parser.parse_args()
 
     t0 = time.time()
-    tokenizer, model = _load_model(args.model)
+    tokenizer, model = _load_model(args.model, device=args.device)
     print(f"loaded model in {time.time()-t0:.1f}s", flush=True)
 
-    reader, _ = _load_reader(args.reader)
+    reader, _ = _load_reader(args.reader, device=args.device)
     handle = _install_reader(model, reader, args.layer, args.inject_scale)
     qa_store = QAEtStore(args.rows_dir, args.scale)
     items = _load_qa(args.qa_file, args.limit, args.tasks)

@@ -38,6 +38,9 @@
 | `mechanism_alignment.py` | 机制验证：PLE e_t 与 Qwen hidden 的 CKA / Procrustes / kNN overlap / intrinsic dimension，以及 reader 参数和 gate 统计 |
 | `mechanism_logit_patch.py` | 快速 logit-level activation patching：no-reader / real / control / random / zero 五条件；支持 `--inject-scale` 做注入强度扫描 |
 | `mechanism_patching.py` | 逐 token 生成的 activation patching / 条件生成对比脚本 |
+| `build_rare_kb.py` | Phase A：构建 rare-token 知识评测集（QA + Alpaca + 参考语料稀有度） |
+| `mechanism_rare_task_r2.py` | Phase A：任务级增量 R² / real vs control 条件信息探针 |
+| `analyze_rare_kb_logit.py` | 汇总 rare-token logit-patch 结果，按 rare/common 输出条件均值与差值 |
 
 ## 预期脚本（与设计文档里程碑对应）
 

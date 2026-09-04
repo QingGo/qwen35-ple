@@ -72,6 +72,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-67-research-routes-limited-resources.md](docs/round-67-research-routes-limited-resources.md) | 有限资源技术路线全景：RAG自蒸馏/QLoRA/MoRA/teacher蒸馏/自我训练/合并/PERK/PLE |
 | [docs/round-68-ple-as-ngram-memory.md](docs/round-68-ple-as-ngram-memory.md) | PLE 新思路：训练无关 n-gram 词法记忆，与 RAG/base 形成三级记忆 |
 | [docs/round-69-ple-paths-10plus-searches.md](docs/round-69-ple-paths-10plus-searches.md) | 10+ 轮调研后的 PLE 使用路径大全：n-gram LM/代码/专名/混合检索/约束解码/缓存等 |
+| [docs/round-70-most-effective-path-math.md](docs/round-70-most-effective-path-math.md) | 数学推导最有效路径：通道排序/Blackwell信息序/多源凸融合/资源性价比/λ* |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

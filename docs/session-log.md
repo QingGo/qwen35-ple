@@ -2125,3 +2125,18 @@ lazy-window gate        ✅
   - rerank/ak审计/安全 等；
 - 下一步：先验证低熵/代码/专名 real vs control。
 
+
+## Session 70：数学推导最有效路径
+
+- 新增 `docs/round-70-most-effective-path-math.md`；
+- 关键推导：
+  - 通道有效性：input ≥ logit ≥ hidden；
+  - Blackwell 信息序：源是否更优取决于任务；
+  - 多源 log-linear 融合是凸优化；
+  - 资源性价比：优先 \(I/c\) 高的 RAG；
+  - n-gram 最优插值系数 \(\lambda^*\) 可由协方差/方差估计；
+  - 自蒸馏收益受 teacher 噪声上界约束；
+- 结论：
+  - 最优路径 = RAG/teacher + logit 融合 + n-gram 局部专家 + 凸 router；
+  - 不建议 hidden PLE 作为主路径。
+

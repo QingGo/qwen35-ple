@@ -1414,3 +1414,31 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 ### 55.3 下一步
 
 先验证低熵/代码/专名 real vs control，再选择 2–3 条路径落地。
+
+---
+
+## 56. 2026-09-04 第七十轮：数学推导最有效路径
+
+> 详细见 `docs/round-70-most-effective-path-math.md`。
+
+### 56.1 核心数学结论
+
+1. 通道：input ≥ logit ≥ hidden；
+2. 源是否更优是任务相关的（Blackwell 信息序）；
+3. 多源 log-linear 融合是凸优化；
+4. 资源性价比应选 \(I/c\) 高的源；
+5. n-gram 最优 \(\lambda^*\) 可通过协方差估计；
+6. 自蒸馏受 teacher 噪声上界约束。
+
+### 56.2 最优路径
+
+RAG/teacher + logit 融合 + n-gram 局部专家 + 凸 router。
+
+### 56.3 实验指导
+
+- RAG vs PLE rare QA；
+- N-gram \(\lambda^*\) on code/names；
+- RAG self-distillation；
+- Multi-source router；
+- Teacher distillation；
+- PLE local real vs control。

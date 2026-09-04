@@ -1005,3 +1005,58 @@ Phase A 任务与指标 → Phase B Reader 稳定 → Phase C Backbone 适配与
 ### 37.4 停止条件
 
 若改进 memory interface 后 rare real−control 仍非正，则转 RAG/蒸馏/更语义化记忆，不进入大规模 RL。
+
+---
+
+## 38. 2026-09-04 第五十二轮：P1 记忆接口原型代码
+
+> 详细见 `docs/round-52-p1-memory-prototype.md`。
+
+### 38.1 完成
+
+- `ExactNgramBank`：2/3/4-gram exact bank、longest-match、control shuffle、save/load；
+- `TokenMemCrossAttention` + `MemoryLogitHead` + `MemoryRouter` + `P1MemoryModule`；
+- `build_exact_ple_bank.py` / `train_p1_memory.py` / `eval_p1_memory.py`；
+- `tests/test_memory_bank.py` / `tests/test_memory_token_mem.py`；
+- CI 与 README 同步。
+
+### 38.2 尚未完成
+
+- WSL 真表 bank 构建与 P1 训练/评测；
+- rare real>control 门禁结果；
+- 2/3-only 与 2/3/4 bank 的消融；
+- bank 泄漏审计。
+
+### 38.3 下一步
+
+1. WSL 构建 bank；
+2. 训练 P1 memory module；
+3. 跑 rare/common QA；
+4. 根据门禁决定进入 P2 或转 RAG/蒸馏。
+
+---
+
+## 39. 2026-09-04 第五十三轮：P1 真表实测与门禁判定
+
+> 详细见 `docs/round-53-p1-results.md`。
+
+### 39.1 结果
+
+- real-ckpt rare real−control = +0.000131 (t=0.71)；
+- control-ckpt rare real−control = +0.000044 (t=0.20)；
+- common real−control 为负；
+- first-token hit 无差异；
+- memory module 对 real/control 同样提升，说明学到的是通用 distribution shift，不是 PLE 内容因果增益。
+
+### 39.2 判定
+
+- P1 门禁未通过；
+- 触发停止条件：不进入大规模 MoRA/GaLore/RL；
+- 转向 RAG / OPD / Purified OPSD / 更语义化记忆。
+
+### 39.3 下一步
+
+1. 同口径 RAG baseline；
+2. OPD / Purified OPSD 蒸馏；
+3. 判断能力提升是否依赖 PLE；
+4. 如果不依赖，则把 PLE 降级为可选局部语言先验。

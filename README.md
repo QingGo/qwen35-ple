@@ -54,6 +54,8 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-49-phase-a.md](docs/round-49-phase-a.md) | Phase A：rare-token 知识评测集、任务级 ΔR²、logit-patch 分层结果与门禁判定 |
 | [docs/round-50-systematic-plan.md](docs/round-50-systematic-plan.md) | 系统性复盘：终极目标、技术债、借鉴矩阵、低资源 PLE 使用方案、蒸馏与停止条件 |
 | [docs/round-51-full-summary.md](docs/round-51-full-summary.md) | 本轮完整总结：计划/发现/尝试/踩坑/完成/未完成/未来计划 |
+| [docs/round-52-p1-memory-prototype.md](docs/round-52-p1-memory-prototype.md) | P1 记忆接口原型：exact bank + TokenMem cross-attention + distribution memory/router，训练与评测入口 |
+| [docs/round-53-p1-results.md](docs/round-53-p1-results.md) | P1 实测：rare real−control 不显著，门禁未通过，转向 RAG/蒸馏/语义记忆 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）
@@ -179,6 +181,8 @@ tests/            一致性冒烟测试（golden 对拍）
 - [x] 依赖收口：engram-peft>=1.2.7、engramdb-python>=0.2.12（CI 同步固定正式 tag）
 - [x] target-side reader checkpoint 保存/加载（`--save-reader` / `--load-reader`）
 - [x] 通用 serving adapter（`QwenReaderServingAdapter`）
+- [x] P1 记忆接口原型代码：exact n-gram bank + TokenMem cross-attention + distribution memory/router（`docs/round-52-p1-memory-prototype.md`）
+- [x] P1 真表实测：rare real−control 不显著，门禁未通过，转向 RAG/蒸馏/语义记忆（`docs/round-53-p1-results.md`）
 - [ ] 真实 vLLM/SGLang 引擎 serving 适配与 A/B
 - [x] CI 改用 uv 管理依赖与测试（`uv sync --all-groups` + `uv run ruff/pytest`）
 - [x] pre-commit 已配置（ruff）

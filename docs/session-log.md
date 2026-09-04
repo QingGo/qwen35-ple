@@ -1806,3 +1806,68 @@ lazy-window gate        ✅
 - 包含：计划、发现、尝试、踩坑、完成、未完成、未来计划、借鉴矩阵；
 - 下一阶段从 P1 记忆接口原型开始。
 
+
+## Session 52：P1 记忆接口原型代码
+
+### 1. 完成
+
+- 新增 `src/qwen35_ple/memory/`：
+  - `ExactNgramBank`：2/3/4-gram exact bank、longest-match、control shuffle、save/load；
+  - `TokenMemCrossAttention`：独立跨注意力记忆通道；
+  - `MemoryLogitHead` / `MemoryRouter` / `MemoryLogitFusion` / `P1MemoryModule`；
+- 新增脚本：
+  - `scripts/build_exact_ple_bank.py`；
+  - `scripts/train_p1_memory.py`；
+  - `scripts/eval_p1_memory.py`；
+- 新增测试：`tests/test_memory_bank.py`、`tests/test_memory_token_mem.py`；
+- CI lint 纳入三个新脚本；
+- 新增文档：`docs/round-52-p1-memory-prototype.md`；
+- README 关键文档表、当前状态已同步。
+
+### 2. 当前状态
+
+- P1 代码原型可复现；
+- 尚未在 WSL 真表上构建 bank、训练和跑 rare real>control 门禁。
+
+### 3. 下一步
+
+1. WSL 构建真实/控制 bank；
+2. 训练 P1 memory module；
+3. 跑 rare/common QA 评测；
+4. 若 real>control，进入 Phase P2 (MoRA/GaLore)；
+5. 若不显著，按停止条件转向 RAG/蒸馏/语义记忆。
+
+
+## Session 53：P1 真表实测与门禁判定
+
+### 1. 完成
+
+- WSL 构建 exact bank：
+  - 161,296 tokens；
+  - 347,439 entries；
+  - 2/3/4-gram；
+- 训练 real / control 两个 P1 memory checkpoint；
+- 完成 270 题 rare/common QA 评测；
+- 用两个 checkpoint 分别评测 real/control。
+
+### 2. 结果
+
+- real-ckpt rare real−control = +0.000131 (t=0.71)；
+- control-ckpt rare real−control = +0.000044 (t=0.20)；
+- common real−control 为负；
+- first-token hit 无差异；
+- 详细见 `docs/round-53-p1-results.md`。
+
+### 3. 判定
+
+- P1 门禁未通过；
+- 触发停止条件：不进入大规模 MoRA/GaLore/RL；
+- 转向 RAG / OPD / Purified OPSD / 更语义化记忆。
+
+### 4. 下一步
+
+1. 同口径 RAG baseline；
+2. OPD / Purified OPSD 蒸馏；
+3. 判断能力提升是否依赖 PLE；
+4. 如果不依赖，则把 PLE 降级为可选局部语言先验。
+

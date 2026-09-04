@@ -1296,3 +1296,22 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 - 替换真实 sentence embedding / cross-encoder rerank；
 - 接入 vLLM/SGLang/CompileForge；
 - 继续 D2 教师蒸馏。
+
+---
+
+## 50. 2026-09-04 第六十四轮：提升路线与 PLE 正确定位
+
+> 详细见 `docs/round-64-end-to-end-routes-and-ple-usage.md`。
+
+### 50.1 主提升路线
+
+1. RAG；
+2. 教师蒸馏 / OPD / Purified OPSD；
+3. 低资源 backbone adaptation；
+4. 长上下文后训练。
+
+### 50.2 PLE 新定位
+
+- 局部 n-gram/低熵先验；
+- 新门禁：低熵 token、代码补全、专名接续等；
+- 通过则作为可选专家，不通过则降级归档。

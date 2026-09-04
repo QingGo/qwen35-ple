@@ -2036,3 +2036,17 @@ lazy-window gate        ✅
 - 烟测：hybrid demo 可运行，HTTP smoke 通过 `/health` 和 `/answer`；
 - 已知限制：dense 目前是 token embedding mean-pool，非 sota sentence embedding；生产 transport 需替换。
 
+
+## Session 64：提升路线与 PLE 正确定位
+
+- 新增 `docs/round-64-end-to-end-routes-and-ple-usage.md`；
+- 主提升路线：
+  1. RAG
+  2. 教师蒸馏 / OPD / Purified OPSD
+  3. 低资源 backbone adaptation（MoRA/GaLore）
+  4. 长上下文后训练
+- PLE 定位修正：
+  - 从“知识记忆”改为“局部 n-gram/低熵先验”；
+  - 需要新的局部任务门禁（低熵 token、代码补全、专名接续等）；
+  - 不通过则正式降级/归档。
+

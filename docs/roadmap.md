@@ -1060,3 +1060,30 @@ Phase A 任务与指标 → Phase B Reader 稳定 → Phase C Backbone 适配与
 2. OPD / Purified OPSD 蒸馏；
 3. 判断能力提升是否依赖 PLE；
 4. 如果不依赖，则把 PLE 降级为可选局部语言先验。
+
+---
+
+## 40. 2026-09-04 第五十四轮：RAG 同口径 baseline
+
+> 详细见 `docs/round-54-rag-baseline.md`。
+
+### 40.1 结果
+
+| 分组 | n | no-context | RAG | Δ | wins |
+|---|---:|---:|---:|---:|---:|
+| all | 270 | -7.186 | -5.938 | +1.248 | 229/270 |
+| rare | 182 | -4.566 | -3.716 | +0.851 | 152/182 |
+| common | 88 | -12.604 | -10.534 | +2.070 | 77/88 |
+
+### 40.2 判定
+
+- RAG 显著优于 P1 memory interface；
+- 外部检索可以提升冻结 0.8B；
+- 当前 PLE 记忆接口不构成必要的知识增强；
+- 转向 RAG / 蒸馏为主，PLE 降级为可选局部语言先验。
+
+### 40.3 下一步
+
+1. OPD / Purified OPSD；
+2. 蒸馏 student 与 RAG 对比；
+3. 若能力提升不依赖 PLE，则停止 PLE backbone adaptation，只保留低优先级探索。

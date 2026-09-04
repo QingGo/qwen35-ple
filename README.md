@@ -56,6 +56,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-51-full-summary.md](docs/round-51-full-summary.md) | 本轮完整总结：计划/发现/尝试/踩坑/完成/未完成/未来计划 |
 | [docs/round-52-p1-memory-prototype.md](docs/round-52-p1-memory-prototype.md) | P1 记忆接口原型：exact bank + TokenMem cross-attention + distribution memory/router，训练与评测入口 |
 | [docs/round-53-p1-results.md](docs/round-53-p1-results.md) | P1 实测：rare real−control 不显著，门禁未通过，转向 RAG/蒸馏/语义记忆 |
+| [docs/round-54-rag-baseline.md](docs/round-54-rag-baseline.md) | RAG 同口径 baseline：BM25 top-3 显著提升 rare/common，支持转向 RAG/蒸馏 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）
@@ -183,6 +184,7 @@ tests/            一致性冒烟测试（golden 对拍）
 - [x] 通用 serving adapter（`QwenReaderServingAdapter`）
 - [x] P1 记忆接口原型代码：exact n-gram bank + TokenMem cross-attention + distribution memory/router（`docs/round-52-p1-memory-prototype.md`）
 - [x] P1 真表实测：rare real−control 不显著，门禁未通过，转向 RAG/蒸馏/语义记忆（`docs/round-53-p1-results.md`）
+- [x] RAG 同口径 baseline：BM25 top-3 在 rare/common 上显著提升（`docs/round-54-rag-baseline.md`）
 - [ ] 真实 vLLM/SGLang 引擎 serving 适配与 A/B
 - [x] CI 改用 uv 管理依赖与测试（`uv sync --all-groups` + `uv run ruff/pytest`）
 - [x] pre-commit 已配置（ruff）

@@ -1871,3 +1871,35 @@ lazy-window gate        ✅
 3. 判断能力提升是否依赖 PLE；
 4. 如果不依赖，则把 PLE 降级为可选局部语言先验。
 
+
+## Session 54：RAG 同口径 baseline
+
+### 1. 完成
+
+- 新增 `scripts/run_rag_baseline.py`：轻量 BM25 + 冻结 0.8B + 同口径 answer-logprob；
+- 使用 `data/sources/wikitext.jsonl` 23,767 docs，top-k=3；
+- 完成 270 题全量 RAG baseline。
+
+### 2. 结果
+
+- all：Δ=+1.248，229/270 wins；
+- rare：Δ=+0.851，152/182 wins；
+- common：Δ=+2.070，77/88 wins。
+
+### 3. 对比 P1
+
+- P1 rare real−control：+0.000131，不显著；
+- RAG rare no-context→RAG：+0.851，显著且大。
+
+### 4. 判定
+
+- 外部检索可以显著提升冻结 0.8B 的知识问答；
+- PLE 记忆接口当前贡献远小于简单 RAG；
+- 转向以 RAG/蒸馏为主，PLE 降级为可选局部语言先验。
+
+### 5. 下一步
+
+- OPD / Purified OPSD 蒸馏；
+- 蒸馏 student 与 RAG 同口径对比；
+- 若不依赖 PLE，则不再进入大规模 PLE backbone adaptation。
+

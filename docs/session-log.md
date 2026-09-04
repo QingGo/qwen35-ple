@@ -1799,3 +1799,10 @@ lazy-window gate        ✅
 - 然后 OPD/Purified OPSD；
 - 最后 RAG 对照。
 
+
+## Session 51：本轮完整总结归档
+
+- 已整理本轮完整总结到 `docs/round-51-full-summary.md`；
+- 包含：计划、发现、尝试、踩坑、完成、未完成、未来计划、借鉴矩阵；
+- 下一阶段从 P1 记忆接口原型开始。
+

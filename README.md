@@ -53,6 +53,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-48-full-summary.md](docs/round-48-full-summary.md) | 本轮完整总结：计划/发现/尝试/踩坑/完成/未完成/技术债/未来计划 |
 | [docs/round-49-phase-a.md](docs/round-49-phase-a.md) | Phase A：rare-token 知识评测集、任务级 ΔR²、logit-patch 分层结果与门禁判定 |
 | [docs/round-50-systematic-plan.md](docs/round-50-systematic-plan.md) | 系统性复盘：终极目标、技术债、借鉴矩阵、低资源 PLE 使用方案、蒸馏与停止条件 |
+| [docs/round-51-full-summary.md](docs/round-51-full-summary.md) | 本轮完整总结：计划/发现/尝试/踩坑/完成/未完成/未来计划 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

@@ -2009,3 +2009,16 @@ lazy-window gate        ✅
   - 对训练/蒸馏数据做审计；
   - 报告“去污染后的 RAG 收益”。
 
+
+## Session 62：RAG 产品化原型
+
+- 新增 `src/qwen35_ple/rag.py`：
+  - `tokenize`
+  - `load_corpus`
+  - `BM25Index`
+  - `build_rag_prompt`
+- 新增 `scripts/run_rag_demo.py`：单条查询 demo；
+- 新增 `tests/test_rag.py`；
+- 烟测：RAG 路径可运行，但当前 BM25 检索质量和 0.8B 生成格式仍需改进；
+- 下一步：混合检索、语料分块、prompt 控制、serving 接入。
+

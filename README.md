@@ -64,6 +64,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-59-b3-logit-results.md](docs/round-59-b3-logit-results.md) | B3 logit-space 直接记忆下界：连绕开 Jacobian 也得不到 real>control，PLE 信息不足 |
 | [docs/round-60-multitask-harness.md](docs/round-60-multitask-harness.md) | 多任务评测 harness：知识/算术/代码输出，后续统一评测入口 |
 | [docs/round-61-contamination-audit.md](docs/round-61-contamination-audit.md) | RAG 语料污染审计：答案表面污染率 6.7%，需继续做严格去污染 |
+| [docs/round-62-rag-product-prototype.md](docs/round-62-rag-product-prototype.md) | RAG 产品化原型：可复用 BM25 模块 + 单条查询 demo |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

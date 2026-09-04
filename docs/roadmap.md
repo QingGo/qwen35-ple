@@ -1245,3 +1245,28 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 - 对 PLE bank 做同样审计；
 - 对训练/蒸馏数据审计；
 - 报告去污染后的 RAG 收益。
+
+---
+
+## 48. 2026-09-04 第六十二轮：RAG 产品化原型
+
+> 详细见 `docs/round-62-rag-product-prototype.md`。
+
+### 48.1 完成
+
+- `src/qwen35_ple/rag.py`：可复用 BM25 + prompt；
+- `scripts/run_rag_demo.py`：单条查询 demo；
+- `tests/test_rag.py`。
+
+### 48.2 烟测结论
+
+- RAG 链路可运行；
+- BM25 检索质量一般；
+- 0.8B 生成格式仍需蒸馏/SFT。
+
+### 48.3 下一步
+
+- 混合检索和 rerank；
+- 语料分块与 metadata；
+- prompt 控制；
+- 接入 serving。

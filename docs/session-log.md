@@ -1998,3 +1998,14 @@ lazy-window gate        ✅
 - 结果：当前 frozen 0.8B 在生成式短答案上 exact-match 和 first-token hit 都很低；
 - 下一步：接入真实 GSM8K/MATH/HumanEval/MBPP，加入 3-seed。
 
+
+## Session 61：RAG 污染审计
+
+- 新增 `scripts/audit_eval_contamination.py`；
+- 对 rare-kb + wikitext 20k docs 做答案泄漏审计；
+- 结果：可检查 165 个答案，其中 11 个在语料中完整出现，污染率 6.7%；
+- 后续：
+  - 对 PLE bank 做同样审计；
+  - 对训练/蒸馏数据做审计；
+  - 报告“去污染后的 RAG 收益”。
+

@@ -1214,16 +1214,34 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 
 - `scripts/run_multi_task_eval.py`；
 - 任务：knowledge / arithmetic / code-output；
+- 已加 greedy decoding exact-match；
 - 烟测已跑通。
 
 ### 46.2 当前短板
 
-- 只有 logprob/first-hit；
 - 尚无真实 GSM8K/MATH/HumanEval/MBPP；
-- 尚无生成式 exact-match；
-- 后续需补 3-seed 和污染审计。
+- 尚无 3-seed；
+- 污染审计已开始（见 round-61）。
 
 ### 46.3 下一步
 
 - 接入真实任务集；
 - 将多任务评测作为 RAG/蒸馏统一 gate。
+
+---
+
+## 47. 2026-09-04 第六十一轮：RAG 污染审计
+
+> 详细见 `docs/round-61-contamination-audit.md`。
+
+### 47.1 结果
+
+- 可检查答案 165 个；
+- 在 wikitext 20k docs 中完整出现 11 个；
+- 表面污染率 6.7%。
+
+### 47.2 下一步
+
+- 对 PLE bank 做同样审计；
+- 对训练/蒸馏数据审计；
+- 报告去污染后的 RAG 收益。

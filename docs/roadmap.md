@@ -1373,3 +1373,24 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 ### 53.2 推荐组合
 
 数据筛选 → RAG/teacher 蒸馏 → LoRA/MoRA → 多 LoRA 合并 → RAG + optional PLE → 量化 serving。
+
+---
+
+## 54. 2026-09-04 第六十八轮：PLE 训练无关 n-gram 记忆
+
+> 详细见 `docs/round-68-ple-as-ngram-memory.md`。
+
+### 54.1 新定位
+
+- PLE = 稀疏词法记忆 / 局部低熵先验；
+- 不是语义知识记忆。
+
+### 54.2 已实现
+
+- `src/qwen35_ple/ngram_lm.py`
+- `tests/test_ngram_lm.py`
+
+### 54.3 下一步
+
+- 低熵 / 代码 / 专名任务 real vs control；
+- 与 RAG 形成三级记忆融合。

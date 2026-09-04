@@ -2090,3 +2090,18 @@ lazy-window gate        ✅
 - 推荐组合：
   - 数据筛选 → RAG/teacher 蒸馏 → LoRA/MoRA → 多 LoRA 合并 → RAG+PLE optional → 量化 serving。
 
+
+## Session 68：PLE 新定位——训练无关 n-gram 词法记忆
+
+- 新增 `src/qwen35_ple/ngram_lm.py`：
+  - 2/3/4-gram 精确匹配；
+  - backoff；
+  - `distribution / logprob / topk / interpolate_logits`；
+- 新增 `tests/test_ngram_lm.py`（3 passed）；
+- 新增 `docs/round-68-ple-as-ngram-memory.md`；
+- 核心变化：
+  - 不再把 PLE 当“语义知识记忆”；
+  - 而是当“稀疏词法记忆/局部低熵先验”；
+  - 与 RAG（语义）+ base（推理）形成三级记忆；
+- 下一步：用低熵/代码/专名任务验证 real vs control。
+

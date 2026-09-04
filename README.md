@@ -70,6 +70,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-65-teacher-distillation-with-current-resources.md](docs/round-65-teacher-distillation-with-current-resources.md) | 现有资源怎么跑教师蒸馏：离线 teacher-text LoRA 已跑通，下一步 RAG self-distill |
 | [docs/round-66-running-qwen38-teacher.md](docs/round-66-running-qwen38-teacher.md) | 有限 GPU 跑 Qwen3.8-Flash-Next：8GB GPU+48GB RAM 可跑/离线 teacher 解耦方案 |
 | [docs/round-67-research-routes-limited-resources.md](docs/round-67-research-routes-limited-resources.md) | 有限资源技术路线全景：RAG自蒸馏/QLoRA/MoRA/teacher蒸馏/自我训练/合并/PERK/PLE |
+| [docs/round-68-ple-as-ngram-memory.md](docs/round-68-ple-as-ngram-memory.md) | PLE 新思路：训练无关 n-gram 词法记忆，与 RAG/base 形成三级记忆 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

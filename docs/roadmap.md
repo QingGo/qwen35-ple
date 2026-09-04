@@ -1105,3 +1105,28 @@ Phase A 任务与指标 → Phase B Reader 稳定 → Phase C Backbone 适配与
 - 任务级 real−control 是门禁；
 - 绝对 logprob / loss 不能作为 PLE 有效性证据；
 - RAG/蒸馏优先于大规模 PLE backbone adaptation。
+
+---
+
+## 42. 2026-09-04 第五十六轮：更紧的 PLE 上下界
+
+> 详细见 `docs/round-56-tighter-bounds.md`。
+
+### 42.1 分层界
+
+- B0：完整信息上界 \(I(Y;E|H)\)；
+- B1：线性/低秩 PLS 上界；
+- B2：backbone 可见子空间上界；
+- B3：logit-space 可实现下界；
+- B4：当前 hidden 注入实测下界。
+
+预期大小关系：
+
+```text
+B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
+```
+
+### 42.2 已实现
+
+- `scripts/estimate_ple_bounds.py`：计算 B0 和 B1(r)；
+- 完整实现方案见 round-56 文档。

@@ -1916,3 +1916,16 @@ lazy-window gate        ✅
   4. 明确正 CMI 不是充分条件；
   5. 修改评测证据标准为 paired real−control + 离散指标。
 
+
+## Session 56：更紧的 PLE 上下界
+
+- 新增 `docs/round-56-tighter-bounds.md`；
+- 提出分层界：
+  - B0：完整条件信息上界；
+  - B1：线性/低秩 PLS 上界；
+  - B2：backbone 可见子空间上界；
+  - B3：logit-space 可实现下界；
+  - B4：当前 hidden 注入实测下界；
+- 新增 `scripts/estimate_ple_bounds.py`：可计算 B0、B1(r)；
+- CI lint 纳入新脚本。
+

@@ -1968,10 +1968,10 @@ lazy-window gate        ✅
 ## Session 59：B3 logit-space 直接记忆下界实测
 
 - 实现 `PureLogitMemoryModule`：不经过 hidden，直接把 PLE 映射为 logit 偏移；
-- 训练 200 steps，评估 rare-kb 270 题；
-- 结果：
-  - rare real−control = −0.00101，t=−0.73；
-  - common real−control = −0.00578；
+- 训练 3 seeds × 200 steps，评估 rare-kb 270 题；
+- 结果（3 seeds）：
+  - rare real−control = −0.00117 ± 0.00008，三个 seed 全部为负；
+  - common real−control 约 −0.00345；
   - first-hit 微弱提升，但 real 与 control 无差异；
 - 结论：
   - 连 logit-space 也无法放大 PLE real>control；

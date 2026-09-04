@@ -1189,8 +1189,8 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 
 ### 45.1 结果
 
-- rare real−control = −0.00101，t=−0.73；
-- common real−control = −0.00578；
+- 3 seeds rare real−control = −0.00117 ± 0.00008，三个 seed 全部为负；
+- common real−control 约 −0.00345；
 - first-hit 有轻微提升但 real/control 无差异。
 
 ### 45.2 结论
@@ -1201,5 +1201,5 @@ B4 ≤ B3 ≤ B2 ≤ B1 ≤ B0
 
 ### 45.3 下一步
 
-- 继续 R1：补多任务评测、B2、3-seed；
+- 继续 R1：补多任务评测、B2；
 - 主路径进入 D1/D2：RAG 产品化 + 教师蒸馏。

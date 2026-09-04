@@ -31,7 +31,7 @@ Round 56 提出了 B3 下界：
 
 ## 3. 结果
 
-### 3.1 汇总
+### 3.1 单种子（seed 0）汇总
 
 | 分组 | no-memory logprob | real logprob | control logprob | real−control | t | first-hit real |
 |---|---:|---:|---:|---:|---:|---:|
@@ -39,15 +39,26 @@ Round 56 提出了 B3 下界：
 | common | -8.241 | -8.257 | -8.251 | -0.00578 | -0.94 | 0/88 |
 | all | -5.549 | -5.517 | -5.514 | -0.00256 | -1.17 | 4/270 |
 
-### 3.2 解读
+### 3.2 3-seed 汇总
+
+| 分组 | 各 seed real−control | mean | se |
+|---|---:|---:|---:|
+| rare | -0.00101 / -0.00134 / -0.00116 | **-0.00117** | 0.000078 |
+| common | -0.00578 / +0.00368 / -0.00825 | -0.00345 | 0.00297 |
+| all | -0.00256 / +0.00030 / -0.00347 | -0.00191 | 0.00093 |
+
+3 个 seed 的 rare real−control 全部为负，且 se 很小：
+
+> **不存在可检测的 PLE real>control 正信号，反而有微弱的负倾向。**
+
+### 3.3 解读
 
 - real 相对 no-memory 在 rare 上略好：
-  - logprob +0.056；
-  - first-token hit 从 1/182 提升到 4/182。
-- 但 real 相对 control 是负的、不显著：
-  - rare：−0.00101；
-  - common：−0.00578。
-- 说明 logit-space PLE 头学到的主要是 **记忆向量的通用分布效应**，不是 exact n-gram 内容的因果增益。
+  - logprob +0.05 左右；
+  - first-token hit 从 1/182 提升到 4/182（seed 0）。
+- 但 real 相对 control 在 3-seed 下全部为负或接近 0：
+  - rare mean = −0.00117；
+  - 说明 logit-space PLE 头学到的主要是 **记忆向量的通用分布效应**，不是 exact n-gram 内容的因果增益。
 - 连直接改 logits 都无法放大 PLE 的 real>control，因此：
 
 > **PLE 信息不足的结论进一步加强。**

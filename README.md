@@ -84,6 +84,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-79-rag-channel-ablation.md](docs/round-79-rag-channel-ablation.md) | 真实 RAG 三通道消融：BM25/Dense/N-gram/Hybrid 文档与QA检索 |
 | [docs/round-80-fusion-calibration.md](docs/round-80-fusion-calibration.md) | 真实 base logits 上单λ/scale+bias/temperature 校准 |
 | [docs/round-81-ngram-router-integration.md](docs/round-81-ngram-router-integration.md) | 校准后 n-gram 融合接入 RAGServingAdapter 与独立 router |
+| [docs/round-82-semantic-values-3seed.md](docs/round-82-semantic-values-3seed.md) | 语义 value（函数块/段落）+ 3-seed 可寻址记忆结果 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

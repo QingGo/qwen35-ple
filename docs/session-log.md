@@ -2309,3 +2309,17 @@ lazy-window gate        ✅
 - 测试通过（14 passed）；
 - PLE 现在同时进入：混合检索 + 生成阶段 logit 校准融合；
 - 下一步：扩大校准、任务 gate、真实生成消融。
+
+
+## Session 82：语义 value + 3-seed
+
+- 新增 `scripts/run_ple2_semantic_values_3seed.py`；
+- 新增 `docs/round-82-semantic-values-3seed.md`；
+- value 升级：
+  - code：AST 函数/类块；
+  - wiki：段落块；
+- 3 seeds 平均：
+  - code：Cont@1 0.606，Ret exact 0.698；
+  - wiki：Cont@1 0.134，Ret exact 0.176；
+- 相比整篇文档 value，code ret exact 从约 60.6% 提升到约 69.8%；
+- 下一步：接入 RAG serving value、实体条目、联合 logit fusion 消融。

@@ -234,6 +234,7 @@ class HybridRetriever:
         bm25: BM25Index,
         dense_vectors: np.ndarray | None = None,
         *,
+        bm25_weight: float = 1.0,
         dense_weight: float = 1.0,
         ngram_retriever=None,
         ngram_weight: float = 1.0,
@@ -241,6 +242,7 @@ class HybridRetriever:
     ) -> None:
         self.bm25 = bm25
         self.dense_vectors = dense_vectors
+        self.bm25_weight = bm25_weight
         self.dense_weight = dense_weight
         self.ngram_retriever = ngram_retriever
         self.ngram_weight = ngram_weight
@@ -256,7 +258,7 @@ class HybridRetriever:
     ) -> list[int]:
         bm25_ranking = self.bm25.search(query, top_k=candidate_pool)
         rankings = [bm25_ranking]
-        weights = [1.0]
+        weights = [self.bm25_weight]
         if self.ngram_retriever is not None:
             ngram_ranking = self.ngram_retriever.search(query, top_k=candidate_pool)
             if ngram_ranking:

@@ -2266,3 +2266,18 @@ lazy-window gate        ✅
   - sparse mixture；
 - 测试通过（15 passed）；
 - 下一步：真实 base logits 上的校准对比 + 接入 serving/router。
+
+
+## Session 79：RAG 三通道检索消融
+
+- 新增 `scripts/run_rag_channel_ablation.py`；
+- 新增 `docs/round-79-rag-channel-ablation.md`；
+- 文档检索（200 wiki queries）：
+  - BM25 Recall@1 98.5%，MRR 0.989；
+  - Dense 81.0%，N-gram 30.0%；
+  - 加权 Hybrid Recall@3/5 接近 BM25，Recall@1 略低。
+- QA answer-containment（34 题）：
+  - Dense 最好：Recall@5 58.8%，MRR 0.439；
+  - N-gram 0%，确认 PLE 不适合语义知识检索；
+  - Hybrid 介于 BM25 与 Dense 之间。
+- 结论：需要任务条件 router，而不是固定 RRF。

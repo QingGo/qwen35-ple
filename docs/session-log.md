@@ -2159,3 +2159,22 @@ lazy-window gate        ✅
   - 联合小规模预训练
   - 语义可寻址 PLE。
 
+
+## Session 72：系统性复盘 v2
+
+- 新增 `docs/round-72-systematic-rethink-v2.md`；
+- 终极目标重新表述：
+  - 以 PLE/外部稀疏记忆为核心创新；
+  - 同时用 RAG/蒸馏提升 0.8B 实际能力；
+- 主要技术债：
+  - 未验证 PLE 低熵/代码/专名 real>control；
+  - 未度量 \(I(Y;C|E_{\text{ngram}})\)；
+  - 未实现非参数残差记忆、语义可寻址 PLE、多源 router；
+  - 未跑 RAG self-distillation / teacher logits；
+- 新开发计划：
+  1. PLE-1：证明 PLE 真正擅长什么；
+  2. PLE-2：可寻址残差/长尾记忆架构；
+  3. CAP-1：RAG/蒸馏提升能力；
+  4. CAP-2：多源集成；
+  5. PROD：量化/CPU serving。
+

@@ -1469,3 +1469,29 @@ RAG/teacher + logit 融合 + n-gram 局部专家 + 凸 router。
 - 非参数残差记忆
 - 语义可寻址 PLE
 - 联合小规模预训练。
+
+---
+
+## 58. 2026-09-04 第七十二轮：系统性复盘 v2
+
+> 详细见 `docs/round-72-systematic-rethink-v2.md`。
+
+### 58.1 终极目标
+
+- 以 PLE/外部稀疏记忆为核心创新；
+- 同时用 RAG/蒸馏提升 0.8B 实际能力。
+
+### 58.2 技术债
+
+- PLE 真实价值未验证；
+- 残差记忆/语义可寻址/多源 router 未实现；
+- RAG self-distillation / teacher logits 未跑；
+- 无完整产品化闭环。
+
+### 58.3 计划
+
+1. PLE-1：证明 PLE 擅长什么；
+2. PLE-2：可寻址残差/长尾记忆；
+3. CAP-1：RAG/蒸馏能力提升；
+4. CAP-2：多源集成；
+5. PROD：量化/CPU serving。

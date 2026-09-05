@@ -2484,3 +2484,18 @@ lazy-window gate        ✅
 - `HybridRetriever` 新增 `set_channel_weights`，支持按查询任务切换检索通道；
 - 测试扩展到 89 passed；
 - 剩余 P0：多源联合消融、3-seed router 评测、正式评测集。
+
+
+## Session 94：P0 多源消融（base / RAG / PLE / MoRA / all）
+
+- 新增 `scripts/run_multisource_ablation.py`；
+- 在远程 WSL GTX1070 上完成 3-seed（seed 0/1/2）多源消融；
+- 每 seed：20 knowledge + 10 arithmetic + 10 code-output；
+- 结果：
+  - RAG：knowledge +1.19 nats；
+  - MoRA：code-output +0.93 nats；
+  - PLE：knowledge/code 无提升，arithmetic -0.47 nats；
+  - all：收益主要来自 RAG + MoRA，PLE 未贡献正收益；
+- 新增 `docs/round-94-p0-multisource-ablation.md`；
+- P0 标记完成；
+- 下一步进入 P1：正式评测集、Purified OPSD、多 seed adapter 对比、PLE 窄口径改进。

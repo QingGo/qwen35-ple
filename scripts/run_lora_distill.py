@@ -30,7 +30,7 @@ from pathlib import Path
 import torch
 
 
-def _load_model(model_path: str, device: str):
+def _load_model(model_path: str, device: str, use_qlora: bool = False):
     import os
 
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -38,10 +38,26 @@ def _load_model(model_path: str, device: str):
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path, local_files_only=True, dtype=torch.float32
-    )
-    model.to(device)
+    if use_qlora:
+        from transformers import BitsAndBytesConfig
+
+        bnb = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            local_files_only=True,
+            quantization_config=bnb,
+            device_map="auto",
+        )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path, local_files_only=True, dtype=torch.float32
+        )
+        model.to(device)
     model.config.use_cache = False
     model.train()
     return tokenizer, model
@@ -108,6 +124,7 @@ def main() -> int:
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--use-qlora", action="store_true", help="load base in 4-bit NF4 with bitsandbytes")
     parser.add_argument("--max-length", type=int, default=512)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--target-modules", default="q_proj,k_proj,v_proj,o_proj")
@@ -119,7 +136,7 @@ def main() -> int:
     rng = random.Random(args.seed)
     t0 = time.time()
 
-    tokenizer, model = _load_model(args.model, args.device)
+    tokenizer, model = _load_model(args.model, args.device, use_qlora=args.use_qlora)
     examples = _load_examples(args.data, args.limit)
     if not examples:
         print("[lora-distill] no examples loaded", flush=True)

@@ -2333,3 +2333,19 @@ lazy-window gate        ✅
 - 本地 CPU LoRA smoke 启动但未完成（模型可加载，trainable 540k，单步过慢）；
 - QLoRA 需要 bitsandbytes，当前环境未安装；
 - 状态：CAP-1 数据与训练入口已完成，实际训练待 GPU/长跑。
+
+
+## Session 84：CAP-1 实际训练跑通
+
+- 远程 WSL GTX1070 可用；
+- 复制 RAG self-distill 数据/训练脚本到远程；
+- LoRA 50 步训练：`outputs/cap1-lora-50`；
+- LoRA held-out 评测：
+  - base mean logprob -0.2310；
+  - LoRA -0.2261；
+  - 提升 +0.0049，方向为正；
+- QLoRA 4-bit smoke 跑通：
+  - loss 2.14 → 1.41；
+  - held-out logprob 略正；
+- MoRA 当前 peft 无 `MoRAConfig`，未实现；
+- 下一步：扩大数据、完整多任务评测、与 PLE/RAG 联合。

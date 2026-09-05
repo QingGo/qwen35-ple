@@ -86,6 +86,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-81-ngram-router-integration.md](docs/round-81-ngram-router-integration.md) | 校准后 n-gram 融合接入 RAGServingAdapter 与独立 router |
 | [docs/round-82-semantic-values-3seed.md](docs/round-82-semantic-values-3seed.md) | 语义 value（函数块/段落）+ 3-seed 可寻址记忆结果 |
 | [docs/round-83-cap1-rag-self-distill-start.md](docs/round-83-cap1-rag-self-distill-start.md) | CAP-1 启动：RAG self-distill 数据与 LoRA 训练入口，待GPU长跑 |
+| [docs/round-84-cap1-actual-training.md](docs/round-84-cap1-actual-training.md) | CAP-1 实际训练：GTX1070 跑通 LoRA/QLoRA，held-out logprob 正向 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

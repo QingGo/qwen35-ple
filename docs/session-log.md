@@ -2613,5 +2613,21 @@ lazy-window gate        ✅
   - name：scale=1.0, bias=2.4；
   - number：scale=0.0（等效关闭）；
 - 新增单元测试；
-- 下一步：HumanEval/MBPP 正式代码评测、强化 name bank、Purified OPSD。<｜end▁of▁thinking｜>
+- 下一步：HumanEval/MBPP 正式代码评测、强化 name bank、Purified OPSD。
+
+
+## Session 102：P1/P2 工具链落地
+
+- 新增 `scripts/build_formal_benchmarks.py`：
+  - GSM8K-like / MATH-like / HumanEval-like / MBPP-like 本地正式评测生成；
+- 新增 `scripts/run_formal_benchmark_eval.py`：
+  - 对正式评测文件做 answer-logprob / first-hit 评测；
+- 新增 `scripts/run_purified_opsd.py`：
+  - math 数值验证、code AST 验证、通用长度过滤；
+  - 输出 `data/purified-opsd-train.jsonl`；
+- 新增 `scripts/bench_cpu_tok_s.py`：
+  - CPU tokens/sec 基准；
+- 所有新脚本已加入 CI lint；
+- 本地验证：90 passed, 9 skipped, 1 xfailed；
+- 下一步：GPU 可用时跑正式评测和 Purified OPSD 训练。<｜end▁of▁thinking｜>
 

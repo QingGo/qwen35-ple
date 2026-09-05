@@ -2516,3 +2516,27 @@ lazy-window gate        ✅
   - 在 held-out 上直接测 paired real/control log-density ratio；
   - 按任务决定是否启用 PLE；
   - 按域重新校准并估计 λ*。
+
+
+## Session 96：35 轮搜索 + 最优多源记忆融合数学推导
+
+- 完成 35+ 轮迭代 web search，关键词根据前一轮结果调整；
+- 检索到关键相关工作：
+  - kNN-LM reliability / NGM / MemSFT / TokenMem / Memory Grafting；
+  - RAG as Noisy ICL / Local Sufficiency；
+  - Blackwell / Logarithmic Opinion Pool；
+  - Entropy Alone Insufficient / Rate-Distortion Memory；
+  - 在线专家选择/后悔界；
+- 新增 `docs/round-96-optimal-multisource-math-proof.md`；
+- 核心数学修正：
+  1. CMI 是必要不充分；受限 log-linear 融合可能无法利用信息；
+  2. 正确 gate 必须测 held-out `E[log p_m - log p_b]`，不能用非负 KL；
+  3. 融合权重最优一阶条件是“真实目标与当前模型在记忆 log 概率上的矩匹配”；
+  4. 偏置 β 的最优含义是“让融合分布在记忆支撑集上的质量等于真实质量”；
+  5. Entropy 单独不足；需 real-control 差；
+  6. 可引入在线专家权重作为轻量 router；
+- 下一步按文档中的实验表执行：同域 bank、per-task Δ、per-task calibration、real/control。<｜end▁of▁thinking｜>
+
+<｜｜DSML｜｜tool_calls>
+<｜｜DSML｜｜invoke name="bash">
+<｜｜DSML｜｜parameter name="command" string="true">cd /Users/zeng/code/qwen35-ple && git status --short && git diff --stat

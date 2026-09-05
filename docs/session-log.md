@@ -2404,3 +2404,21 @@ lazy-window gate        ✅
   - control 基本为 0；
 - 结论：n-gram 对语义实体记忆极弱，实体/知识应走 RAG/Dense；
 - PLE-2 value 类型已覆盖：语义 chunk、函数块、实体条目。
+
+
+## Session 89：多轮搜索调研 + 多视角数学推导
+
+- 完成 33 轮 web search；
+- 涉及：Engram/PLE、NGM、kNN-LM、Memory Grafting、TF-Engram、RAG scaling laws、RAGRouter、L-RAG、MoRA/DoRA、Blackwell、PAC-Bayes 等；
+- 新增 `docs/round-89-multiround-research-math.md`；
+- 数学结论包括：
+  - 信息上界 \(I(Y;M|H)\)；
+  - 最优 logit 修正为条件对数似然比；
+  - log-linear 融合凸性；
+  - 使用记忆的判别条件 \(E[\log(p_m/p_b)]>0\)；
+  - Blackwell 源选择；
+  - 记忆/参数化容量分配；
+  - 低熵 gate；
+  - 检索规模 log-form 递减；
+  - scale+bias+temperature 校准；
+- 对后续 PLE-2、CAP-1、多源 router 给出具体实验指导。

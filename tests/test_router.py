@@ -268,3 +268,24 @@ def test_serving_adapter_auto_builds_from_config(tmp_path) -> None:
     assert adapter.logit_processor is not None
     assert hasattr(adapter.logit_processor, "set_task")
     assert adapter.logit_processor.scale == 1.0
+
+
+def test_task_conditioned_processor_uses_per_task_fusion() -> None:
+    from qwen35_ple.router import (
+        LogDensityRatioGate,
+        TaskConditionedNgramLogitProcessor,
+    )
+
+    proc = TaskConditionedNgramLogitProcessor(
+        _memory(),
+        scale=1.0,
+        bias=1.0,
+        temperature=1.0,
+        task="code",
+        density_gate=LogDensityRatioGate(mode="expected_kl", threshold=0.0),
+        per_task_fusion={"code": {"scale": 3.0, "bias": 5.0}},
+    )
+    logits = np.zeros(10, dtype=np.float32)
+    out = proc(logits, [1, 2])
+    assert "per_task_fusion" in proc.state_dict()
+    assert out[3] >= 5.0

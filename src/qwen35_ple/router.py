@@ -477,6 +477,7 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
         ple_tasks: tuple[str, ...] | list[str] | None = None,
         default_task: str = "general",
         task_scale: dict[str, float] | None = None,
+        per_task_fusion: dict[str, dict[str, float]] | None = None,
         context_decoder: Callable[[Any], str] | None = None,
     ) -> None:
         super().__init__(
@@ -493,6 +494,10 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
         self.ple_tasks = set(ple_tasks or {"code", "name", "number", "low_entropy"})
         self.default_task = default_task
         self.task_scale = dict(task_scale or {})
+        self.per_task_fusion = {
+            str(k): {kk: float(vv) for kk, vv in v.items()}
+            for k, v in (per_task_fusion or {}).items()
+        }
         self.context_decoder = context_decoder
         self.last_task: str | None = None
         self.last_gate: dict[str, Any] | None = None
@@ -548,13 +553,22 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
         if not gate["active"]:
             return logits
 
-        factor = self.task_scale.get(task, 1.0)
+        task_params = self.per_task_fusion.get(task)
+        if task_params is not None:
+            scale = float(task_params.get("scale", self.scale))
+            bias = float(task_params.get("bias", self.bias))
+            temperature = float(task_params.get("temperature", self.temperature))
+        else:
+            factor = self.task_scale.get(task, 1.0)
+            scale = self.scale * factor
+            bias = self.bias
+            temperature = self.temperature
         fused_np = fuse_ngram_logits(
             logits_np,
             dist,
-            scale=self.scale * factor,
-            bias=self.bias,
-            temperature=self.temperature,
+            scale=scale,
+            bias=bias,
+            temperature=temperature,
         )
 
         if is_torch:
@@ -570,6 +584,9 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
                 "semantic_tasks": sorted(self.semantic_tasks),
                 "ple_tasks": sorted(self.ple_tasks),
                 "task_scale": dict(self.task_scale),
+                "per_task_fusion": {
+                    k: dict(v) for k, v in self.per_task_fusion.items()
+                },
                 "classifier": self.classifier.state_dict(),
                 "density_gate": self.density_gate.state_dict(),
                 "last_task": self.last_task,
@@ -600,6 +617,7 @@ DEFAULT_ROUTER_CONFIG: dict[str, Any] = {
             "low_entropy": 1.0,
             "general": 0.5,
         },
+        "fusion_per_task": {},
         "classifier": {
             "code_keywords": list(_DEFAULT_CODE_KEYWORDS),
             "semantic_keywords": list(_DEFAULT_SEMANTIC_KEYWORDS),
@@ -634,7 +652,7 @@ def save_fusion_router_config(
         cfg["fusion"].update(config.get("fusion", {}))
         cfg["router"].update(config.get("router", {}))
         # Deep-merge nested classifier/task_scale/channel_weights dicts.
-        for key in ("task_scale", "classifier", "channel_weights"):
+        for key in ("task_scale", "classifier", "channel_weights", "fusion_per_task"):
             if key in config.get("router", {}):
                 cfg["router"][key] = {
                     **cfg["router"].get(key, {}),
@@ -717,6 +735,7 @@ def build_task_conditioned_processor(
         ple_tasks=router.get("ple_tasks", ["code", "name", "number", "low_entropy"]),
         default_task=router.get("default_task", "general"),
         task_scale=router.get("task_scale", {}),
+        per_task_fusion=router.get("fusion_per_task", {}),
         context_decoder=None if tokenizer is None else lambda ids: tokenizer.decode(ids),
     )
 

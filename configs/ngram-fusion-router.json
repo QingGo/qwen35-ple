@@ -1,6 +1,6 @@
 {
   "schema": "ngram-fusion-router-v1",
-  "source": "outputs/fusion-calibration.json (real temp_scale_bias)",
+  "source": "outputs/fusion-calibration.json + outputs/ple-evidence-base-s*.json (round-100 per-task calibration)",
   "fusion": {
     "scale": 1.0,
     "bias": -1.0,
@@ -135,6 +135,23 @@
         "bm25_weight": 1.0,
         "dense_weight": 1.0,
         "ngram_weight": 1.0
+      }
+    },
+    "fusion_per_task": {
+      "code": {
+        "scale": 0.5,
+        "bias": 3.0,
+        "temperature": 0.5
+      },
+      "name": {
+        "scale": 1.0,
+        "bias": 2.4,
+        "temperature": 0.5
+      },
+      "number": {
+        "scale": 0.0,
+        "bias": 0.0,
+        "temperature": 1.0
       }
     }
   }

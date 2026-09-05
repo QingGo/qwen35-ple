@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, ClassVar
 
 import numpy as np
 
@@ -222,7 +223,7 @@ class TaskRouter:
     product deployments can inspect and tune every routing decision.
     """
 
-    DEFAULT_CHANNEL_WEIGHTS: dict[str, dict[str, float]] = {
+    DEFAULT_CHANNEL_WEIGHTS: ClassVar[dict[str, dict[str, float]]] = {
         "semantic": {"bm25_weight": 1.0, "dense_weight": 2.0, "ngram_weight": 0.0},
         "code": {"bm25_weight": 1.0, "dense_weight": 0.5, "ngram_weight": 2.0},
         "name": {"bm25_weight": 1.0, "dense_weight": 0.75, "ngram_weight": 1.5},
@@ -674,7 +675,7 @@ def load_fusion_router_config(path: str | Path | dict[str, Any]) -> dict[str, An
     else:
         cfg = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(cfg, dict):
-        raise ValueError("fusion router config must be a JSON object")
+        raise TypeError("fusion router config must be a JSON object")
     if "fusion" not in cfg or "router" not in cfg:
         raise ValueError("fusion router config requires 'fusion' and 'router' sections")
     cfg.setdefault("schema", _SCHEMA)
@@ -741,8 +742,8 @@ def build_task_conditioned_processor(
 
 
 __all__ = [
-    "CalibratedNgramLogitProcessor",
     "DEFAULT_ROUTER_CONFIG",
+    "CalibratedNgramLogitProcessor",
     "LogDensityRatioGate",
     "TaskClassifier",
     "TaskConditionedNgramLogitProcessor",

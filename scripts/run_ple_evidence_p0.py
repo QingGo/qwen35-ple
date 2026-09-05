@@ -90,7 +90,7 @@ def _split(seqs: list[list[int]], train_frac: float, seed: int):
     rng = random.Random(seed)
     idx = list(range(len(seqs)))
     rng.shuffle(idx)
-    n_train = max(1, int(round(len(seqs) * train_frac)))
+    n_train = max(1, round(len(seqs) * train_frac))
     return [seqs[i] for i in idx[:n_train]], [seqs[i] for i in idx[n_train:]]
 
 
@@ -109,7 +109,7 @@ def _token_category(tokenizer, tok_id: int) -> str:
     try:
         raw = tokenizer.convert_ids_to_tokens([tok_id])[0]
         text = raw.lstrip("Ġ▁")
-    except Exception:
+    except (IndexError, KeyError, TypeError, ValueError):
         text = ""
     if text and text[0].isdigit():
         return "number"
@@ -282,9 +282,12 @@ def main() -> int:
     py_files = _python_files(Path(args.code_root), args.max_code_files)
     code_seqs = []
     for f in py_files:
+        text = ""
         try:
             text = f.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
+        except OSError:
+            text = ""
+        if not text.strip():
             continue
         ids = tokenizer.encode(text, add_special_tokens=False)
         if len(ids) > 8:

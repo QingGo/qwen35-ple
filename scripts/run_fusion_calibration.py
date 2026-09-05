@@ -23,8 +23,8 @@ from pathlib import Path
 import numpy as np
 
 from qwen35_ple.fusion import calibrate_ngram_fusion, fuse_ngram_logits, softmax
-from qwen35_ple.router import save_fusion_router_config
 from qwen35_ple.ngram_lm import NgramLM
+from qwen35_ple.router import save_fusion_router_config
 
 
 def _load_model(model_dir: str):

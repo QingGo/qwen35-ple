@@ -2601,17 +2601,17 @@ lazy-window gate        ✅
   - number：真实融合 -0.022，未获绝对正收益；
 - MoRA 结果与 base 接近；
 - 新增 `docs/round-100-p0-ple-evidence-results.md`；
-- 结论：P0 PLE 证据闭环完成；code/name 通过，number 仍需改进；下一步把 per-task 校准写入 serving、补 HumanEval/MBPP、Purified OPSD。<｜end▁of▁thinking｜>
+- 结论：P0 PLE 证据闭环完成；code/name 通过，number 仍需改进；下一步把 per-task 校准写入 serving、补 HumanEval/MBPP、Purified OPSD。
 
-<｜｜DSML｜｜tool_calls>
-<｜｜DSML｜｜invoke name="bash">
-<｜｜DSML｜｜parameter name="command" string="true">cd /Users/zeng/code/qwen35-ple && git add README.md docs/session-log.md docs/round-97-multibranch-math-proof.md && git commit -m "docs(research): multibranch math proofs for optimal memory fusion
 
-Add 25+ further search rounds and proofs from Riemannian geometry,
-manifolds, optimization, control, systems, operations research,
-information theory, probability, Bayesian, and topology.
-Gives unified sufficiency criterion and actionable experiment table." && git push origin main 2>&1 | tail -30 && git log --oneline -5<｜end▁of▁thinking｜>
+## Session 101：Per-task 校准参数持久化并接入 Serving
 
-<｜｜DSML｜｜tool_calls>
-<｜｜DSML｜｜invoke name="bash">
-<｜｜DSML｜｜parameter name="command" string="true">cd /Users/zeng/code/qwen35-ple && git status --short && git diff --stat
+- 新增 `docs/round-101-per-task-calibration-serving.md`；
+- `TaskConditionedNgramLogitProcessor` 支持 per-task `scale/bias/temperature`；
+- `configs/ngram-fusion-router.json` 新增 `fusion_per_task`：
+  - code：scale=0.5, bias=3.0；
+  - name：scale=1.0, bias=2.4；
+  - number：scale=0.0（等效关闭）；
+- 新增单元测试；
+- 下一步：HumanEval/MBPP 正式代码评测、强化 name bank、Purified OPSD。<｜end▁of▁thinking｜>
+

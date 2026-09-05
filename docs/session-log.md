@@ -2393,3 +2393,14 @@ lazy-window gate        ✅
   - code-output：base -14.250 → MoRA -13.317（+0.933）；
   - knowledge：MoRA -2.019，优于 LoRA -2.079；
 - 剩余：正式生成指标、PLE/RAG+MoRA 联合评测、多 seed。
+
+
+## Session 88：实体 value 记忆评测
+
+- 新增 `scripts/run_ple2_entity_memory_eval.py`；
+- 以 QA snippet 为实体 value，3 seeds；
+- 结果：
+  - real@1 mean 1.1%，real@5 mean 2.2%；
+  - control 基本为 0；
+- 结论：n-gram 对语义实体记忆极弱，实体/知识应走 RAG/Dense；
+- PLE-2 value 类型已覆盖：语义 chunk、函数块、实体条目。

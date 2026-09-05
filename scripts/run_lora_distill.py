@@ -88,6 +88,13 @@ def _format_example(obj: dict) -> str:
         return f"Instruction: {obj['instruction']}\n\nResponse: {obj['output']}"
     if "problem" in obj:
         answer = obj.get("solution") or obj.get("answer") or ""
+        context = obj.get("context")
+        if context:
+            return (
+                f"Question: {obj['problem']}\n\n"
+                f"Context:\n{context}\n\n"
+                f"Answer: {answer}"
+            )
         return f"Question: {obj['problem']}\n\nAnswer: {answer}"
     return ""
 

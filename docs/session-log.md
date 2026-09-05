@@ -2323,3 +2323,13 @@ lazy-window gate        ✅
   - wiki：Cont@1 0.134，Ret exact 0.176；
 - 相比整篇文档 value，code ret exact 从约 60.6% 提升到约 69.8%；
 - 下一步：接入 RAG serving value、实体条目、联合 logit fusion 消融。
+
+
+## Session 83：CAP-1 启动
+
+- 新增 `scripts/build_cap1_rag_distill_data.py`;
+- `scripts/run_lora_distill.py` 支持带 context 的 RAG self-distill 格式；
+- 生成 `data/cap1-rag-distill-smoke.jsonl`（30 条）；
+- 本地 CPU LoRA smoke 启动但未完成（模型可加载，trainable 540k，单步过慢）；
+- QLoRA 需要 bitsandbytes，当前环境未安装；
+- 状态：CAP-1 数据与训练入口已完成，实际训练待 GPU/长跑。

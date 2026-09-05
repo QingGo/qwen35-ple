@@ -2586,7 +2586,22 @@ lazy-window gate        ✅
   - P1：正式评测集 + Purified OPSD + 多 seed + 在线 router；
   - P2：CPU 100 tok/s / bundle / e2e；
 - 借鉴矩阵继续强调：kNN-LM reliability、MemSFT、TokenMem、Log Opinion Pool、Hedge、Purified OPSD、MoRA/QLoRA 均与 PLE 不冲突；
-- 判定：当前先别扩展，先完成 PLE 窄口径证据闭环。<｜end▁of▁thinking｜>
+- 判定：当前先别扩展，先完成 PLE 窄口径证据闭环。
+
+
+## Session 100：P0 PLE 证据修复结果
+
+- 新增 `scripts/run_ple_evidence_p0.py`；
+- 构建真实局部任务：代码 next-token / name / number；
+- 构建同域 PLE bank：Python 源码 + Wiki；
+- 每个任务做 real vs shuffled control、per-task 校准、3-seed；
+- 基础模型结果：
+  - code：真实融合 +0.421，control +0.018，real-control +0.402；
+  - name：真实融合 +0.291，control +0.011，real-control +0.279；
+  - number：真实融合 -0.022，未获绝对正收益；
+- MoRA 结果与 base 接近；
+- 新增 `docs/round-100-p0-ple-evidence-results.md`；
+- 结论：P0 PLE 证据闭环完成；code/name 通过，number 仍需改进；下一步把 per-task 校准写入 serving、补 HumanEval/MBPP、Purified OPSD。<｜end▁of▁thinking｜>
 
 <｜｜DSML｜｜tool_calls>
 <｜｜DSML｜｜invoke name="bash">

@@ -2535,7 +2535,31 @@ lazy-window gate        ✅
   4. 偏置 β 的最优含义是“让融合分布在记忆支撑集上的质量等于真实质量”；
   5. Entropy 单独不足；需 real-control 差；
   6. 可引入在线专家权重作为轻量 router；
-- 下一步按文档中的实验表执行：同域 bank、per-task Δ、per-task calibration、real/control。<｜end▁of▁thinking｜>
+- 下一步按文档中的实验表执行：同域 bank、per-task Δ、per-task calibration、real/control。
+
+
+## Session 97：多分支数学推导
+
+- 完成额外 25+ 轮搜索，覆盖黎曼几何、流形、最优化、控制论、系统论、运筹学、信息论、概率、贝叶斯、拓扑/谱方法；
+- 新增 `docs/round-97-multibranch-math-proof.md`；
+- 新增数学结论：
+  1. Softmax 流形 Fisher 度量下，log-linear 融合等价于沿记忆方向做测地线移动；
+  2. 最优融合需与真实残差方向对齐，否则负收益；
+  3. 最优化/对偶：源权重可用镜像下降/Hedge，带预算时用拉格朗日对偶；
+  4. 控制论：RAG/PLE 是控制输入，不是无条件增益；
+  5. 系统论：Purified OPSD 是反馈回路稳定器；
+  6. 贝叶斯：Bayes factor/后验源选择可自动判断 PLE 是否该启用；
+  7. 统一最终判据：Δ>0、real-control>0、融合 CE 小于 base CE 三者同时满足才启用；
+- 下一步完全按文档实验表执行。<｜end▁of▁thinking｜>
+
+<｜｜DSML｜｜tool_calls>
+<｜｜DSML｜｜invoke name="bash">
+<｜｜DSML｜｜parameter name="command" string="true">cd /Users/zeng/code/qwen35-ple && git add README.md docs/session-log.md docs/round-97-multibranch-math-proof.md && git commit -m "docs(research): multibranch math proofs for optimal memory fusion
+
+Add 25+ further search rounds and proofs from Riemannian geometry,
+manifolds, optimization, control, systems, operations research,
+information theory, probability, Bayesian, and topology.
+Gives unified sufficiency criterion and actionable experiment table." && git push origin main 2>&1 | tail -30 && git log --oneline -5<｜end▁of▁thinking｜>
 
 <｜｜DSML｜｜tool_calls>
 <｜｜DSML｜｜invoke name="bash">

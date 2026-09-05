@@ -2192,3 +2192,18 @@ lazy-window gate        ✅
   - 借鉴矩阵
 - 下一阶段：从 PLE-1 低熵/代码/专名 real vs control 开始。
 
+
+
+## Session 74：PLE-1 N-gram 实证通过
+
+- 新增 `scripts/run_ple1_ngram_eval.py`；
+- 新增 `docs/round-74-ple1-ngram-results.md`；
+- 完成 wiki 与 code 两个域的 n-gram real vs control：
+  - wiki：real Δ logprob +1.41，top1 24.5% vs 4.2%；
+  - code：real Δ logprob +3.40，top1 50.0% vs 4.6%；
+  - name/number 分类同样显著通过；
+- 完成小样本 base fusion：
+  - base+real NLL 下降约 0.43 bits；
+  - base+control 仅约 0.005 bits；
+  - 但最优 λ 贴边界，说明 raw log p 插值需要 router/温度校准；
+- 结论：PLE/n-gram 作为“局部有序词法记忆”成立，进入 PLE-2 架构与 router 实验。

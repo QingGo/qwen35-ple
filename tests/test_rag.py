@@ -69,3 +69,32 @@ def test_hybrid_retriever_combines_bm25_and_dense() -> None:
     retriever = HybridRetriever(bm25, dense)
     hits = retriever.retrieve("capital France", top_k=1, query_vector=np.array([1.0, 0.0, 0.0]))
     assert hits == ["The capital of France is Paris."]
+
+
+def test_ngram_key_retriever_in_hybrid() -> None:
+    from qwen35_ple.addressable_memory import AddressableNgramMemory
+    from qwen35_ple.rag import BM25Index, HybridRetriever, NgramKeyRetriever
+
+    vocab = {"the": 1, "capital": 2, "of": 3, "france": 4, "is": 5, "paris": 6}
+    def enc(text: str) -> list[int]:
+        return [vocab[w.lower()] for w in text.split() if w.lower() in vocab]
+
+    sequences = [
+        [1, 2, 3, 4, 5, 6],
+        [1, 5, 7, 8],
+    ]
+    docs = [
+        "the capital of france is paris",
+        "the capital is big",
+    ]
+    mem = AddressableNgramMemory(min_order=2, max_order=4)
+    for i, seq in enumerate(sequences):
+        mem.add_document(seq, value_id=i)
+
+    ngram = NgramKeyRetriever(mem, tokenizer=enc)
+    assert ngram.search("capital of france", top_k=1) == [0]
+
+    bm25 = BM25Index(docs)
+    hybrid = HybridRetriever(bm25, ngram_retriever=ngram, ngram_weight=2.0)
+    hits = hybrid.retrieve("capital france", top_k=1)
+    assert hits[0] == docs[0]

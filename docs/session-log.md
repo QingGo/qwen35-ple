@@ -2240,3 +2240,15 @@ lazy-window gate        ✅
   - 接入 RAG 词法通道；
   - 实现多源凸 router；
   - 提升 value 为语义 chunk/实体并跑 3-seed。
+
+
+## Session 77：PLE-2 接入 RAG
+
+- `src/qwen35_ple/rag.py` 新增 `NgramKeyRetriever`；
+- `HybridRetriever` 支持三通道：BM25 + Dense + N-gram 精确寻址；
+- `run_rag_demo.py` / `serve_rag_http.py` 新增 `--use-ngram` / `--ngram-weight`；
+- 新增 `docs/round-77-ple2-rag-integration.md`；
+- 测试通过（14 passed）；
+- 下一步：
+  - 在真实 RAG 检索/问答上做三通道消融；
+  - 多源凸 router/温度校准。

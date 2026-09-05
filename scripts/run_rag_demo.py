@@ -18,9 +18,11 @@ import time
 import numpy as np
 import torch
 
+from qwen35_ple.addressable_memory import AddressableNgramMemory
 from qwen35_ple.rag import (
     BM25Index,
     HybridRetriever,
+    NgramKeyRetriever,
     chunk_corpus,
     load_corpus,
     mean_pool_embeddings,
@@ -65,6 +67,8 @@ def main() -> int:
     parser.add_argument("--chunk-size", type=int, default=800)
     parser.add_argument("--overlap", type=int, default=100)
     parser.add_argument("--max-new-tokens", type=int, default=64)
+    parser.add_argument("--use-ngram", action="store_true", help="add PLE-style n-gram key retrieval to hybrid RAG")
+    parser.add_argument("--ngram-weight", type=float, default=1.0)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -89,7 +93,25 @@ def main() -> int:
         if qn > 0:
             query_vector = query_vector / qn
 
-    retriever = HybridRetriever(bm25, dense_vectors)
+    ngram_retriever = None
+    if args.use_ngram:
+        mem = AddressableNgramMemory(min_order=2, max_order=4)
+        for i, text in enumerate(chunk_texts):
+            ids = tokenizer.encode(text, add_special_tokens=False)
+            if ids:
+                mem.add_document(ids, value_id=i)
+        ngram_retriever = NgramKeyRetriever(
+            mem,
+            tokenizer=lambda text: tokenizer.encode(text, add_special_tokens=False),
+        )
+        print(f"[demo] ngram memory entries={mem.stats()}", flush=True)
+
+    retriever = HybridRetriever(
+        bm25,
+        dense_vectors,
+        ngram_retriever=ngram_retriever,
+        ngram_weight=args.ngram_weight,
+    )
     adapter = RAGServingAdapter(
         model,
         tokenizer,

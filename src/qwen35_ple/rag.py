@@ -191,6 +191,37 @@ def reciprocal_rank_fusion(
     return sorted(scores, key=scores.get, reverse=True)
 
 
+class NgramKeyRetriever:
+    """Use PLE-style exact n-gram addresses as an external lexical retrieval channel.
+
+    The query is tokenized to subword ids; the last n tokens form an exact
+    n-gram key; ``AddressableNgramMemory.retrieve`` returns external value ids
+    (by default document indices) that contain those exact n-gram keys.
+    """
+
+    def __init__(
+        self,
+        memory,
+        *,
+        value_to_index=None,
+        tokenizer=None,
+        top_k: int = 5,
+    ) -> None:
+        self.memory = memory
+        self.value_to_index = value_to_index or (lambda x: x)
+        self.tokenizer = tokenizer or (lambda text: [])
+        self.top_k = top_k
+
+    def search(self, query: str, top_k: int | None = None) -> list[int]:
+        ids = self.tokenizer(query)
+        if not ids:
+            return []
+        k = top_k or self.top_k
+        matches = self.memory.retrieve(ids, top_k=k)
+        return [self.value_to_index(m.value_id) for m in matches]
+
+
+
 class HybridRetriever:
     """Combine BM25 lexical scores with dense embedding cosine scores.
 
@@ -204,11 +235,15 @@ class HybridRetriever:
         dense_vectors: np.ndarray | None = None,
         *,
         dense_weight: float = 1.0,
+        ngram_retriever=None,
+        ngram_weight: float = 1.0,
         rrf_k: int = 60,
     ) -> None:
         self.bm25 = bm25
         self.dense_vectors = dense_vectors
         self.dense_weight = dense_weight
+        self.ngram_retriever = ngram_retriever
+        self.ngram_weight = ngram_weight
         self.rrf_k = rrf_k
 
     def search(
@@ -222,6 +257,11 @@ class HybridRetriever:
         bm25_ranking = self.bm25.search(query, top_k=candidate_pool)
         rankings = [bm25_ranking]
         weights = [1.0]
+        if self.ngram_retriever is not None:
+            ngram_ranking = self.ngram_retriever.search(query, top_k=candidate_pool)
+            if ngram_ranking:
+                rankings.append(ngram_ranking)
+                weights.append(self.ngram_weight)
         if self.dense_vectors is not None and query_vector is not None:
             dense_scores = self.dense_vectors @ query_vector
             # Normalize each vector to unit length for cosine.
@@ -279,6 +319,7 @@ __all__ = [
     "BM25Index",
     "Chunk",
     "HybridRetriever",
+    "NgramKeyRetriever",
     "build_rag_prompt",
     "chunk_corpus",
     "chunk_text",

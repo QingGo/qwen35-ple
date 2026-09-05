@@ -74,6 +74,11 @@ def main() -> int:
     parser.add_argument("--fusion-scale", type=float, default=1.0)
     parser.add_argument("--fusion-bias", type=float, default=0.0)
     parser.add_argument("--fusion-temperature", type=float, default=1.0)
+    parser.add_argument(
+        "--fusion-config",
+        default="configs/ngram-fusion-router.json",
+        help="persisted calibrated fusion/router JSON; used when --use-ngram-fusion",
+    )
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -100,6 +105,8 @@ def main() -> int:
 
     ngram_retriever = None
     logit_processor = None
+    mem = None
+    use_adapter_config = False
     if args.use_ngram:
         mem = AddressableNgramMemory(min_order=2, max_order=4)
         for i, text in enumerate(chunk_texts):
@@ -111,12 +118,18 @@ def main() -> int:
             tokenizer=lambda text: tokenizer.encode(text, add_special_tokens=False),
         )
         if args.use_ngram_fusion:
-            logit_processor = CalibratedNgramLogitProcessor(
-                mem,
-                scale=args.fusion_scale,
-                bias=args.fusion_bias,
-                temperature=args.fusion_temperature,
-            )
+            if args.fusion_config:
+                # The adapter will load the persisted calibrated parameters and
+                # build a task-conditioned processor from the same memory.
+                use_adapter_config = True
+                logit_processor = None
+            else:
+                logit_processor = CalibratedNgramLogitProcessor(
+                    mem,
+                    scale=args.fusion_scale,
+                    bias=args.fusion_bias,
+                    temperature=args.fusion_temperature,
+                )
         print(f"[demo] ngram memory entries={mem.stats()}", flush=True)
 
     retriever = HybridRetriever(
@@ -135,6 +148,8 @@ def main() -> int:
         concise=True,
         device=args.device,
         logit_processor=logit_processor,
+        ngram_memory=mem if use_adapter_config else None,
+        fusion_config=args.fusion_config if use_adapter_config else None,
     )
     result = adapter.answer(args.question)
     elapsed = time.time() - t0

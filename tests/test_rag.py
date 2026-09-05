@@ -98,3 +98,23 @@ def test_ngram_key_retriever_in_hybrid() -> None:
     hybrid = HybridRetriever(bm25, ngram_retriever=ngram, ngram_weight=2.0)
     hits = hybrid.retrieve("capital france", top_k=1)
     assert hits[0] == docs[0]
+
+
+def test_hybrid_retriever_set_channel_weights() -> None:
+    from qwen35_ple.rag import BM25Index, HybridRetriever
+
+    docs = ["alpha beta", "gamma delta"]
+    retriever = HybridRetriever(
+        BM25Index(docs),
+        bm25_weight=1.0,
+        dense_weight=1.0,
+        ngram_weight=1.0,
+    )
+    retriever.set_channel_weights(
+        bm25_weight=0.5,
+        dense_weight=2.0,
+        ngram_weight=0.0,
+    )
+    assert retriever.bm25_weight == 0.5
+    assert retriever.dense_weight == 2.0
+    assert retriever.ngram_weight == 0.0

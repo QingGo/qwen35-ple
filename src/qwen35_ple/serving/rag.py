@@ -17,6 +17,10 @@ from typing import Any
 import torch
 
 from qwen35_ple.rag import Chunk, HybridRetriever, build_rag_prompt
+from qwen35_ple.router import (
+    build_task_conditioned_processor,
+    build_task_router_from_config,
+)
 
 
 class RAGServingAdapter:
@@ -35,6 +39,9 @@ class RAGServingAdapter:
         device: str = "cpu",
         stop_sequences: list[str] | None = None,
         logit_processor=None,
+        ngram_memory=None,
+        fusion_config=None,
+        task_router=None,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -45,6 +52,15 @@ class RAGServingAdapter:
         self.concise = bool(concise)
         self.device = device
         self.stop_sequences = stop_sequences or []
+        if task_router is None and fusion_config is not None:
+            task_router = build_task_router_from_config(fusion_config)
+        self.task_router = task_router
+        if logit_processor is None and ngram_memory is not None and fusion_config is not None:
+            logit_processor = build_task_conditioned_processor(
+                ngram_memory,
+                fusion_config,
+                tokenizer=tokenizer,
+            )
         self.logit_processor = logit_processor
 
     def retrieve(self, question: str) -> list[Chunk | str]:
@@ -63,16 +79,51 @@ class RAGServingAdapter:
         return prompt
 
     def answer(self, question: str) -> dict[str, Any]:
+        route_info: dict[str, Any] | None = None
+        task: str | None = None
+        if self.task_router is not None:
+            if hasattr(self.task_router, "route"):
+                route_info = self.task_router.route(question)
+                task = str(route_info.get("task", "")) or None
+            elif callable(self.task_router):
+                task = str(self.task_router(question))
+            elif hasattr(self.task_router, "classify"):
+                task = str(self.task_router.classify(question))
+
+        if self.logit_processor is not None and hasattr(self.logit_processor, "set_task"):
+            if task is None and hasattr(self.logit_processor, "classifier"):
+                task = self.logit_processor.classifier.classify(question)
+            self.logit_processor.set_task(task)
+
+        if route_info is not None and hasattr(self.retriever, "set_channel_weights"):
+            self.retriever.set_channel_weights(
+                **route_info.get("channel_weights", {})
+            )
+
         chunks = self.retrieve(question)
         context = "\n\n".join(str(c) for c in chunks)
         prompt = self.build_prompt(context, question)
         answer_text = self._generate(prompt)
-        return {
+        result = {
             "question": question,
             "contexts": [str(c) for c in chunks],
             "prompt": prompt,
             "answer": answer_text,
         }
+        result_task = task
+        if result_task is None and getattr(self.logit_processor, "task", None) is not None:
+            result_task = self.logit_processor.task
+        if result_task is not None:
+            result["task"] = result_task
+        if getattr(self.logit_processor, "last_gate", None) is not None:
+            gate = self.logit_processor.last_gate
+            result["ple_gate"] = {
+                "active": bool(gate.get("active", False)),
+                "task": gate.get("task", result_task),
+                "expected_log_density_ratio": gate.get("expected_log_density_ratio"),
+                "mode": gate.get("mode"),
+            }
+        return result
 
     def _generate(self, prompt: str) -> str:
         ids = self.tokenizer.encode(prompt, add_special_tokens=False)

@@ -1,0 +1,141 @@
+{
+  "schema": "ngram-fusion-router-v1",
+  "source": "outputs/fusion-calibration.json (real temp_scale_bias)",
+  "fusion": {
+    "scale": 1.0,
+    "bias": -1.0,
+    "temperature": 0.5,
+    "enabled": true
+  },
+  "router": {
+    "mode": "expected_kl",
+    "min_log_density_ratio": 0.0,
+    "average_log_density_ratio": 0.0,
+    "semantic_tasks": [
+      "semantic",
+      "knowledge",
+      "qa"
+    ],
+    "ple_tasks": [
+      "code",
+      "name",
+      "number",
+      "low_entropy"
+    ],
+    "default_task": "general",
+    "task_scale": {
+      "code": 1.0,
+      "name": 1.0,
+      "number": 1.0,
+      "low_entropy": 1.0,
+      "general": 0.5
+    },
+    "classifier": {
+      "code_keywords": [
+        "def ",
+        "class ",
+        "import ",
+        "return ",
+        "function",
+        "lambda",
+        "code",
+        "program",
+        "script",
+        "snippet",
+        "write ",
+        "implement",
+        "debug",
+        "compile",
+        "select ",
+        "where ",
+        "if ",
+        "for ",
+        "while ",
+        "=>",
+        "{",
+        "}",
+        ";",
+        "//",
+        "#include"
+      ],
+      "semantic_keywords": [
+        "what",
+        "who",
+        "whom",
+        "why",
+        "how",
+        "explain",
+        "describe",
+        "define",
+        "definition",
+        "meaning",
+        "capital",
+        "country",
+        "history",
+        "science",
+        "knowledge",
+        "answer",
+        "which",
+        "where"
+      ],
+      "number_keywords": [
+        "number",
+        "count",
+        "sum",
+        "calculate",
+        "compute",
+        "math",
+        "arithmetic",
+        "digit",
+        "numeric",
+        "integer",
+        "prime",
+        "fibonacci"
+      ],
+      "name_keywords": [
+        "name",
+        "called",
+        "author",
+        "person",
+        "entity",
+        "company",
+        "organization",
+        "city",
+        "river"
+      ],
+      "default_task": "general"
+    },
+    "channel_weights": {
+      "semantic": {
+        "bm25_weight": 1.0,
+        "dense_weight": 2.0,
+        "ngram_weight": 0.0
+      },
+      "code": {
+        "bm25_weight": 1.0,
+        "dense_weight": 0.5,
+        "ngram_weight": 2.0
+      },
+      "name": {
+        "bm25_weight": 1.0,
+        "dense_weight": 0.75,
+        "ngram_weight": 1.5
+      },
+      "number": {
+        "bm25_weight": 1.0,
+        "dense_weight": 0.75,
+        "ngram_weight": 1.5
+      },
+      "low_entropy": {
+        "bm25_weight": 1.0,
+        "dense_weight": 0.5,
+        "ngram_weight": 2.0
+      },
+      "general": {
+        "bm25_weight": 1.0,
+        "dense_weight": 1.0,
+        "ngram_weight": 1.0
+      }
+    }
+  }
+}

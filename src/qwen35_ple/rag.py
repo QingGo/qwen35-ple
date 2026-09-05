@@ -248,6 +248,21 @@ class HybridRetriever:
         self.ngram_weight = ngram_weight
         self.rrf_k = rrf_k
 
+    def set_channel_weights(
+        self,
+        *,
+        bm25_weight: float | None = None,
+        dense_weight: float | None = None,
+        ngram_weight: float | None = None,
+    ) -> None:
+        """Update retrieval channel weights for task-conditioned routing."""
+        if bm25_weight is not None:
+            self.bm25_weight = float(bm25_weight)
+        if dense_weight is not None:
+            self.dense_weight = float(dense_weight)
+        if ngram_weight is not None:
+            self.ngram_weight = float(ngram_weight)
+
     def search(
         self,
         query: str,

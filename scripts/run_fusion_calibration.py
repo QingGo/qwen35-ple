@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from qwen35_ple.fusion import calibrate_ngram_fusion, fuse_ngram_logits, softmax
+from qwen35_ple.router import save_fusion_router_config
 from qwen35_ple.ngram_lm import NgramLM
 
 
@@ -180,6 +181,11 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", default="outputs/fusion-calibration.json")
     parser.add_argument("--report", default="outputs/fusion-calibration.md")
+    parser.add_argument(
+        "--router-config",
+        default="configs/ngram-fusion-router.json",
+        help="persisted calibrated fusion/router JSON used by serving",
+    )
     args = parser.parse_args()
 
     t0 = time.time()
@@ -262,7 +268,29 @@ def main() -> int:
         f"| temp+scale+bias | T={control_res['temp_scale_bias']['temperature']:.2f}, scale={control_res['temp_scale_bias']['scale']:.3f}, bias={control_res['temp_scale_bias']['bias']:.3f} | {control_res['temp_scale_bias']['best_mean_nll']:.4f} | {control_res['temp_scale_bias_delta_bits']:.4f} |",
     ]
     rep.write_text("\n".join(lines), encoding="utf-8")
-    print(f"[fusion-cal] wrote {out} and {rep} in {time.time()-t0:.1f}s", flush=True)
+
+    # Persist the calibrated real-n-gram parameters for the serving router.
+    triple = real_res["temp_scale_bias"]
+    router_cfg = save_fusion_router_config(
+        args.router_config,
+        {
+            "source": f"{args.output} (real temp_scale_bias)",
+            "fusion": {
+                "scale": float(triple["scale"]),
+                "bias": float(triple["bias"]),
+                "temperature": float(triple["temperature"]),
+                "enabled": True,
+            },
+            "router": {
+                "min_log_density_ratio": 0.0,
+            },
+        },
+    )
+    print(
+        f"[fusion-cal] wrote {out}, {rep}, and router config {args.router_config} "
+        f"({router_cfg['fusion']}) in {time.time()-t0:.1f}s",
+        flush=True,
+    )
     return 0
 
 

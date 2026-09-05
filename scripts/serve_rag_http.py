@@ -79,6 +79,8 @@ def build_service(args: argparse.Namespace) -> RAGServingAdapter:
 
     ngram_retriever = None
     logit_processor = None
+    mem = None
+    use_adapter_config = False
     if getattr(args, "use_ngram", False):
         mem = AddressableNgramMemory(min_order=2, max_order=4)
         for i, text in enumerate(chunk_texts):
@@ -90,12 +92,18 @@ def build_service(args: argparse.Namespace) -> RAGServingAdapter:
             tokenizer=lambda text: tokenizer.encode(text, add_special_tokens=False),
         )
         if getattr(args, "use_ngram_fusion", False):
-            logit_processor = CalibratedNgramLogitProcessor(
-                mem,
-                scale=getattr(args, "fusion_scale", 1.0),
-                bias=getattr(args, "fusion_bias", 0.0),
-                temperature=getattr(args, "fusion_temperature", 1.0),
-            )
+            if getattr(args, "fusion_config", None):
+                # Let the serving adapter load and persist the calibrated
+                # fusion/router parameters, building a task-conditioned gate.
+                use_adapter_config = True
+                logit_processor = None
+            else:
+                logit_processor = CalibratedNgramLogitProcessor(
+                    mem,
+                    scale=getattr(args, "fusion_scale", 1.0),
+                    bias=getattr(args, "fusion_bias", 0.0),
+                    temperature=getattr(args, "fusion_temperature", 1.0),
+                )
 
     retriever = HybridRetriever(
         bm25,
@@ -113,6 +121,8 @@ def build_service(args: argparse.Namespace) -> RAGServingAdapter:
         concise=True,
         device=args.device,
         logit_processor=logit_processor,
+        ngram_memory=mem if use_adapter_config else None,
+        fusion_config=args.fusion_config if use_adapter_config else None,
     )
 
 
@@ -133,6 +143,11 @@ def main() -> int:
     parser.add_argument("--fusion-scale", type=float, default=1.0)
     parser.add_argument("--fusion-bias", type=float, default=0.0)
     parser.add_argument("--fusion-temperature", type=float, default=1.0)
+    parser.add_argument(
+        "--fusion-config",
+        default="configs/ngram-fusion-router.json",
+        help="persisted calibrated fusion/router JSON; used when --use-ngram-fusion",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)

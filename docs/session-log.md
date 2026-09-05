@@ -2467,3 +2467,20 @@ lazy-window gate        ✅
   - P1 正式评测 + Purified OPSD + 多 seed；
   - P2 产品化；
 - 更新借鉴矩阵，明确不冲突的工作。
+
+
+## Session 93：任务条件 Router + Log-Density Gate + 校准配置持久化
+
+- 新增 `docs/round-93-task-router-and-calibrated-config.md`；
+- 新增 `src/qwen35_ple/router.py`：
+  - `TaskClassifier`：规则式 semantic/code/name/number/general 分类；
+  - `TaskRouter`：按任务返回 BM25/Dense/N-gram 通道权重；
+  - `LogDensityRatioGate`：实现 `E[log(p_m/p_b)]>0` 门控；
+  - `TaskConditionedNgramLogitProcessor`：语义关闭 PLE、局部任务先过 density gate 再融合；
+  - `save/load_fusion_router_config` 与两个 builder；
+- 新增 `configs/ngram-fusion-router.json`，保存真实 base-logit 校准参数；
+- `RAGServingAdapter` 现在可从 `ngram_memory + fusion_config` 自动构建 task router 和 logit processor；
+- `scripts/run_fusion_calibration.py` 新增 `--router-config`，校准后自动写入 serving 配置；
+- `HybridRetriever` 新增 `set_channel_weights`，支持按查询任务切换检索通道；
+- 测试扩展到 89 passed；
+- 剩余 P0：多源联合消融、3-seed router 评测、正式评测集。

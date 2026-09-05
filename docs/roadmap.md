@@ -1495,3 +1495,13 @@ RAG/teacher + logit 融合 + n-gram 局部专家 + 凸 router。
 3. CAP-1：RAG/蒸馏能力提升；
 4. CAP-2：多源集成；
 5. PROD：量化/CPU serving。
+
+---
+
+## 59. 2026-09-04 第七十三轮：本轮完整总结归档
+
+> 详细见 `docs/round-73-full-summary.md`。
+
+- 完成本轮计划/发现/尝试/踩坑/完成/未完成/未来计划整理；
+- 核心重新定位：PLE = 可寻址残差/长尾外部记忆；
+- 下一阶段：PLE-1 低熵/代码/专名 real vs control。

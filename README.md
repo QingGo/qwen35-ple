@@ -75,6 +75,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-70-most-effective-path-math.md](docs/round-70-most-effective-path-math.md) | 数学推导最有效路径：通道排序/Blackwell信息序/多源凸融合/资源性价比/λ* |
 | [docs/round-71-engram-vs-llm-intelligence.md](docs/round-71-engram-vs-llm-intelligence.md) | 深层次反思：Engram为何无法替代LLM智能；应改造成可寻址残差/长尾记忆 |
 | [docs/round-72-systematic-rethink-v2.md](docs/round-72-systematic-rethink-v2.md) | 系统性复盘 v2：PLE 作为主创新的目标、技术债、借鉴矩阵、后续开发计划 |
+| [docs/round-73-full-summary.md](docs/round-73-full-summary.md) | 本轮完整总结：计划/发现/尝试/踩坑/完成/未完成/未来计划 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

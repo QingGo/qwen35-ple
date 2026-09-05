@@ -2178,3 +2178,17 @@ lazy-window gate        ✅
   4. CAP-2：多源集成；
   5. PROD：量化/CPU serving。
 
+
+## Session 73：本轮完整总结归档
+
+- 新增 `docs/round-73-full-summary.md`；
+- 汇总本轮：
+  - 计划
+  - 核心发现（PLE 定位、LLM 智能来源、最优路径）
+  - 尝试（搜索、NgramLM、LoRA smoke、RAG serving、数学推导）
+  - 踩坑
+  - 完成/未完成
+  - 未来计划
+  - 借鉴矩阵
+- 下一阶段：从 PLE-1 低熵/代码/专名 real vs control 开始。
+

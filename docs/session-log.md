@@ -2140,3 +2140,22 @@ lazy-window gate        ✅
   - 最优路径 = RAG/teacher + logit 融合 + n-gram 局部专家 + 凸 router；
   - 不建议 hidden PLE 作为主路径。
 
+
+## Session 71：Engram 与 LLM 智能的深层次反思
+
+- 新增 `docs/round-71-engram-vs-llm-intelligence.md`；
+- 核心结论：
+  - Engram 是“非参数局部记忆”；
+  - 普通 LLM 智能来自注意力、组合、深度抽象、归纳头、压缩压力；
+  - n-gram 查表降低的是 local memorization loss，不自动增加组合智能；
+- 新定位：
+  - PLE 不应做“主要预测器”；
+  - 应改造成“可寻址残差记忆 / 长尾外部知识库”；
+  - 与参数化模型互补；
+- 下一步实验：
+  - 度量 \(I(Y;C\mid E_{\text{ngram}})\)
+  - 只 gate 低熵/长尾
+  - 非参数残差记忆
+  - 联合小规模预训练
+  - 语义可寻址 PLE。
+

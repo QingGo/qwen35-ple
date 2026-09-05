@@ -1442,3 +1442,30 @@ RAG/teacher + logit 融合 + n-gram 局部专家 + 凸 router。
 - Multi-source router；
 - Teacher distillation；
 - PLE local real vs control。
+
+---
+
+## 57. 2026-09-04 第七十一轮：Engram 与 LLM 智能反思
+
+> 详细见 `docs/round-71-engram-vs-llm-intelligence.md`。
+
+### 57.1 核心反思
+
+- Engram 是非参数局部记忆；
+- LLM 智能来自组合/注意力/归纳头/压缩压力；
+- n-gram 降低的 loss 主要是局部记忆 loss；
+- 嫁接 n-gram 不会自动带来组合智能。
+
+### 57.2 PLE 新主创新方向
+
+- 可寻址残差记忆；
+- 长尾外部知识库；
+- 只 gate 低熵/长尾；
+- 与参数化模型互补。
+
+### 57.3 建议实验
+
+- 度量 \(I(Y;C\mid E_{\text{ngram}})\)
+- 非参数残差记忆
+- 语义可寻址 PLE
+- 联合小规模预训练。

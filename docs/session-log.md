@@ -2565,7 +2565,28 @@ lazy-window gate        ✅
   6. 在线源选择可用 Hedge，后悔界 O(sqrt(T log K))；
   7. Purified OPSD 在教师含噪时严格优于朴素 OPSD；
 - 给出综合最优算法 `OptimalMultiSource`；
-- 证明概要：任务级验证筛选 + 凸融合校准 + 成本感知激活 + 在线权重 + Purified OPSD。<｜end▁of▁thinking｜>
+- 证明概要：任务级验证筛选 + 凸融合校准 + 成本感知激活 + 在线权重 + Purified OPSD。
+
+
+## Session 99：系统性复盘 v4
+
+- 新增 `docs/round-99-systematic-rethink-v4.md`；
+- 终极目标不变：可审计可寻址 PLE 外部记忆为核心创新，0.8B 混合系统 + CPU 100 tok/s；
+- 本轮关键技术债：
+  - 缺少真正的 PLE 强项评测：代码补全、专名、数字格式；
+  - PLE memory 不是同域 bank；
+  - 缺少 per-task Δ / real-control；
+  - gate 仍是非负 KL 代理；
+  - 融合参数未 per-task 校准；
+  - CAP-1 未升级 Purified OPSD；
+  - 无正式评测集和多 seed 对比；
+  - 产品化未开始；
+- 新优先级：
+  - P0：真实局部任务 + 同域 bank + per-task Δ/校准 + 多源消融 v2；
+  - P1：正式评测集 + Purified OPSD + 多 seed + 在线 router；
+  - P2：CPU 100 tok/s / bundle / e2e；
+- 借鉴矩阵继续强调：kNN-LM reliability、MemSFT、TokenMem、Log Opinion Pool、Hedge、Purified OPSD、MoRA/QLoRA 均与 PLE 不冲突；
+- 判定：当前先别扩展，先完成 PLE 窄口径证据闭环。<｜end▁of▁thinking｜>
 
 <｜｜DSML｜｜tool_calls>
 <｜｜DSML｜｜invoke name="bash">

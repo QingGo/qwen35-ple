@@ -2499,3 +2499,20 @@ lazy-window gate        ✅
 - 新增 `docs/round-94-p0-multisource-ablation.md`；
 - P0 标记完成；
 - 下一步进入 P1：正式评测集、Purified OPSD、多 seed adapter 对比、PLE 窄口径改进。
+
+
+## Session 95：数学推导与 P0 实测差异分析
+
+- 新增 `docs/round-95-math-vs-p0-results.md`；
+- 核心结论：
+  - 数学结论没有错，但 P0 把 PLE 用在“代码题问答/算术计算”上，不是 PLE 最强的“代码补全/专名/数字格式”；
+  - 当前 PLE memory 来自 CAP1 解题文本，与评测任务不同域；
+  - 运行时 gate 使用 KL(p_m||p_b) 非负代理，不能证明真实 `E[log(p_m/p_b)]>0`；
+  - 校准参数来自 4 样本 wiki，未按 code/number 分开校准；
+  - 当前 logit 修正只是带偏置的 n-gram 先验，不是最优条件对数似然比；
+- 修正方向：
+  - 换到真正的 PLE 强项任务；
+  - 用同域 memory bank；
+  - 在 held-out 上直接测 paired real/control log-density ratio；
+  - 按任务决定是否启用 PLE；
+  - 按域重新校准并估计 λ*。

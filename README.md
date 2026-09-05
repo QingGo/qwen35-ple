@@ -97,6 +97,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-92-systematic-rethink-v3.md](docs/round-92-systematic-rethink-v3.md) | 系统性复盘v3：终极目标、技术债、借鉴矩阵、稳定开发计划 |
 | [docs/round-93-task-router-and-calibrated-config.md](docs/round-93-task-router-and-calibrated-config.md) | 任务条件 router、log-density gate、校准配置持久化与 serving 接入 |
 | [docs/round-94-p0-multisource-ablation.md](docs/round-94-p0-multisource-ablation.md) | P0 多源消融：base/RAG/PLE/MoRA/all，3-seed，PLE 暂无正收益 |
+| [docs/round-95-math-vs-p0-results.md](docs/round-95-math-vs-p0-results.md) | 数学推导与 P0 实测差异分析：任务口径/记忆域/gate/校准需修正 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

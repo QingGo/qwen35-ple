@@ -92,6 +92,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-87-mora-implemented.md](docs/round-87-mora-implemented.md) | MoRA 已实现并训练：held-out 最优，code-output 提升显著 |
 | [docs/round-88-entity-value-memory.md](docs/round-88-entity-value-memory.md) | 实体 value 3-seed 评测：n-gram 对语义实体记忆极弱 |
 | [docs/round-89-multiround-research-math.md](docs/round-89-multiround-research-math.md) | 33轮多轮搜索调研 + 多视角数学推导与实验指导 |
+| [docs/round-90-sft-rl-opd-direct-weight.md](docs/round-90-sft-rl-opd-direct-weight.md) | SFT/RL/OPD/OPSD机制、直接权重调整、不用RL提升能力调研 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

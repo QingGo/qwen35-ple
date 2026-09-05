@@ -2422,3 +2422,16 @@ lazy-window gate        ✅
   - 检索规模 log-form 递减；
   - scale+bias+temperature 校准；
 - 对后续 PLE-2、CAP-1、多源 router 给出具体实验指导。
+
+
+## Session 90：SFT/RL/OPD/OPSD 机制与不用RL提升能力调研
+
+- 30+ 轮搜索；
+- 新增 `docs/round-90-sft-rl-opd-direct-weight.md`；
+- 核心结论：
+  - SFT 是外部数据分布匹配；
+  - RL 是自采样 + 奖励 + KL 约束，通常向高奖励区收缩；
+  - OPD/OPSD 是自采样 + teacher/自验证蒸馏；
+  - 直接权重调整存在（ROME/MEMIT/MEND/AlphaEdit、模型合并、ES、外部记忆），但只适合局部/组合/外挂；
+  - 不用 RL 可以实际提升：OPD、Purified OPSD、Semantic Soft Bootstrapping、RAG self-distill、MoRA/QLoRA、ES 等；
+- 对本项目建议：CAP-1 升级为 OPD/OPSD（验证过滤）+ RAG 外部记忆 + MoRA/QLoRA；RL 留到有 verifier 后再做。

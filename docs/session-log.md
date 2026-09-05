@@ -2550,7 +2550,22 @@ lazy-window gate        ✅
   5. 系统论：Purified OPSD 是反馈回路稳定器；
   6. 贝叶斯：Bayes factor/后验源选择可自动判断 PLE 是否该启用；
   7. 统一最终判据：Δ>0、real-control>0、融合 CE 小于 base CE 三者同时满足才启用；
-- 下一步完全按文档实验表执行。<｜end▁of▁thinking｜>
+- 下一步完全按文档实验表执行。
+
+
+## Session 98：最优多源记忆融合形式化证明
+
+- 新增 `docs/round-98-optimal-method-formal-proof.md`；
+- 完成形式化推导与证明：
+  1. 贝叶斯最优预测 = 真实条件分布；
+  2. 受限 log-linear 融合是凸优化，最优一阶条件为矩匹配；
+  3. 支撑集偏置最优校准 = 让融合分布在记忆支撑集上的质量等于真实质量；
+  4. 含成本的激活规则：净收益 > 0 才启用；
+  5. 预算分配：按收益/成本比排序；
+  6. 在线源选择可用 Hedge，后悔界 O(sqrt(T log K))；
+  7. Purified OPSD 在教师含噪时严格优于朴素 OPSD；
+- 给出综合最优算法 `OptimalMultiSource`；
+- 证明概要：任务级验证筛选 + 凸融合校准 + 成本感知激活 + 在线权重 + Purified OPSD。<｜end▁of▁thinking｜>
 
 <｜｜DSML｜｜tool_calls>
 <｜｜DSML｜｜invoke name="bash">

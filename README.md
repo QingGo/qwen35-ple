@@ -100,6 +100,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-95-math-vs-p0-results.md](docs/round-95-math-vs-p0-results.md) | 数学推导与 P0 实测差异分析：任务口径/记忆域/gate/校准需修正 |
 | [docs/round-96-optimal-multisource-math-proof.md](docs/round-96-optimal-multisource-math-proof.md) | 35轮搜索 + 最优多源记忆融合数学推导与证明 |
 | [docs/round-97-multibranch-math-proof.md](docs/round-97-multibranch-math-proof.md) | 多分支数学推导：黎曼几何/流形/优化/控制/系统/运筹/信息论/贝叶斯 |
+| [docs/round-98-optimal-method-formal-proof.md](docs/round-98-optimal-method-formal-proof.md) | 最优多源记忆融合形式化推导与证明 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

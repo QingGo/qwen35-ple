@@ -2344,8 +2344,8 @@ lazy-window gate        ✅
   - base mean logprob -0.2310；
   - LoRA -0.2261；
   - 提升 +0.0049，方向为正；
-- QLoRA 4-bit smoke 跑通：
-  - loss 2.14 → 1.41；
-  - held-out logprob 略正；
+- QLoRA 4-bit 跑通：
+  - smoke 5 步：loss 2.14 → 1.41；
+  - held-out 50 步：mean logprob -0.22747（base -0.23099，+0.0035）；
 - MoRA 当前 peft 无 `MoRAConfig`，未实现；
 - 下一步：扩大数据、完整多任务评测、与 PLE/RAG 联合。

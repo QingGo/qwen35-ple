@@ -36,19 +36,27 @@
 
 **提升**：+0.0049 logprob（约 0.005 nats），方向为正。
 
-### 2.3 QLoRA（4-bit NF4，5 步 smoke）
+### 2.3 QLoRA（4-bit NF4）
+
+#### 5 步 smoke
 
 - 输出：`outputs/cap1-qlora-smoke`
-- bitsandbytes 可用，QLoRA 加载/训练成功
 - loss：2.14 → 1.41
+- held-out：-0.23079（相对 base +0.0002）
+
+#### 50 步 held-out（训练 20 条，评测 10 条）
+
+- 输出：`outputs/cap1-qlora-50-heldout`
+- runtime：111s
+- final loss：1.90
 - held-out 评测：
 
 | Model | mean answer logprob |
 |---|---:|
 | base | -0.23099 |
-| QLoRA 5-step | -0.23079 |
+| QLoRA 50-heldout | -0.22747 |
 
-**提升**：+0.0002 logprob，极微小但为正。
+**提升**：+0.0035 logprob，方向为正，接近 LoRA 50 的 +0.0049。
 
 ---
 

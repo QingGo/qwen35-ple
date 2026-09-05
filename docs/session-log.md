@@ -2224,3 +2224,19 @@ lazy-window gate        ✅
   - 写 ple2_addressable_eval（real vs control 的 retrieval/continuation recall）；
   - 接入 RAG 作为词法 key 通道；
   - 实现多源凸 router 解决 λ 校准。
+
+
+## Session 76：PLE-2 可寻址外部记忆实证
+
+- 新增 `scripts/run_ple2_addressable_eval.py`；
+- 新增 `docs/round-76-ple2-addressable-results.md`；
+- 1000 位置/域结果：
+  - code：real continuation top1 48.3%，control 0.7%；retrieval exact 60.6% vs 5.6%；
+  - wiki：real continuation top1 16.0%，control 0.5%；retrieval exact 21.4% vs 0.8%；
+- 结论：
+  - 以 n-gram 为离散地址、以文档为 value 的外部记忆确实有真实关联；
+  - real 远优于 control，PLE-2 主创新方向通过第一阶段验证；
+- 下一步：
+  - 接入 RAG 词法通道；
+  - 实现多源凸 router；
+  - 提升 value 为语义 chunk/实体并跑 3-seed。

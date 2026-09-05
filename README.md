@@ -78,6 +78,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-73-full-summary.md](docs/round-73-full-summary.md) | 本轮完整总结：计划/发现/尝试/踩坑/完成/未完成/未来计划 |
 | [docs/round-74-ple1-ngram-results.md](docs/round-74-ple1-ngram-results.md) | PLE-1 首个实证结果：n-gram 词法记忆 code/name/number real>control 通过 |
 | [docs/round-75-ple2-addressable-memory.md](docs/round-75-ple2-addressable-memory.md) | PLE-2 可寻址 n-gram 外部记忆原型：离散 key + 外部 value |
+| [docs/round-76-ple2-addressable-results.md](docs/round-76-ple2-addressable-results.md) | PLE-2 可寻址外部记忆实证：real 检索/continuation 远优于 control |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

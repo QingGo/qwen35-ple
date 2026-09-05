@@ -2448,3 +2448,22 @@ lazy-window gate        ✅
 - 对项目建议：
   - 当前先 OPD/Purified OPSD + RAG + MoRA/QLoRA；
   - 后期仅在数学/代码可验证任务上做小规模 RLVR，并监控 reward hacking。
+
+
+## Session 92：系统性复盘 v3
+
+- 新增 `docs/round-92-systematic-rethink-v3.md`；
+- 明确终极目标：
+  - PLE/外部可寻址记忆为核心创新；
+  - 低资源、可复现、可审计、可部署的 0.8B 混合系统；
+- 列出本轮技术债：
+  - 任务 router/gate 未实现；
+  - 校准参数未持久化接入 serving；
+  - 缺正式评测集；
+  - CAP-1 未升级 Purified OPSD；
+  - 无 CPU 100 tok/s / bundle / e2e；
+- 制定后续优先级：
+  - P0 任务条件 router + gate + 校准持久化；
+  - P1 正式评测 + Purified OPSD + 多 seed；
+  - P2 产品化；
+- 更新借鉴矩阵，明确不冲突的工作。

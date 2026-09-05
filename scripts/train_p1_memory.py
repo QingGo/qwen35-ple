@@ -98,7 +98,7 @@ def main() -> int:
 
     tokens, e_t = _load_features(args.features, args.max_tokens)
     bank = ExactNgramBank.load(args.bank)
-    tokenizer, model = _load_model(args.model, args.device)
+    _tokenizer, model = _load_model(args.model, args.device)
     print(
         f"[train-p1] model={args.model} tokens={len(tokens)} "
         f"bank_entries={bank.num_entries}",
@@ -136,7 +136,7 @@ def main() -> int:
             h = out.hidden_states[args.layer][0].float()  # [T,d_model]
             base_logits = out.logits.float()
 
-        fused, mem_logits, alpha = module(h.unsqueeze(0), mem, base_logits)
+        fused, _mem_logits, alpha = module(h.unsqueeze(0), mem, base_logits)
         targets = ids[:, 1:].reshape(-1)
         loss = F.cross_entropy(
             fused[:, :-1].reshape(-1, fused.size(-1)),

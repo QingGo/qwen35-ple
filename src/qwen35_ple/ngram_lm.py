@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 
@@ -48,7 +48,7 @@ class NgramLM:
                     self.counts[n][ctx][tok] += 1
 
     @classmethod
-    def from_tokens(cls, tokens: Iterable[int], max_order: int = 4) -> "NgramLM":
+    def from_tokens(cls, tokens: Iterable[int], max_order: int = 4) -> NgramLM:
         lm = cls(max_order=max_order)
         lm.add_sequence(tokens)
         return lm

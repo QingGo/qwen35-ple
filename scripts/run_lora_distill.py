@@ -148,14 +148,14 @@ def main() -> int:
     from peft import LoraConfig, get_peft_model
 
     target_modules = [m.strip() for m in args.target_modules.split(",") if m.strip()]
-    lora_kwargs = dict(
-        r=args.r,
-        lora_alpha=args.lora_alpha,
-        target_modules=target_modules,
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM",
-    )
+    lora_kwargs = {
+        "r": args.r,
+        "lora_alpha": args.lora_alpha,
+        "target_modules": target_modules,
+        "lora_dropout": 0.05,
+        "bias": "none",
+        "task_type": "CAUSAL_LM",
+    }
     if args.use_mora:
         lora_kwargs.update(use_mora=True, mora_type=args.mora_type)
     lora_config = LoraConfig(**lora_kwargs)

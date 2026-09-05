@@ -140,7 +140,7 @@ def _build_arithmetic(n: int) -> list[dict]:
         b = int(rng.integers(2, 100))
         op = rng.choice([" + ", " - ", " * "])
         expr = f"{a}{op}{b}"
-        ans = eval(expr, {"__builtins__": {}}, {})  # noqa: S307
+        ans = eval(expr, {"__builtins__": {}}, {})
         items.append({
             "id": f"arith-{len(items)}",
             "task": "arithmetic",

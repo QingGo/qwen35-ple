@@ -24,6 +24,7 @@ from qwen35_ple.serving.rag import RAGServingAdapter
 
 __all__ = [
     "QwenReaderServingAdapter",
+    "RAGServingAdapter",
     "install_qwen_reader_adapter",
     "install_qwen_reader_adapter_from_bundle",
     "install_sglang_reader_from_bundle",
@@ -32,5 +33,4 @@ __all__ = [
     "make_bundle",
     "open_bundle_memory",
     "save_bundle",
-    "RAGServingAdapter",
 ]

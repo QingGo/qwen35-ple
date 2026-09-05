@@ -19,7 +19,6 @@ import numpy as np
 import torch
 
 from qwen35_ple.addressable_memory import AddressableNgramMemory
-from qwen35_ple.router import CalibratedNgramLogitProcessor
 from qwen35_ple.rag import (
     BM25Index,
     HybridRetriever,
@@ -28,6 +27,7 @@ from qwen35_ple.rag import (
     load_corpus,
     mean_pool_embeddings,
 )
+from qwen35_ple.router import CalibratedNgramLogitProcessor
 from qwen35_ple.serving.rag import RAGServingAdapter
 
 

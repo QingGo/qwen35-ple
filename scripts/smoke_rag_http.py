@@ -52,7 +52,7 @@ def main() -> int:
                 with urllib.request.urlopen(base + "/health", timeout=2) as r:
                     health = json.loads(r.read().decode())
                 break
-            except Exception:
+            except Exception:  # noqa: BLE001
                 time.sleep(1)
         else:
             print("server did not become healthy", flush=True)

@@ -104,7 +104,7 @@ def split_sequences(seqs, train_frac: float, seed: int):
     rng = random.Random(seed)
     indices = list(range(len(seqs)))
     rng.shuffle(indices)
-    n_train = max(1, int(round(len(seqs) * train_frac)))
+    n_train = max(1, round(len(seqs) * train_frac))
     train = [seqs[i] for i in indices[:n_train]]
     eval_ = [seqs[i] for i in indices[n_train:]]
     return train, eval_

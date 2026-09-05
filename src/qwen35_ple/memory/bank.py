@@ -18,8 +18,8 @@ the exact n-gram -> feature association.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 
@@ -75,7 +75,7 @@ class ExactNgramBank:
         *,
         min_order: int = 2,
         max_order: int = 4,
-    ) -> "ExactNgramBank":
+    ) -> ExactNgramBank:
         """Build a bank from a precomputed ``tokens`` / ``PLE e_t`` pair."""
         tokens_arr = np.asarray(tokens, dtype=np.int64).reshape(-1)
         e_t_arr = np.asarray(e_t, dtype=np.float32)
@@ -179,8 +179,9 @@ class ExactNgramBank:
                     "fallback must have shape [T, d_mem] and match d_mem"
                 )
         for i in range(t):
-            slot = 0
-            for order in range(self.max_order, self.min_order - 1, -1):
+            for slot, order in enumerate(
+                range(self.max_order, self.min_order - 1, -1)
+            ):
                 if i + 1 >= order:
                     key = tuple(int(x) for x in tokens_arr[i - order + 1 : i + 1])
                     idx = self.tables[order].get(key)
@@ -191,10 +192,9 @@ class ExactNgramBank:
                         out[i, slot] = fb[i]
                 elif fb is not None:
                     out[i, slot] = fb[i]
-                slot += 1
         return out, orders
 
-    def shuffled(self, seed: int = 0) -> "ExactNgramBank":
+    def shuffled(self, seed: int = 0) -> ExactNgramBank:
         """Return a control bank with the same keys but permuted values."""
         rng = np.random.default_rng(seed)
         perm = rng.permutation(self.num_entries)
@@ -228,7 +228,7 @@ class ExactNgramBank:
         np.savez(path, **arrays)
 
     @classmethod
-    def load(cls, path: str | Path) -> "ExactNgramBank":
+    def load(cls, path: str | Path) -> ExactNgramBank:
         """Load a bank saved by :meth:`save`."""
         path = Path(path)
         data = np.load(path, allow_pickle=False)

@@ -59,7 +59,7 @@ def _delta_r2_by_rank(
     """Return (delta_r2_per_rank, cumulative_delta_r2_per_rank)."""
     # Cross-covariance between E_perp and residual R.
     m = e_perp.T @ r
-    u, s, _vt = np.linalg.svd(m, full_matrices=False)
+    u, _, _vt = np.linalg.svd(m, full_matrices=False)
     y_ss = float(np.sum(y**2))
     if y_ss <= 0:
         return [], []

@@ -25,7 +25,6 @@ import numpy as np
 import torch
 
 from qwen35_ple.addressable_memory import AddressableNgramMemory
-from qwen35_ple.router import CalibratedNgramLogitProcessor
 from qwen35_ple.rag import (
     BM25Index,
     HybridRetriever,
@@ -34,6 +33,7 @@ from qwen35_ple.rag import (
     load_corpus,
     mean_pool_embeddings,
 )
+from qwen35_ple.router import CalibratedNgramLogitProcessor
 from qwen35_ple.serving.rag import RAGServingAdapter
 
 
@@ -141,7 +141,7 @@ def main() -> int:
     service = build_service(args)
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
             if parsed.path == "/health":
                 payload = json.dumps({"ok": True, "chunks": len(service.retriever.bm25.docs)})

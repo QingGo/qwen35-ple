@@ -7,7 +7,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from qwen35_ple.memory.token_mem import (  # noqa: E402
+from qwen35_ple.memory.token_mem import (
     MemoryLogitFusion,
     MemoryLogitHead,
     MemoryRouter,

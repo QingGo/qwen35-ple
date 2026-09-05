@@ -26,7 +26,12 @@ from pathlib import Path
 import numpy as np
 
 from qwen35_ple.addressable_memory import AddressableNgramMemory
-from qwen35_ple.rag import BM25Index, HybridRetriever, NgramKeyRetriever, mean_pool_embeddings
+from qwen35_ple.rag import (
+    BM25Index,
+    HybridRetriever,
+    NgramKeyRetriever,
+    mean_pool_embeddings,
+)
 
 
 def _load_model(model_dir: str):

@@ -2281,3 +2281,16 @@ lazy-window gate        ✅
   - N-gram 0%，确认 PLE 不适合语义知识检索；
   - Hybrid 介于 BM25 与 Dense 之间。
 - 结论：需要任务条件 router，而不是固定 RRF。
+
+
+## Session 80：真实 base logits 融合校准
+
+- 新增 `scripts/run_fusion_calibration.py`；
+- 新增 `docs/round-80-fusion-calibration.md`；
+- 4 个真实 base logits 样本：
+  - real single λ：Δ 0.122 bits；
+  - real scale+bias：Δ 0.241 bits；
+  - real temp+scale+bias：Δ 0.236 bits；
+- 说明 scale+bias 比单 λ 更有效；
+- control 小样本出现伪信号，需扩大样本；
+- 下一步：扩大样本、持久化参数、接入 serving router。

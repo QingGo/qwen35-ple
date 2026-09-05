@@ -82,6 +82,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-77-ple2-rag-integration.md](docs/round-77-ple2-rag-integration.md) | PLE-2 接入 RAG：N-gram 精确寻址成为混合检索第三通道 |
 | [docs/round-78-multisource-fusion.md](docs/round-78-multisource-fusion.md) | 多源 log-linear 融合与 n-gram 校准工具 |
 | [docs/round-79-rag-channel-ablation.md](docs/round-79-rag-channel-ablation.md) | 真实 RAG 三通道消融：BM25/Dense/N-gram/Hybrid 文档与QA检索 |
+| [docs/round-80-fusion-calibration.md](docs/round-80-fusion-calibration.md) | 真实 base logits 上单λ/scale+bias/temperature 校准 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

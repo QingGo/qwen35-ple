@@ -2207,3 +2207,20 @@ lazy-window gate        ✅
   - base+control 仅约 0.005 bits；
   - 但最优 λ 贴边界，说明 raw log p 插值需要 router/温度校准；
 - 结论：PLE/n-gram 作为“局部有序词法记忆”成立，进入 PLE-2 架构与 router 实验。
+
+
+## Session 75：PLE-2 可寻址外部记忆原型
+
+- 新增 `src/qwen35_ple/addressable_memory.py`；
+- 新增 `tests/test_addressable_memory.py`；
+- 新增 `docs/round-75-ple2-addressable-memory.md`；
+- 核心：
+  - key = 离散 token n-gram；
+  - value = 外部文档/知识块/实体 id；
+  - 保留 continuation 表 + value 索引；
+  - 训练无关、非参数、可审计；
+- 测试通过；
+- 下一步：
+  - 写 ple2_addressable_eval（real vs control 的 retrieval/continuation recall）；
+  - 接入 RAG 作为词法 key 通道；
+  - 实现多源凸 router 解决 λ 校准。

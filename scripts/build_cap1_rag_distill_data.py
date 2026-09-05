@@ -47,14 +47,21 @@ def main() -> int:
     parser.add_argument("--top-k", type=int, default=2)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--max-docs", type=int, default=2000)
+    parser.add_argument("--exclude-source", action="store_true", help="exclude source examples from retrieval corpus to avoid self-leakage")
     parser.add_argument("--output", default="data/cap1-rag-distill-smoke.jsonl")
     args = parser.parse_args()
 
-    corpus = load_jsonl(Path(args.corpus))[: args.max_docs]
-    docs = [corpus_text(o) for o in corpus if corpus_text(o)]
+    all_corpus = load_jsonl(Path(args.corpus))[: args.max_docs]
+    source_items = load_jsonl(Path(args.source))
+    exclude = set()
+    if args.exclude_source:
+        for item in source_items:
+            text = corpus_text(item)
+            if text:
+                exclude.add(text)
+    docs = [corpus_text(o) for o in all_corpus if corpus_text(o) and corpus_text(o) not in exclude]
     bm25 = BM25Index(docs)
 
-    source_items = load_jsonl(Path(args.source))
     if args.limit is not None:
         source_items = source_items[: args.limit]
 

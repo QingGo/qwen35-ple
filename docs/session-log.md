@@ -2349,3 +2349,19 @@ lazy-window gate        ✅
   - held-out 50 步：mean logprob -0.22747（base -0.23099，+0.0035）；
 - MoRA 当前 peft 无 `MoRAConfig`，未实现；
 - 下一步：扩大数据、完整多任务评测、与 PLE/RAG 联合。
+
+
+## Session 85：CAP-1 扩展数据与显著 held-out 提升
+
+- `build_cap1_rag_distill_data.py` 新增 `--exclude-source`，避免检索到自身答案；
+- 生成 199 条 RAG self-distill 数据；
+- 切分 160 训练 / 39 held-out；
+- 训练：
+  - LoRA-160；
+  - QLoRA-160；
+- 39 条 held-out 结果：
+  - base：-1.33702；
+  - LoRA：-1.24270（+0.0943，约 +7.05%）；
+  - QLoRA：-1.25187（+0.0851，约 +6.36%）；
+- 结论：CAP-1 实际提升 0.8B 能力已得到可测证据；
+- 剩余：MoRA 未实现，完整多任务评测，PLE/RAG 联合评测。

@@ -172,44 +172,46 @@ def _sample_positions_by_category(
     return out
 
 
-def _context_logprob(
+def _precompute_position(
     model,
-    tokenizer,
     context: list[int],
     target: int,
     device: str,
     dist=None,
-    *,
-    scale: float = 0.0,
-    bias: float = 0.0,
-    temperature: float = 1.0,
 ):
     ids = torch.tensor([context], dtype=torch.long, device=device)
     with torch.no_grad():
         logits = model(input_ids=ids, use_cache=False).logits[0, -1].float().cpu().numpy()
+    return {
+        "logits": logits,
+        "target": target,
+        "dist": dist,
+    }
+
+
+def _score_precomputed(rec, *, scale: float = 0.0, bias: float = 0.0, temperature: float = 1.0):
+    logits = rec["logits"]
+    target = rec["target"]
+    dist = rec["dist"]
     base_logprob = float(math.log(max(softmax(logits)[target], 1e-12)))
     ngram_logprob = None
     fused_logprob = None
+    ngram_hit = False
+    fused_hit = False
     if dist is not None:
         p = float(dist.get(target, 0.0))
         ngram_logprob = float(math.log(max(p, 1e-12)))
-        fused = fuse_ngram_logits(
-            logits,
-            dist,
-            scale=scale,
-            bias=bias,
-            temperature=temperature,
-        )
+        fused = fuse_ngram_logits(logits, dist, scale=scale, bias=bias, temperature=temperature)
         fused_logprob = float(math.log(max(softmax(fused)[target], 1e-12)))
+        fused_hit = bool(int(np.argmax(fused)) == target)
+        ngram_hit = bool(max(dist, key=dist.get) == target)
     return {
         "base_logprob": base_logprob,
         "ngram_logprob": ngram_logprob,
         "fused_logprob": fused_logprob,
         "base_hit": bool(int(np.argmax(logits)) == target),
-        "ngram_hit": bool(dist is not None and max(dist, key=dist.get) == target) if dist else False,
-        "fused_hit": bool(
-            dist is not None and int(np.argmax(fuse_ngram_logits(logits, dist, scale=scale, bias=bias, temperature=temperature))) == target
-        ) if dist is not None else False,
+        "ngram_hit": ngram_hit,
+        "fused_hit": fused_hit,
     }
 
 
@@ -242,9 +244,9 @@ def _calibrate(
     bias_grid: np.ndarray | None = None,
 ) -> dict:
     if scale_grid is None:
-        scale_grid = np.linspace(-3.0, 5.0, 17)
+        scale_grid = np.linspace(-2.0, 4.0, 9)
     if bias_grid is None:
-        bias_grid = np.linspace(-5.0, 3.0, 17)
+        bias_grid = np.linspace(-4.0, 3.0, 9)
     return calibrate_ngram_fusion(
         base_logits_list,
         targets,
@@ -351,30 +353,28 @@ def main() -> int:
         real_cal = _calibrate(calib_logits, calib_targets, calib_real_dists)
         ctrl_cal = _calibrate(calib_logits, calib_targets, calib_ctrl_dists)
 
-        def _eval_set(mem, scale, bias):
-            entries = []
-            for seq, i in eval_positions:
-                context = seq[max(0, i - args.context_len): i]
-                target = seq[i]
-                dist = mem.continuation_distribution(context)[0] if mem.continuation_distribution(context) else None
-                e = _context_logprob(
-                    model,
-                    tokenizer,
-                    context,
-                    target,
-                    args.device,
-                    dist,
-                    scale=scale,
-                    bias=bias,
-                    temperature=global_temp,
-                )
-                entries.append(e)
+        precomputed_real = []
+        precomputed_ctrl = []
+        for seq, i in eval_positions:
+            context = seq[max(0, i - args.context_len): i]
+            target = seq[i]
+            real_dist = mem_real.continuation_distribution(context)[0] if mem_real.continuation_distribution(context) else None
+            ctrl_dist = mem_ctrl.continuation_distribution(context)[0] if mem_ctrl.continuation_distribution(context) else None
+            rec = _precompute_position(model, context, target, args.device)
+            precomputed_real.append({**rec, "dist": real_dist})
+            precomputed_ctrl.append({**rec, "dist": ctrl_dist})
+
+        def _eval_set(precomputed, scale, bias):
+            entries = [
+                _score_precomputed(r, scale=scale, bias=bias, temperature=global_temp)
+                for r in precomputed
+            ]
             return _aggregate(entries)
 
-        real_global = _eval_set(mem_real, global_scale, global_bias)
-        real_calibrated = _eval_set(mem_real, real_cal["best_scale"], real_cal["best_bias"])
-        ctrl_global = _eval_set(mem_ctrl, global_scale, global_bias)
-        ctrl_calibrated = _eval_set(mem_ctrl, ctrl_cal["best_scale"], ctrl_cal["best_bias"])
+        real_global = _eval_set(precomputed_real, global_scale, global_bias)
+        real_calibrated = _eval_set(precomputed_real, real_cal["best_scale"], real_cal["best_bias"])
+        ctrl_global = _eval_set(precomputed_ctrl, global_scale, global_bias)
+        ctrl_calibrated = _eval_set(precomputed_ctrl, ctrl_cal["best_scale"], ctrl_cal["best_bias"])
 
         results[task_name] = {
             "n_raw_positions": len(positions),

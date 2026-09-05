@@ -2365,3 +2365,14 @@ lazy-window gate        ✅
   - QLoRA：-1.25187（+0.0851，约 +6.36%）；
 - 结论：CAP-1 实际提升 0.8B 能力已得到可测证据；
 - 剩余：MoRA 未实现，完整多任务评测，PLE/RAG 联合评测。
+
+
+## Session 86：CAP-1 多任务评测
+
+- `run_multi_task_eval.py` 支持 `--adapter`；
+- 30 题小评测（knowledge 10 / arithmetic 10 / code-output 10）：
+  - knowledge：base -1.979 → LoRA -2.079（-0.100）；
+  - arithmetic：base -7.287 → LoRA -7.280（+0.007）；
+  - code-output：base -14.250 → LoRA -14.134（+0.116）；
+- exact match 均未提升（0/0/0）；
+- 结论：RAG self-distill LoRA 偏向 code/arithmetic，knowledge 略降；需要任务条件混合。

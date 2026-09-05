@@ -42,7 +42,7 @@ def _tokenize(text: str) -> list[str]:
     return [t.lower() for t in _TOKEN_RE.findall(text)]
 
 
-def _load_model(model_path: str, device: str):
+def _load_model(model_path: str, device: str, adapter: str | None = None):
     import os
 
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -53,6 +53,10 @@ def _load_model(model_path: str, device: str):
     model = AutoModelForCausalLM.from_pretrained(
         model_path, local_files_only=True, dtype=torch.float32
     )
+    if adapter:
+        from peft import PeftModel
+
+        model = PeftModel.from_pretrained(model, adapter)
     model.to(device)
     model.eval()
     for p in model.parameters():
@@ -231,6 +235,7 @@ def _exact_match(pred: str, gold: str) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="data/models/Qwen3.5-0.8B")
+    parser.add_argument("--adapter", default=None, help="optional PEFT adapter directory")
     parser.add_argument("--qa-file", default="data/rare-kb-v1.json")
     parser.add_argument("--corpus", default=None)
     parser.add_argument("--top-k", type=int, default=3)
@@ -244,7 +249,7 @@ def main() -> int:
     args = parser.parse_args()
 
     t0 = time.time()
-    tokenizer, model = _load_model(args.model, args.device)
+    tokenizer, model = _load_model(args.model, args.device, adapter=args.adapter)
 
     items = _load_qa(args.qa_file, args.limit)
     items = [

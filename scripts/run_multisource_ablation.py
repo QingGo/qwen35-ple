@@ -322,7 +322,7 @@ def evaluate_combos(
         ("ple", False, True, None),
     ]
     if with_adapter_combos:
-        combos += [
+        combos = [
             ("mora", False, False, True),
             ("rag_mora", True, False, True),
             ("ple_mora", False, True, True),

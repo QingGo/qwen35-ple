@@ -2435,3 +2435,16 @@ lazy-window gate        ✅
   - 直接权重调整存在（ROME/MEMIT/MEND/AlphaEdit、模型合并、ES、外部记忆），但只适合局部/组合/外挂；
   - 不用 RL 可以实际提升：OPD、Purified OPSD、Semantic Soft Bootstrapping、RAG self-distill、MoRA/QLoRA、ES 等；
 - 对本项目建议：CAP-1 升级为 OPD/OPSD（验证过滤）+ RAG 外部记忆 + MoRA/QLoRA；RL 留到有 verifier 后再做。
+
+
+## Session 91：业界 RL Scaling 合理性/不合理性分析
+
+- 20+ 轮搜索；
+- 新增 `docs/round-91-rl-scaling-analysis.md`；
+- 合理性：
+  - 预训练收敛、可验证奖励、on-policy 减少失配、长CoT/推理缩放、环境数据工厂、开源工具链；
+- 不合理性：
+  - 采样/算力极低效、reward hacking、overoptimization、不可验证任务受限、小模型收益有限、行业集中化；
+- 对项目建议：
+  - 当前先 OPD/Purified OPSD + RAG + MoRA/QLoRA；
+  - 后期仅在数学/代码可验证任务上做小规模 RLVR，并监控 reward hacking。

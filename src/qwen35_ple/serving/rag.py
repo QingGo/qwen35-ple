@@ -34,6 +34,7 @@ class RAGServingAdapter:
         concise: bool = True,
         device: str = "cpu",
         stop_sequences: list[str] | None = None,
+        logit_processor=None,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -44,6 +45,7 @@ class RAGServingAdapter:
         self.concise = bool(concise)
         self.device = device
         self.stop_sequences = stop_sequences or []
+        self.logit_processor = logit_processor
 
     def retrieve(self, question: str) -> list[Chunk | str]:
         return self.retriever.retrieve(
@@ -79,6 +81,8 @@ class RAGServingAdapter:
             input_ids = torch.tensor([generated], dtype=torch.long, device=self.device)
             with torch.no_grad():
                 logits = self.model(input_ids=input_ids, use_cache=False).logits[0, -1]
+                if self.logit_processor is not None:
+                    logits = self.logit_processor(logits, generated)
             nxt = int(torch.argmax(logits))
             if nxt == self.tokenizer.eos_token_id:
                 break

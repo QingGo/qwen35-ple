@@ -2294,3 +2294,18 @@ lazy-window gate        ✅
 - 说明 scale+bias 比单 λ 更有效；
 - control 小样本出现伪信号，需扩大样本；
 - 下一步：扩大样本、持久化参数、接入 serving router。
+
+
+## Session 81：n-gram 融合接入 Serving/Router
+
+- 新增 `src/qwen35_ple/router.py`；
+- 新增 `tests/test_router.py`；
+- `RAGServingAdapter` 支持可选 `logit_processor`；
+- `run_rag_demo.py` / `serve_rag_http.py` 新增：
+  - `--use-ngram-fusion`
+  - `--fusion-scale`
+  - `--fusion-bias`
+  - `--fusion-temperature`
+- 测试通过（14 passed）；
+- PLE 现在同时进入：混合检索 + 生成阶段 logit 校准融合；
+- 下一步：扩大校准、任务 gate、真实生成消融。

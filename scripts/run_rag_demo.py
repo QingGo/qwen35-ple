@@ -19,6 +19,7 @@ import numpy as np
 import torch
 
 from qwen35_ple.addressable_memory import AddressableNgramMemory
+from qwen35_ple.router import CalibratedNgramLogitProcessor
 from qwen35_ple.rag import (
     BM25Index,
     HybridRetriever,
@@ -69,6 +70,10 @@ def main() -> int:
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument("--use-ngram", action="store_true", help="add PLE-style n-gram key retrieval to hybrid RAG")
     parser.add_argument("--ngram-weight", type=float, default=1.0)
+    parser.add_argument("--use-ngram-fusion", action="store_true", help="apply calibrated n-gram logit fusion during generation")
+    parser.add_argument("--fusion-scale", type=float, default=1.0)
+    parser.add_argument("--fusion-bias", type=float, default=0.0)
+    parser.add_argument("--fusion-temperature", type=float, default=1.0)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -94,6 +99,7 @@ def main() -> int:
             query_vector = query_vector / qn
 
     ngram_retriever = None
+    logit_processor = None
     if args.use_ngram:
         mem = AddressableNgramMemory(min_order=2, max_order=4)
         for i, text in enumerate(chunk_texts):
@@ -104,6 +110,13 @@ def main() -> int:
             mem,
             tokenizer=lambda text: tokenizer.encode(text, add_special_tokens=False),
         )
+        if args.use_ngram_fusion:
+            logit_processor = CalibratedNgramLogitProcessor(
+                mem,
+                scale=args.fusion_scale,
+                bias=args.fusion_bias,
+                temperature=args.fusion_temperature,
+            )
         print(f"[demo] ngram memory entries={mem.stats()}", flush=True)
 
     retriever = HybridRetriever(
@@ -121,6 +134,7 @@ def main() -> int:
         candidate_pool=args.candidate_pool,
         concise=True,
         device=args.device,
+        logit_processor=logit_processor,
     )
     result = adapter.answer(args.question)
     elapsed = time.time() - t0

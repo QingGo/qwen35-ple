@@ -25,6 +25,7 @@ import numpy as np
 import torch
 
 from qwen35_ple.addressable_memory import AddressableNgramMemory
+from qwen35_ple.router import CalibratedNgramLogitProcessor
 from qwen35_ple.rag import (
     BM25Index,
     HybridRetriever,
@@ -77,6 +78,7 @@ def build_service(args: argparse.Namespace) -> RAGServingAdapter:
         )
 
     ngram_retriever = None
+    logit_processor = None
     if getattr(args, "use_ngram", False):
         mem = AddressableNgramMemory(min_order=2, max_order=4)
         for i, text in enumerate(chunk_texts):
@@ -87,6 +89,13 @@ def build_service(args: argparse.Namespace) -> RAGServingAdapter:
             mem,
             tokenizer=lambda text: tokenizer.encode(text, add_special_tokens=False),
         )
+        if getattr(args, "use_ngram_fusion", False):
+            logit_processor = CalibratedNgramLogitProcessor(
+                mem,
+                scale=getattr(args, "fusion_scale", 1.0),
+                bias=getattr(args, "fusion_bias", 0.0),
+                temperature=getattr(args, "fusion_temperature", 1.0),
+            )
 
     retriever = HybridRetriever(
         bm25,
@@ -103,6 +112,7 @@ def build_service(args: argparse.Namespace) -> RAGServingAdapter:
         candidate_pool=args.candidate_pool,
         concise=True,
         device=args.device,
+        logit_processor=logit_processor,
     )
 
 
@@ -119,6 +129,10 @@ def main() -> int:
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument("--use-ngram", action="store_true", help="add PLE-style n-gram key retrieval to hybrid RAG")
     parser.add_argument("--ngram-weight", type=float, default=1.0)
+    parser.add_argument("--use-ngram-fusion", action="store_true", help="apply calibrated n-gram logit fusion during generation")
+    parser.add_argument("--fusion-scale", type=float, default=1.0)
+    parser.add_argument("--fusion-bias", type=float, default=0.0)
+    parser.add_argument("--fusion-temperature", type=float, default=1.0)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)

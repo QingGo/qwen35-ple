@@ -2252,3 +2252,17 @@ lazy-window gate        ✅
 - 下一步：
   - 在真实 RAG 检索/问答上做三通道消融；
   - 多源凸 router/温度校准。
+
+
+## Session 78：多源融合与校准工具
+
+- 新增 `src/qwen35_ple/fusion.py`；
+- 新增 `tests/test_fusion.py`；
+- 新增 `docs/round-78-multisource-fusion.md`；
+- 功能：
+  - n-gram logits 插值（scale/bias/temperature）；
+  - 小样本两参数校准；
+  - 多源 log-linear 融合；
+  - sparse mixture；
+- 测试通过（15 passed）；
+- 下一步：真实 base logits 上的校准对比 + 接入 serving/router。

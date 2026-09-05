@@ -80,6 +80,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-75-ple2-addressable-memory.md](docs/round-75-ple2-addressable-memory.md) | PLE-2 可寻址 n-gram 外部记忆原型：离散 key + 外部 value |
 | [docs/round-76-ple2-addressable-results.md](docs/round-76-ple2-addressable-results.md) | PLE-2 可寻址外部记忆实证：real 检索/continuation 远优于 control |
 | [docs/round-77-ple2-rag-integration.md](docs/round-77-ple2-rag-integration.md) | PLE-2 接入 RAG：N-gram 精确寻址成为混合检索第三通道 |
+| [docs/round-78-multisource-fusion.md](docs/round-78-multisource-fusion.md) | 多源 log-linear 融合与 n-gram 校准工具 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

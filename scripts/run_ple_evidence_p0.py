@@ -390,6 +390,10 @@ def main() -> int:
                 (real_calibrated.get("delta_ngram_vs_base") or 0.0)
                 - (ctrl_calibrated.get("delta_ngram_vs_base") or 0.0)
             ) if real_calibrated and ctrl_calibrated else None,
+            "real_vs_control_fused_delta": (
+                (real_calibrated.get("delta_fused_vs_base") or 0.0)
+                - (ctrl_calibrated.get("delta_fused_vs_base") or 0.0)
+            ) if real_calibrated and ctrl_calibrated else None,
         }
         print(json.dumps({k: results[task_name][k] for k in ["real_calibrated", "control_calibrated", "real_vs_control_delta"]}, ensure_ascii=False), flush=True)
 

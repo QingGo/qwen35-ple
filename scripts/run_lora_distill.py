@@ -125,6 +125,8 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--use-qlora", action="store_true", help="load base in 4-bit NF4 with bitsandbytes")
+    parser.add_argument("--use-mora", action="store_true", help="use MoRA from peft-mora fork")
+    parser.add_argument("--mora-type", type=int, default=1, help="MoRA type: 1/2/3/4/6 from peft-mora")
     parser.add_argument("--max-length", type=int, default=512)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--target-modules", default="q_proj,k_proj,v_proj,o_proj")
@@ -146,7 +148,7 @@ def main() -> int:
     from peft import LoraConfig, get_peft_model
 
     target_modules = [m.strip() for m in args.target_modules.split(",") if m.strip()]
-    lora_config = LoraConfig(
+    lora_kwargs = dict(
         r=args.r,
         lora_alpha=args.lora_alpha,
         target_modules=target_modules,
@@ -154,6 +156,9 @@ def main() -> int:
         bias="none",
         task_type="CAUSAL_LM",
     )
+    if args.use_mora:
+        lora_kwargs.update(use_mora=True, mora_type=args.mora_type)
+    lora_config = LoraConfig(**lora_kwargs)
     model = get_peft_model(model, lora_config)
     trainable = [p for p in model.parameters() if p.requires_grad]
     print(

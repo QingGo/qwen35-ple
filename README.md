@@ -89,6 +89,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-84-cap1-actual-training.md](docs/round-84-cap1-actual-training.md) | CAP-1 实际训练：GTX1070 跑通 LoRA/QLoRA，held-out logprob 正向 |
 | [docs/round-85-cap1-scaling.md](docs/round-85-cap1-scaling.md) | CAP-1 扩展到199条：LoRA/QLoRA 39条held-out显著正提升 |
 | [docs/round-86-cap1-multitask-eval.md](docs/round-86-cap1-multitask-eval.md) | CAP-1 多任务评测：LoRA 提升 code/arithmetic，knowledge 略降 |
+| [docs/round-87-mora-implemented.md](docs/round-87-mora-implemented.md) | MoRA 已实现并训练：held-out 最优，code-output 提升显著 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

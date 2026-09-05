@@ -2376,3 +2376,20 @@ lazy-window gate        ✅
   - code-output：base -14.250 → LoRA -14.134（+0.116）；
 - exact match 均未提升（0/0/0）；
 - 结论：RAG self-distill LoRA 偏向 code/arithmetic，knowledge 略降；需要任务条件混合。
+
+
+## Session 87：MoRA 实现完成
+
+- vendor `peft-mora` 到 `vendor/peft-mora/src/peft`；
+- `run_lora_distill.py` 新增 `--use-mora` / `--mora-type`；
+- MoRA-160 训练完成；
+- 39 条 held-out：
+  - MoRA -1.23607；
+  - LoRA -1.24270；
+  - QLoRA -1.25187；
+  - base -1.33702；
+  - MoRA 为当前最优；
+- 多任务：
+  - code-output：base -14.250 → MoRA -13.317（+0.933）；
+  - knowledge：MoRA -2.019，优于 LoRA -2.079；
+- 剩余：正式生成指标、PLE/RAG+MoRA 联合评测、多 seed。

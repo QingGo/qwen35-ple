@@ -499,7 +499,7 @@ def main() -> int:
     )
     from qwen35_ple.projector import save_projector
 
-    projector_path = out.parent / "ple-projector-v0.json"
+    projector_path = out.parent / f"{out.stem}.projector.json"
     save_projector(projector_path, trained["projector_dict"])
     print(f"[ple-projector] wrote {out} and {projector_path}", flush=True)
     return 0

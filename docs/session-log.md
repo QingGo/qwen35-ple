@@ -2645,5 +2645,28 @@ lazy-window gate        ✅
   - CAP-1 held-out：base -1.3370，原始 MoRA-160 -1.2361，Purified MoRA-80 -1.2522；
   - 正式基准：Purified MoRA-80 在 GSM8K-like +0.289、HumanEval-like +0.096、MBPP-like +0.124，MATH-like -0.048；
 - 新增 `docs/round-103-purified-opsd-results.md`；
-- 下一步：多 seed Purified OPSD、QLoRA/LoRA 对照、PLE 联合评测、CPU 产品化。<｜end▁of▁thinking｜>
+- 下一步：多 seed Purified OPSD、QLoRA/LoRA 对照、PLE 联合评测、CPU 产品化。
+
+
+## Session 104：系统性复盘 v5
+
+- 新增 `docs/round-104-systematic-rethink-v5.md`；
+- 本轮成果：
+  - PLE 在真实局部任务 code/name 正收益；
+  - per-task 校准接入 serving；
+  - 正式评测工具 + Purified OPSD 实跑；
+  - CI 已通过；
+- 技术债：
+  - number 仍无绝对正收益；
+  - name 稳定性不足；
+  - 无 multi-seed Purified OPSD；
+  - 无 PLE+RAG+Purified OPSD 联合评测；
+  - 无真实 HumanEval/MBPP；
+  - 无 CPU 100 tok/s / bundle / e2e；
+- 下一阶段计划：
+  - P1a：多 seed Purified OPSD + LoRA/QLoRA/MoRA 对照；
+  - P1b：联合系统评测；
+  - P1c：在线 Hedge router + 污染审计；
+  - PROD：量化/CPU 100 tok/s/bundle/e2e；
+- 借鉴矩阵已更新。<｜end▁of▁thinking｜>
 

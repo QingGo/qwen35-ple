@@ -2905,3 +2905,26 @@ lazy-window gate        ✅
   - 对 NeurIPS/ICML 仍需数月且风险高。
 - 新增：
   - `docs/round-113-post-p0-p1-paper-gap.md`
+
+## Session 114：补齐论文实验推进
+
+- 完成 TriviaQA 100 条真实 exact-match：
+  - exact match = 0.0；
+  - repetition rate = 0.0048；
+  - 说明 0.8B 短答案生成质量仍弱。
+- 完成 NGM 官方基线：
+  - NGM vs base：NLL 2.5208 → 2.5206，hit 均 0.55；
+  - 在当前局部任务上几乎无增益，未超过 PLE Projector。
+- 新增：
+  - `scripts/run_triviaqa_real_eval.py`
+  - `scripts/run_ngm_baseline.py`
+  - `scripts/run_llm_judge.py`
+  - `scripts/run_10k_projector_seeds.sh`
+  - `Dockerfile`
+  - `docs/evaluation-card-paper.md`
+  - `docs/round-114-progress.md`
+- 进行中：
+  - HumanEval 20 题（后台运行，预计需较长时间）；
+  - 10k 3 seed 等待 GPU；
+  - pass@k / LLM-judge 待运行。
+- 未完成，下一轮继续。

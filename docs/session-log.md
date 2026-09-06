@@ -2717,6 +2717,9 @@ lazy-window gate        ✅
   - Code：PLE +0.528 > BM25 +0.290 > n-gram retrieval +0.261；
   - Name：BM25 +0.721 远超 PLE +0.066；
   - Number：BM25 +0.154 > PLE +0.009 > n-gram retrieval -0.338；
+- 完成 CPU 吞吐初测：
+  - fp32 朴素 CPU 生成约 2.24 tok/s，未达到 100 tok/s；
+  - 已记录为诚实基线，后续需量化/KV cache/专用运行时优化；
 - 结论：
   - PLE 只在 code 类任务上表现出不可替代性；
   - Purified OPSD 不是稳定的通用能力提升；
@@ -2727,4 +2730,4 @@ lazy-window gate        ✅
   - `scripts/run_ple_baseline_ablation.py`
   - `scripts/run_purified_seed_evals.sh`
 - 文档：`docs/round-107-limited-resource-experiments.md`；
-- 下一步：code 类多 seed paired、真实基准子集、CPU 100 tok/s、误差分析。
+- 下一步：code 类多 seed paired、真实基准子集、CPU 100 tok/s 优化（量化/KV cache）、误差分析。

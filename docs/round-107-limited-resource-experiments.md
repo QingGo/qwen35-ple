@@ -33,6 +33,11 @@
    - 新增 `outputs/cap1-purified-qlora-80`
    - 与 MoRA seed 0/1/2 统一在 CAP-1 + 正式风格基准上做 per-item paired 分析
 
+5. **CPU 吞吐初测**
+   - 运行 `scripts/bench_cpu_tok_s.py`；
+   - 浮点 fp32、无 KV cache、最朴素 greedy：约 **2.24 tok/s**；
+   - 当前未达到 100 tok/s，已记录为诚实基线并指出优化方向。
+
 ---
 
 ## 2. Purified OPSD 多 seed 结果
@@ -146,7 +151,25 @@
 
 ---
 
-## 4. 本轮新增/修改文件
+## 4. CPU 吞吐初测（诚实基线）
+
+- 脚本：`scripts/bench_cpu_tok_s.py`
+- 环境：远程 WSL CPU，Qwen3.5-0.8B，float32，greedy，`use_cache=False`
+- 结果：
+  - prompt 7 tokens，生成 8 tokens；
+  - 用时 3.57 s；
+  - **2.24 tokens/sec**；
+  - 目标 100 tok/s，差距约 45×。
+- 当前 CPU 路径是“全量重算、无 KV cache、无量化”的最朴素基线；
+- 这说明 **CPU 100 tok/s 目前不成立**；要达标需要：
+  - int8/GGUF 量化；
+  - KV cache；
+  - 批处理/投机采样或专用运行时的优化；
+  - 或在论文/产品中明确把目标降为“可接受的低资源吞吐”，而不是 100 tok/s。
+
+---
+
+## 5. 本轮新增/修改文件
 
 - `scripts/run_cap1_formal_eval.py`：per-item CAP-1 + formal 评测
 - `scripts/analyze_seed_peritem.py`：paired delta + bootstrap CI + p 值
@@ -156,7 +179,7 @@
 
 ---
 
-## 5. 下一步判断
+## 6. 下一步判断
 
 1. **PLE 不可替代性只在 code 类任务部分成立**：
    - Code：PLE > BM25 > n-gram retrieval；

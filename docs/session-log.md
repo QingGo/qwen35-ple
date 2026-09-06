@@ -2845,3 +2845,19 @@ lazy-window gate        ✅
   - `configs/ngram-fusion-router-projector-policy.json`
   - `docs/round-110-ple-projector-v1.md`
 - 下一步：10k 训练、name 专项校准、生成质量标签 policy、M2。
+
+## Session 111：论文工作差距系统性分析
+
+- 基于当前 PLE Projector / Purified OPSD / RAG 证据，做了新一轮论文完整性调研。
+- 结论：
+  - 当前最缺的不是更多内部实验，而是真实公开基准、直接可比基线、联合系统评测、统计显著性、生成质量评估、公开 artifact。
+  - 最稳的论文定位是“可审计 n-gram 外部记忆在低资源小模型上的能力与边界”，而不是“更好的通用记忆模型”。
+- 新增：
+  - `docs/round-111-paper-gap-analysis.md`
+- 下一步：
+  1. 真实 HumanEval / NQ / TriviaQA 最小子集；
+  2. kNN-LM / NGM / MemSFT 或 TokenMem 基线；
+  3. 联合系统消融表；
+  4. 5 seed + bootstrap；
+  5. 10k 训练；
+  6. 开放生成质量指标与 public artifact。

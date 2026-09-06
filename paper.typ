@@ -157,6 +157,11 @@ Python code corpus and wiki text.
   caption: [HumanEval 20: #text("pass@1") and repetition.]
 )
 
+#figure(
+  image("figures/fig_humaneval.png", width: 85%),
+  caption: [HumanEval 20: #text("pass@1") and repetition rate.]
+)
+
 Base solved `HumanEval/16` and `HumanEval/18`. BM25+PLE solved
 `HumanEval/0` and `HumanEval/10`. The solved sets are disjoint, indicating that
 PLE retrieval provides different local code knowledge rather than duplicating the
@@ -198,6 +203,11 @@ Paired across seeds:
 At 100 samples with 5 seeds, the projector-vs-fixed mean was $+0.1044$ with CI
 $[0.0251, 0.1866]$, also positive.
 
+#figure(
+  image("figures/fig_10k_improvement.png", width: 70%),
+  caption: [Per-seed projector-vs-fixed NLL improvements on 10k data.]
+)
+
 === NGM and kNN-LM Baselines
 
 #figure(
@@ -233,6 +243,11 @@ On knowledge, arithmetic, and code-output tasks with 3 seeds:
   caption: [Mean answer log-probability (higher is better).]
 )
 
+#figure(
+  image("figures/fig_joint_system.png", width: 90%),
+  caption: [Joint system answer log-probability, 3 seed means.]
+)
+
 RAG mainly improves knowledge; MoRA mainly improves arithmetic and code-output;
 PLE alone does not improve general tasks.
 
@@ -243,6 +258,20 @@ degradation: repetitive fragments, unrelated repository text, and broken
 structure. Adding the learned token policy strongly reduced this degradation.
 This indicates that PLE should not be enabled unconditionally in open-ended
 generation.
+
+=== LLM-as-Judge
+
+We used DeepSeek V4 Flash as an external judge. For HumanEval 20 problems, the
+mean judge score was $0.50$ for base and $0.25$ for BM25+PLE. For TriviaQA 20
+examples, the base model scored $0.25$.
+
+#figure(
+  image("figures/fig_judge.png", width: 70%),
+  caption: [LLM-as-judge mean scores.]
+)
+
+The judge scores are lower than pass-based metrics, indicating that generated
+answers often look plausible but are judged as incomplete or incorrect.
 
 == Discussion
 
@@ -258,7 +287,7 @@ The empirical picture is clear:
 
 + HumanEval subset is 20 problems; TriviaQA exact match is zero.
 + #text("Pass@k") evidence is small (3 problems x 2 samples).
-+ LLM-as-judge results are not yet available in the published artifact package.
++ LLM-as-judge results are available for HumanEval 20 and a 20-example TriviaQA subset; the full 100-example judge run is not part of this artifact package.
 + Public adapter weights are not yet released.
 + CPU deployment throughput is not yet optimized.
 

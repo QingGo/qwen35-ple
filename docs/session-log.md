@@ -2886,3 +2886,22 @@ lazy-window gate        ✅
   - analyzer 增加 bootstrap CI
   - `docs/round-112-p0-p1-real-baselines-stats.md`
 - 下一步：10k training、公开 artifact、CPU 效率、生成质量 judge。
+
+## Session 113：P0/P1 后论文距离再评估
+
+- 回看最新证据后确认：
+  - 真实 HumanEval 最小子集、kNN-LM、5 seed + bootstrap CI、联合系统表已经补齐；
+  - 但仍不足以直接投稿。
+- 最小可行论文还差：
+  - HumanEval 20–50 题或 NQ/TriviaQA 100 条；
+  - NGM / MemSFT 等至少一个当代外部记忆基线；
+  - 10k 数据 3–5 seed；
+  - 生成质量指标（pass@k / exact match / judge）；
+  - 公开 artifact 与评测卡；
+  - CPU/效率数据。
+- 建议定位：
+  - 最现实的是“低资源 0.8B 下可审计 n-gram 外部记忆的能力与边界”；
+  - 对 TMLR/ACL Findings 预计 3–6 周；
+  - 对 NeurIPS/ICML 仍需数月且风险高。
+- 新增：
+  - `docs/round-113-post-p0-p1-paper-gap.md`

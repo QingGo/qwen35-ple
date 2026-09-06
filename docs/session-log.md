@@ -2727,10 +2727,10 @@ lazy-window gate        ✅
   - Arithmetic：MoRA 是主要收益（-7.37 → -7.11），PLE 反而略降；
   - Code-output：MoRA 主要收益（-14.25 → -12.29），PLE 无增益；
   - 结论：PLE 不能作为通用系统组件无脑叠加，只适合同域局部续写场景；
-- 完成端到端生成观察：
-  - BM25-only 和 BM25+ngram retrieval 都能生成正确 sum 函数；
-  - 加 PLE logit fusion 后生成退化、复读上下文；
-  - 说明 PLE 检索通道安全，但开放生成不应直接做 logit 修改；
+- 完成端到端生成对比（5 个 code prompts）：
+  - BM25-only 与 BM25+ngram retrieval 表现基本一致；
+  - 加 PLE logit fusion 后结果不稳定：有的退化、有的生成更规范；
+  - 结论：PLE 检索通道安全，开放生成不应默认加 PLE logit fusion；
   - 建议 PLE logit fusion 仅用于低熵续写，开放生成只使用检索/重排；
 - 完成 CPU 吞吐初测：
   - fp32 朴素 CPU 生成约 2.24 tok/s，未达到 100 tok/s；

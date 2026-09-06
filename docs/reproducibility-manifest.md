@@ -26,6 +26,7 @@
 - `data/cap1-rag-distill-eval39.jsonl`：CAP-1 held-out，39 条；
 - `data/formal-benchmarks/*.jsonl`：GSM8K-like / MATH-like / HumanEval-like / MBPP-like；
 - `data/sources/wikitext.jsonl`：PLE/BM25 同域 wiki 语料；
+- `data/code-corpus.jsonl`：由 `scripts/build_code_corpus.py` 生成的同域 Python 代码语料；
 - `configs/ngram-fusion-router.json`：per-task PLE 融合参数。
 
 ---
@@ -78,6 +79,19 @@ python scripts/run_multisource_ablation.py \
   --seed 0 --output outputs/ms-purified-mora-s0.json
 ```
 
+### 3.6 端到端代码生成对比
+
+```bash
+python scripts/build_code_corpus.py \
+  --root src --root scripts --root tests \
+  --output data/code-corpus.jsonl --max-files 300
+
+python scripts/run_code_generation_compare.py \
+  --model data/models/Qwen3.5-0.8B \
+  --corpus data/code-corpus.jsonl --device cuda \
+  --output outputs/code-generation-compare.json
+```
+
 ---
 
 ## 4. 固定随机性
@@ -99,6 +113,7 @@ python scripts/run_multisource_ablation.py \
 | PLE 基线 | `outputs/ple-baseline-ablation*.json` |
 | PLE 混合 | `outputs/ple-baseline-hybrid-s*.json` |
 | 多源系统 | `outputs/ms-purified-mora-s*.json` |
+| 端到端生成对比 | `outputs/code-generation-compare.json` |
 
 ---
 

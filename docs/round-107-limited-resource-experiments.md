@@ -199,25 +199,26 @@
 - PLE 在“通用 QA/数学/代码问答”上基本无增益，甚至在 arithmetic 上小幅拉低；
 - 这进一步说明：**PLE 不能作为通用系统增强组件无脑叠加；它的价值局限于同域、局部、低熵的续写场景（如 code corpus 上的 P0 实验）**。
 
-### 3.8 端到端生成观察（code corpus）
+### 3.8 端到端生成观察（code corpus，5 prompts）
 
-在 code corpus 上做了一次简单生成对比：
+在 code corpus 上做了 3 种配置的端到端生成对比：
 
-- 查询：“Write a Python function that returns the sum of two numbers.”
-- BM25-only：
-  - 生成 `def sum(a, b): return a + b`，正确。
-- BM25 + ngram retrieval（不加 PLE logit fusion）：
-  - 同样生成 `def sum(a, b): return a + b`，正确。
-- BM25 + ngram retrieval + PLE logit fusion：
-  - 生成退化为 `def sum(a, b) -> sum:` 并开始复读上下文，明显变差。
+| 配置 | sum | length | reverse | even | max |
+|---|---|---|---|---|---|
+| BM25-only | 正确 | 差（输出 imports） | 正确 | 正确 | 一般 |
+| BM25+ngram retrieval | 正确 | 差 | 正确 | 正确 | 一般 |
+| BM25+ngram+PLE fusion | 退化 | 更好的类型化函数 | 正确 | 正确 | 更好的类型化函数 |
 
 **观察**：
 
-- PLE 在 P0 的“teacher-forced 续写 logprob”上有帮助；
-- 在端到端生成中，**PLE 作为检索通道（NgramKeyRetriever）是安全的，不降低生成质量**；
-- 真正造成退化的是 **PLE logit fusion 被用于开放生成**；
+- **BM25 + ngram retrieval（不加 PLE logit fusion）与 BM25-only 表现基本一致**，说明 PLE 检索通道是安全的；
+- **PLE logit fusion 在开放生成上不稳定**：
+  - 有的 prompt 生成退化为 `def sum(a, b) -> sum:` 并复读上下文；
+  - 有的 prompt 反而生成更规范的类型化函数；
+  - 总体不能证明“开放生成中加入 logit fusion 可靠有益”。
+- PLE 在 P0 的 teacher-forced 续写 logprob 上确实有帮助；
 - 因此推荐：
-  - 在开放生成/通用 QA 中：PLE 只参与检索/重排，不做 logit 修改；
+  - 在开放生成/通用 QA 中：PLE 只作为检索/重排通道，不做 logit 修改；
   - 在低熵局部续写中：可以使用 PLE logit fusion；
   - 需要更强的 task router / gate 来区分这两种模式。
 

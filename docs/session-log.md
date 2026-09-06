@@ -2736,6 +2736,10 @@ lazy-window gate        ✅
   - NL 代码生成指令归类为 semantic，自动关闭 PLE logit fusion；
   - 重新验证 sum 生成恢复正确，检索通道仍保留；
   - 规则放在 router JSON，源码默认空；长期替换为 learned router；
+- 强化 token/ngram-level 路由复用：
+  - PLE fusion 决策应发生在每个 token，而不是 query 级；
+  - 复用现有 `TaskConditionedNgramLogitProcessor` + `LogDensityRatioGate`；
+  - gate 新增 `matched_order`，为后续 learned token policy 提供特征；
 - 完成 CPU 吞吐初测：
   - fp32 朴素 CPU 生成约 2.24 tok/s，未达到 100 tok/s；
   - 已记录为诚实基线，后续需量化/KV cache/专用运行时优化；

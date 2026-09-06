@@ -311,12 +311,15 @@ class LogDensityRatioGate:
         self,
         base_logits: Any,
         ngram_probs: dict[int, float] | None,
+        *,
+        memory_order: int | None = None,
     ) -> dict[str, Any]:
         if not ngram_probs:
             return {
                 "active": False,
                 "mode": self.mode,
                 "threshold": self.threshold,
+                "matched_order": memory_order,
                 "expected_log_density_ratio": -math.inf,
                 "pseudo_label_log_density_ratio": -math.inf,
                 "memory_top1_log_density_ratio": -math.inf,
@@ -367,6 +370,7 @@ class LogDensityRatioGate:
             "active": active,
             "mode": self.mode,
             "threshold": self.threshold,
+            "matched_order": memory_order,
             "expected_log_density_ratio": expected,
             "pseudo_label_log_density_ratio": pseudo,
             "memory_top1_log_density_ratio": mem_top1,
@@ -546,8 +550,10 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
         result = self.memory.continuation_distribution(context)
         if result is None:
             dist = None
+            matched_order = None
         else:
             dist = result[0]
+            matched_order = result[1] if len(result) > 1 else None
         if not dist:
             return logits
 
@@ -558,10 +564,13 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
                 "active": False,
                 "reason": "semantic_task",
                 "task": task,
+                "matched_order": matched_order,
             }
             return logits
 
-        gate = self.density_gate.evaluate(logits_np, dist)
+        gate = self.density_gate.evaluate(
+            logits_np, dist, memory_order=matched_order
+        )
         self.last_gate = gate
         if not gate["active"]:
             return logits

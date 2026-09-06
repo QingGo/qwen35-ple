@@ -92,10 +92,11 @@ def test_density_gate_modes_and_persistence() -> None:
     gate = LogDensityRatioGate(mode="expected_kl", threshold=0.0)
     base = np.zeros(10, dtype=np.float32)
     dist = {5: 0.9, 7: 0.1}
-    info = gate.evaluate(base, dist)
+    info = gate.evaluate(base, dist, memory_order=3)
     assert info["active"] is True
     assert info["expected_log_density_ratio"] > 0.0
     assert info["base_top1_prob"] > 0.0
+    assert info["matched_order"] == 3
 
     import json
     import tempfile

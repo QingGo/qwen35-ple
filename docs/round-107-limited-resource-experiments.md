@@ -236,6 +236,31 @@
 - 长期方向应是：从线上生成数据中学习“何时该用 PLE fusion”的 router，而不是继续增加关键词表；
 - 现阶段它只是一个 **可替换的临时策略**，不是最终架构。
 
+### 3.9 路由层级：query-level vs token/ngram-level
+
+现有的 PLE 路由层可以复用，但需要明确分层：
+
+| 层级 | 现有组件 | 用途 |
+|---|---|---|
+| Query-level | `TaskRouter` / `TaskClassifier` | 粗粒度检索通道权重（BM25/dense/ngram） |
+| Token-level | `TaskConditionedNgramLogitProcessor` | 每个生成 token 决定是否应用 PLE logit fusion |
+| Ngram-level | `LogDensityRatioGate` | 基于当前 n-gram 分布、密度比、熵来决定 |
+
+关键点：
+
+- **PLE fusion 的最终决策应该是 token/ngram-level，而不是 query-level**；
+- 我们已经把 `LogDensityRatioGate` 扩展为返回 `matched_order`，因此 token-level 策略可以直接使用：
+  - n-gram order；
+  - memory entropy；
+  - base entropy；
+  - log-density ratio；
+  - memory top-1 与 base top-1 的一致性；
+- 当前 query-level `generation_keywords` 只是临时 fallback；
+- 长期应该改为 **token/ngram-level learned policy**，例如：
+  - 从生成日志中收集特征和“是否该启用 PLE”的标签；
+  - 训练轻量二分类器 / online bandit；
+  - 让模型自己判断当前这一 token 是否适合 PLE 先验。
+
 ---
 
 ## 4. CPU 吞吐初测（诚实基线）

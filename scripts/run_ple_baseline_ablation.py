@@ -342,12 +342,37 @@ def evaluate_task(
         ) if ngram_ctx_ids else (base_lp, base_hit)
 
         # PLE calibrated log-linear fusion.
-        dist = memory.continuation_distribution(context)
-        dist = dist[0] if dist else None
+        dist_result = memory.continuation_distribution(context)
+        dist = dist_result[0] if dist_result else None
+        matched_order = dist_result[1] if dist_result else None
+        token_features = {
+            "matched_order": matched_order,
+            "base_entropy": None,
+            "memory_entropy": None,
+            "density_ratio": None,
+            "base_top1_prob": None,
+            "memory_top1_prob": None,
+            "memory_top1_agree_base": None,
+        }
         if dist:
             ids = torch.tensor([context], dtype=torch.long, device=device)
             with torch.no_grad():
                 logits = model(input_ids=ids, use_cache=False).logits[0, -1].float().cpu().numpy()
+            pb = softmax(logits)
+            base_top1 = int(np.argmax(logits))
+            mem_top1 = max(dist, key=dist.get)
+            token_features = {
+                "matched_order": matched_order,
+                "base_entropy": float(-np.sum(pb * np.log(np.maximum(pb, 1e-12)))),
+                "memory_entropy": float(-sum(p * math.log(p) for p in dist.values() if p > 0)),
+                "density_ratio": float(sum(
+                    p * (math.log(p) - math.log(max(pb[tok], 1e-12)))
+                    for tok, p in dist.items() if 0 <= tok < len(pb) and p > 0
+                )),
+                "base_top1_prob": float(pb[base_top1]),
+                "memory_top1_prob": float(dist[mem_top1]),
+                "memory_top1_agree_base": bool(mem_top1 == base_top1),
+            }
             fused = fuse_ngram_logits(
                 logits, dist, scale=scale, bias=bias, temperature=global_temp
             )
@@ -393,6 +418,7 @@ def evaluate_task(
                 "bm25_ple_hit": bm25_ple_hit,
                 "ngram_raw_logprob": ngram_raw_lp,
                 "ngram_raw_hit": ngram_raw_hit,
+                **token_features,
             }
         )
         if (len(rows) % 25) == 0:
@@ -401,6 +427,7 @@ def evaluate_task(
     summary = _aggregate(rows)
     summary["calibration"] = cal
     summary["runtime_seconds"] = time.time() - t0
+    summary["per_item"] = rows
     return summary
 
 

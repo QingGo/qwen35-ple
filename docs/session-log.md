@@ -2740,6 +2740,11 @@ lazy-window gate        ✅
   - PLE fusion 决策应发生在每个 token，而不是 query 级；
   - 复用现有 `TaskConditionedNgramLogitProcessor` + `LogDensityRatioGate`；
   - gate 新增 `matched_order`，为后续 learned token policy 提供特征；
+- 训练并集成 learned token-level PLE policy：
+  - 147 个 per-token 样本，logistic regression；
+  - accuracy 0.803，AUC 0.882；
+  - 策略文件 `configs/token-ple-policy.json`；
+  - `TaskConditionedNgramLogitProcessor` 支持 `token_policy_path` 启用；
 - 完成 CPU 吞吐初测：
   - fp32 朴素 CPU 生成约 2.24 tok/s，未达到 100 tok/s；
   - 已记录为诚实基线，后续需量化/KV cache/专用运行时优化；

@@ -261,6 +261,19 @@
   - 训练轻量二分类器 / online bandit；
   - 让模型自己判断当前这一 token 是否适合 PLE 先验。
 
+**已实现第一版 learned token policy**：
+
+- 从 P0 code/name/number per-token 观测中提取 147 个样本；
+- 训练 logistic regression，预测“PLE fusion 是否提升 next-token logprob”；
+- 指标：
+  - accuracy：0.803
+  - AUC：0.882
+- 策略文件：`configs/token-ple-policy.json`；
+- 已集成到 `TaskConditionedNgramLogitProcessor`：
+  - 通过 `TokenPlePolicy` 在每个 token 计算 `should_apply`；
+  - 配置 `router.token_policy_path` 即可启用；
+  - 这是朝向 Bitter Lesson 的实际一步：用数据学习 token 级 policy，而不是继续写关键词。
+
 ---
 
 ## 4. CPU 吞吐初测（诚实基线）

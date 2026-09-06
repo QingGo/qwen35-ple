@@ -162,6 +162,8 @@
         "bias": 0.0,
         "temperature": 1.0
       }
-    }
+    },
+    "token_policy_path": "configs/token-ple-policy.json",
+    "token_policy_threshold": 0.5
   }
 }

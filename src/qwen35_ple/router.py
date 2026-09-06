@@ -391,6 +391,42 @@ class LogDensityRatioGate:
         return {"mode": self.mode, "threshold": self.threshold}
 
 
+class TokenPlePolicy:
+    """Small learned token-level policy for whether to apply PLE fusion.
+
+    This is a logistic regression trained on per-token observations from
+    ``scripts/train_token_ple_policy.py``.  It predicts whether calibrated
+    PLE fusion improves the next-token log-probability given features such as
+    matched n-gram order, entropies, density ratio, and source agreement.
+    """
+
+    def __init__(
+        self,
+        data: dict[str, Any] | str | Path,
+    ) -> None:
+        if isinstance(data, (str, Path)):
+            with Path(data).open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        self.feature_names = list(data["feature_names"])
+        self.mean = np.asarray(data["mean"], dtype=np.float64)
+        self.std = np.asarray(data["std"], dtype=np.float64)
+        self.weights = np.asarray(data["weights"], dtype=np.float64)
+        self.bias = float(data["bias"])
+        self.metrics = dict(data.get("metrics", {}))
+
+    def predict(self, features: dict[str, Any]) -> float:
+        x = np.asarray(
+            [float(features.get(name, 0.0)) for name in self.feature_names],
+            dtype=np.float64,
+        )
+        x = (x - self.mean) / self.std
+        z = float(x @ self.weights + self.bias)
+        return float(1.0 / (1.0 + math.exp(-max(min(z, 30.0), -30.0))))
+
+    def should_apply(self, features: dict[str, Any], threshold: float = 0.5) -> bool:
+        return self.predict(features) >= threshold
+
+
 class CalibratedNgramLogitProcessor:
     """Apply a calibrated n-gram log-prior during generation.
 
@@ -496,6 +532,8 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
         task_scale: dict[str, float] | None = None,
         per_task_fusion: dict[str, dict[str, float]] | None = None,
         context_decoder: Callable[[Any], str] | None = None,
+        token_policy: TokenPlePolicy | None = None,
+        token_policy_threshold: float = 0.5,
     ) -> None:
         super().__init__(
             memory,
@@ -516,8 +554,11 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
             for k, v in (per_task_fusion or {}).items()
         }
         self.context_decoder = context_decoder
+        self.token_policy = token_policy
+        self.token_policy_threshold = float(token_policy_threshold)
         self.last_task: str | None = None
         self.last_gate: dict[str, Any] | None = None
+        self.last_policy: dict[str, Any] | None = None
 
     def set_task(self, task: str | None) -> None:
         self.task = task
@@ -568,6 +609,33 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
             }
             return logits
 
+        if self.token_policy is not None:
+            log_pb = _log_softmax(logits_np)
+            pb = np.exp(log_pb)
+            base_top1 = int(np.argmax(logits_np))
+            mem_top1 = max(dist, key=dist.get)
+            features = {
+                "matched_order": matched_order if matched_order is not None else 0,
+                "base_entropy": float(-np.sum(pb * np.log(np.maximum(pb, 1e-12)))),
+                "memory_entropy": float(-sum(p * math.log(p) for p in dist.values() if p > 0)),
+                "density_ratio": float(sum(
+                    p * (math.log(p) - float(log_pb[tok]))
+                    for tok, p in dist.items() if 0 <= tok < len(log_pb) and p > 0
+                )),
+                "base_top1_prob": float(pb[base_top1]),
+                "memory_top1_prob": float(dist[mem_top1]),
+                "memory_top1_agree_base": bool(mem_top1 == base_top1),
+            }
+            policy_prob = self.token_policy.predict(features)
+            self.last_policy = {
+                "probability": policy_prob,
+                "features": features,
+            }
+            if not self.token_policy.should_apply(
+                features, self.token_policy_threshold
+            ):
+                return logits
+
         gate = self.density_gate.evaluate(
             logits_np, dist, memory_order=matched_order
         )
@@ -612,6 +680,8 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
                 "classifier": self.classifier.state_dict(),
                 "density_gate": self.density_gate.state_dict(),
                 "last_task": self.last_task,
+                "last_policy": self.last_policy,
+                "token_policy_threshold": self.token_policy_threshold,
             }
         )
         return out
@@ -747,6 +817,10 @@ def build_task_conditioned_processor(
         mode=router.get("mode", "expected_kl"),
         threshold=float(router.get("min_log_density_ratio", 0.0)),
     )
+    token_policy = None
+    policy_path = router.get("token_policy_path")
+    if policy_path:
+        token_policy = TokenPlePolicy(policy_path)
     return TaskConditionedNgramLogitProcessor(
         memory,
         scale=fusion.get("scale", 1.0),
@@ -761,6 +835,8 @@ def build_task_conditioned_processor(
         task_scale=router.get("task_scale", {}),
         per_task_fusion=router.get("fusion_per_task", {}),
         context_decoder=None if tokenizer is None else lambda ids: tokenizer.decode(ids),
+        token_policy=token_policy,
+        token_policy_threshold=float(router.get("token_policy_threshold", 0.5)),
     )
 
 
@@ -771,6 +847,7 @@ __all__ = [
     "TaskClassifier",
     "TaskConditionedNgramLogitProcessor",
     "TaskRouter",
+    "TokenPlePolicy",
     "build_task_conditioned_processor",
     "build_task_router_from_config",
     "load_fusion_router_config",

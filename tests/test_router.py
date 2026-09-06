@@ -122,6 +122,25 @@ def test_density_gate_modes_and_persistence() -> None:
         assert cfg["fusion"]["temperature"] == 0.5
 
 
+def test_token_ple_policy_loads_and_predicts() -> None:
+    from qwen35_ple.router import TokenPlePolicy
+
+    data = {
+        "feature_names": ["matched_order", "density_ratio"],
+        "mean": [2.0, 1.0],
+        "std": [1.0, 1.0],
+        "weights": [1.0, 0.5],
+        "bias": -1.0,
+        "metrics": {"n": 10, "auc": 0.9},
+    }
+    policy = TokenPlePolicy(data)
+    features = {"matched_order": 3, "density_ratio": 2.0}
+    prob = policy.predict(features)
+    assert 0.0 <= prob <= 1.0
+    assert policy.should_apply(features, 0.0) is True
+    assert policy.should_apply(features, 1.0) is False
+
+
 def test_task_conditioned_processor_disables_semantic() -> None:
     from qwen35_ple.router import (
         LogDensityRatioGate,

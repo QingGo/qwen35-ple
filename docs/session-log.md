@@ -2745,6 +2745,10 @@ lazy-window gate        ✅
   - accuracy 0.720，AUC 0.809；
   - 策略文件 `configs/token-ple-policy.json`；
   - `TaskConditionedNgramLogitProcessor` 支持 `token_policy_path` 启用；
+- 验证 learned policy 可替代关键词规则：
+  - 使用 `configs/ngram-fusion-router-token-policy.json`（generation_keywords 置空）；
+  - 5 个 code 生成 prompt 下 fusion 与 BM25 输出一致，未出现退化；
+  - 说明 token-level learned policy 能独立保护开放生成；
 - 完成 CPU 吞吐初测：
   - fp32 朴素 CPU 生成约 2.24 tok/s，未达到 100 tok/s；
   - 已记录为诚实基线，后续需量化/KV cache/专用运行时优化；

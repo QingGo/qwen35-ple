@@ -274,6 +274,16 @@
   - 配置 `router.token_policy_path` 即可启用；
   - 这是朝向 Bitter Lesson 的实际一步：用数据学习 token 级 policy，而不是继续写关键词。
 
+**Learned policy 验证（替代关键词规则）**：
+
+- 使用配置 `configs/ngram-fusion-router-token-policy.json`：
+  - `generation_keywords` 置空；
+  - 仅启用 `token_policy_path`；
+- 在 5 个 code 生成 prompt 上重新跑 BM25 / BM25+ngram retrieval / BM25+fusion：
+  - 三者输出与 BM25 一致，未再出现退化；
+- 说明 **learned token policy 可以在没有手工关键词的情况下保护开放生成**；
+- 这是从“写死规则”到“数据学习”的关键一步。
+
 ---
 
 ## 4. CPU 吞吐初测（诚实基线）

@@ -2741,8 +2741,8 @@ lazy-window gate        ✅
   - 复用现有 `TaskConditionedNgramLogitProcessor` + `LogDensityRatioGate`；
   - gate 新增 `matched_order`，为后续 learned token policy 提供特征；
 - 训练并集成 learned token-level PLE policy：
-  - 147 个 per-token 样本，logistic regression；
-  - accuracy 0.803，AUC 0.882；
+  - 460 个 per-token 样本（3 seed），logistic regression；
+  - accuracy 0.720，AUC 0.809；
   - 策略文件 `configs/token-ple-policy.json`；
   - `TaskConditionedNgramLogitProcessor` 支持 `token_policy_path` 启用；
 - 完成 CPU 吞吐初测：

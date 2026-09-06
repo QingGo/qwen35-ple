@@ -261,13 +261,13 @@
   - 训练轻量二分类器 / online bandit；
   - 让模型自己判断当前这一 token 是否适合 PLE 先验。
 
-**已实现第一版 learned token policy**：
+**已实现 learned token policy（3 seed 版）**：
 
-- 从 P0 code/name/number per-token 观测中提取 147 个样本；
+- 从 P0 code/name/number per-token 观测中提取 460 个样本；
 - 训练 logistic regression，预测“PLE fusion 是否提升 next-token logprob”；
 - 指标：
-  - accuracy：0.803
-  - AUC：0.882
+  - accuracy：0.720
+  - AUC：0.809
 - 策略文件：`configs/token-ple-policy.json`；
 - 已集成到 `TaskConditionedNgramLogitProcessor`：
   - 通过 `TokenPlePolicy` 在每个 token 计算 `should_apply`；

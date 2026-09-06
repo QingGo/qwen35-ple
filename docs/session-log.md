@@ -2684,5 +2684,23 @@ lazy-window gate        ✅
   - 缺误差分析、case study、人类评估；
   - 缺效率/延迟/量化/100 tok/s 证据；
   - 缺可复现 artifact/manifest；
-- 最核心审稿风险：**PLE 是否不可替代、是否只是 n-gram/kNN/BM25 的另一种实现**。<｜end▁of▁thinking｜>
+- 最核心审稿风险：**PLE 是否不可替代、是否只是 n-gram/kNN/BM25 的另一种实现**。
+
+
+## Session 106：资源有限现状下的下一步方向
+
+- 新增 `docs/round-106-limited-resource-next-steps.md`；
+- 核心原则：用最小算力换最大信息增益；
+- 下一步优先级：
+  1. Purified OPSD 多 seed + 统计；
+  2. PLE vs BM25 / n-gram / kNN 不可替代性；
+  3. 联合系统评测；
+  4. 理论验证 + 误差分析；
+  5. CPU 100 tok/s + 量化；
+  6. 可复现 artifact；
+- 不建议现在做：大规模预训练、全参微调、RL、大 teacher；
+- 关键决策：
+  - PLE 不可替代则作为主创新；
+  - 否则转向系统/边界论文，主卖点改为 Purified OPSD + 低资源部署；
+  - Purified OPSD 多 seed 稳定正提升则作为第二创新点。<｜end▁of▁thinking｜>
 

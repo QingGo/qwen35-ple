@@ -2728,16 +2728,18 @@ lazy-window gate        ✅
   - Code-output：MoRA 主要收益（-14.25 → -12.29），PLE 无增益；
   - 结论：PLE 不能作为通用系统组件无脑叠加，只适合同域局部续写场景；
 - 完成端到端生成观察：
-  - BM25-only 能从 code corpus 生成正确 sum 函数；
+  - BM25-only 和 BM25+ngram retrieval 都能生成正确 sum 函数；
   - 加 PLE logit fusion 后生成退化、复读上下文；
-  - 说明 PLE 适合 teacher-forced 续写，不适合开放生成直接 logit 修改；
+  - 说明 PLE 检索通道安全，但开放生成不应直接做 logit 修改；
+  - 建议 PLE logit fusion 仅用于低熵续写，开放生成只使用检索/重排；
 - 完成 CPU 吞吐初测：
   - fp32 朴素 CPU 生成约 2.24 tok/s，未达到 100 tok/s；
   - 已记录为诚实基线，后续需量化/KV cache/专用运行时优化；
 - 结论：
-  - PLE 最有价值的用法是叠加在 BM25/RAG 上，作为可审计 logit 先验，尤其适合同域 code 续写；
-  - 在通用 QA/数学/代码问答上 PLE 无增益，不能无脑叠加；
-  - 不建议把 PLE 作为独立普适记忆替代品；
+  - PLE 最有价值的使用方式：
+    - 作为检索/重排通道（安全）；
+    - 作为低熵续写场景的 logit 先验（如 code 局部续写）；
+  - 在开放生成/通用 QA 上不要直接做 PLE logit fusion；
   - Purified OPSD 不是稳定的通用能力提升；
   - 建议转向“低资源可审计混合记忆系统”定位；
 - 新增脚本：

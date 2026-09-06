@@ -172,9 +172,9 @@
 >
 > 因此建议的 PLE 利用方式是：
 >
-> **“统一使用 BM25/RAG 作为检索上下文，同时把 PLE 作为可审计的 logit-level n-gram 先验叠加在 base/BME 之上；用 task router 或 gate 决定 code/number 开启、name 可关闭。”**
+> **“PLE 作为可审计的检索/重排通道通常安全；PLE logit fusion 只在低熵局部续写场景开启，例如 code 续写。在开放生成/通用 QA 中不要直接把 PLE logit fusion 叠加到生成过程，应通过 task router/gate 关闭或只保留检索。”**
 >
-> 这样 PLE 就从“不可替代的独立记忆”转变为“低成本、可审计、可叠加的局部记忆增强组件”，更适合当前证据和低资源系统定位。
+> 这样 PLE 就从“不可替代的独立记忆”转变为“低成本、可审计、可检索、可分场景启用的局部记忆增强组件”，更适合当前证据和低资源系统定位。
 
 ---
 
@@ -206,18 +206,20 @@
 - 查询：“Write a Python function that returns the sum of two numbers.”
 - BM25-only：
   - 生成 `def sum(a, b): return a + b`，正确。
+- BM25 + ngram retrieval（不加 PLE logit fusion）：
+  - 同样生成 `def sum(a, b): return a + b`，正确。
 - BM25 + ngram retrieval + PLE logit fusion：
   - 生成退化为 `def sum(a, b) -> sum:` 并开始复读上下文，明显变差。
 
 **观察**：
 
 - PLE 在 P0 的“teacher-forced 续写 logprob”上有帮助；
-- 但在“自然语言 → 开放代码生成”的端到端 greedy 生成中，直接叠加 PLE 可能伤害生成质量；
-- 当前 PLE 更适合：
-  - 同域低熵续写；
-  - 可审计的局部 n-gram 先验；
-  - 不应该无脑用于开放生成任务。
-- 这解释了为什么需要更强的 task router / gate：**PLE 应在局部续写场景开启，在开放生成任务关闭或只做检索重排，不做 logit 修改**。
+- 在端到端生成中，**PLE 作为检索通道（NgramKeyRetriever）是安全的，不降低生成质量**；
+- 真正造成退化的是 **PLE logit fusion 被用于开放生成**；
+- 因此推荐：
+  - 在开放生成/通用 QA 中：PLE 只参与检索/重排，不做 logit 修改；
+  - 在低熵局部续写中：可以使用 PLE logit fusion；
+  - 需要更强的 task router / gate 来区分这两种模式。
 
 ---
 

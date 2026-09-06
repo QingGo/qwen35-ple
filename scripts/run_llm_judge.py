@@ -49,6 +49,8 @@ def main() -> int:
     scored = []
     for i, row in enumerate(rows):
         reference = row.get("reference") or ""
+        if not reference and row.get("aliases"):
+            reference = row["aliases"][0]
         prompt = (
             "Judge whether the following answer is correct and faithful to the "
             "question. Output only an integer 0-5.\n\n"

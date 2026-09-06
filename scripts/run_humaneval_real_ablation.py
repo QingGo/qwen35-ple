@@ -149,6 +149,7 @@ def main() -> int:
     parser.add_argument("--corpus", default="data/code-corpus.jsonl")
     parser.add_argument("--max-problems", type=int, default=5)
     parser.add_argument("--max-new-tokens", type=int, default=96)
+    parser.add_argument("--conditions", default="base,bm25,base_ple,bm25_ple")
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--chunk-size", type=int, default=600)
     parser.add_argument("--device", default="cuda")
@@ -175,7 +176,10 @@ def main() -> int:
         context = "\n\n".join(chunk_texts[i] for i in hits) if hits else None
 
         row = {"task_id": tid, "entry_point": prob["entry_point"], "prompt": prompt[:80]}
-        for name, ctx in [("base", None), ("bm25", context), ("base_ple", None), ("bm25_ple", context)]:
+        condition_names = [c.strip() for c in args.conditions.split(",") if c.strip()]
+        for name in condition_names:
+            ctx = context if name in {"bm25", "bm25_ple"} else None
+            use_ple = name.endswith("_ple")
             use_ple = name.endswith("_ple")
             completion = _generate(
                 model,
@@ -200,7 +204,8 @@ def main() -> int:
         results[tid] = row
 
     summary = {}
-    for name in ["base", "bm25", "base_ple", "bm25_ple"]:
+    condition_names = [c.strip() for c in args.conditions.split(",") if c.strip()]
+    for name in condition_names:
         passed = sum(1 for r in results.values() if r[name]["passed"])
         reps = [r[name]["repetition_rate"] for r in results.values()]
         summary[name] = {

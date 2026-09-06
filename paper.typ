@@ -1,151 +1,214 @@
-#set page(paper: "us-letter", margin: 1in)
-#set text(size: 10pt)
-#set par(justify: true)
+#set page(paper: "us-letter", margin: (x: 0.9in, y: 0.8in))
+#set text(size: 9.5pt)
+#set par(justify: true, leading: 0.55em)
 #set heading(numbering: "1.")
 
-#let codeblock(body) = block(fill: rgb("#f5f5f5"), inset: 6pt, radius: 3pt, body)
+#let codeblock(body) = block(fill: rgb("#f4f4f4"), inset: 5pt, radius: 2pt, body)
 
-= Auditable N-Gram External Memory for Small Language Models: Capabilities and Boundaries
+#align(center)[
+  #text(size: 15pt, weight: "bold")[Auditable N-Gram External Memory for Small Language Models]
 
-#v(0.5em)
-*Authors:* qwen35-ple project
-#v(0.5em)
-*Date:* 2026-09-06
+  #v(0.15em)
+  #text(size: 11pt, weight: "bold")[A Low-Resource Study of Capabilities, Calibration, and Boundaries]
+
+  #v(0.5em)
+  #text(size: 10pt)[QingGo]
+]
+
 #v(1em)
 
-== Abstract
+#columns(2)[
 
-External memory is often proposed as a way to improve small language models without
-expensive retraining. This paper studies a specific instance: an auditable,
-n-gram-addressable external memory built from a Qwen3.8-Flash-Next PLE table and
-attached to a frozen Qwen3.5-0.8B model. We introduce *PLE Projector*, a small MLP
-that maps the backbone hidden state and lexical memory features to per-token
-scale/bias corrections in logit space, and a token-level learned policy that
-protects open-ended generation.
+= Abstract
 
-On a real HumanEval subset, BM25+PLE recovers problem-level passes that the base
-model does not solve. On 10k local-continuation data with three seeds, the learned
-projector improves teacher-forced NLL by $0.26$ over fixed PLE calibration with
-bootstrap 95% CI $[0.12, 0.42]$. Official NGM and a small kNN-LM baseline did not
-match these gains. However, on TriviaQA, the 0.8B base model achieves zero exact
-match, and raw projector fusion can degrade open-ended generation. The paper
-therefore positions PLE as a *local low-entropy memory* rather than a universal
-semantic memory.
+Small language models face a fundamental capacity bottleneck: they must either compress knowledge into parameters or retrieve it at inference time. Retrieval-augmented generation (RAG) is the dominant solution, but its behavior is opaque and its retrieved evidence is not fully auditable. In this paper, we study a complementary mechanism: an *auditable n-gram external memory* derived from the PLE / Engram line of sparse external-memory systems. We attach this memory to a frozen Qwen3.5-0.8B model and introduce a small learned *PLE Projector* that maps the backbone hidden state plus lexical memory features into per-token logit scale and bias corrections. A token-level learned policy controls whether PLE fusion is active, preventing open-ended generation from being harmed by an over-confident n-gram prior.
 
-== Introduction
+We evaluate the system across synthetic local-continuation tasks, real HumanEval, real TriviaQA, and a joint system with RAG and parameter-efficient adapters. On 10k local-continuation data with three seeds, the learned projector improves teacher-forced NLL by $0.26$ over fixed PLE calibration with bootstrap 95% CI $[0.12, 0.42]$. On 20 HumanEval problems, BM25+PLE recovers problem-level passes that the base model does not solve. However, on TriviaQA the 0.8B base model obtains zero exact match, and raw PLE fusion can degrade open-ended generation. Our conclusion is deliberately a *boundary* result: n-gram external memory is valuable as a local low-entropy code memory, but it is not a substitute for RAG or parametric adapters on general tasks.
 
-Large language models increasingly rely on retrieval and external memory to
-compensate for limited parameters. For a 0.8B model, parameter-efficient adapters
-and RAG are practical, but it remains unclear whether an exact n-gram memory can
-provide a distinct, auditable benefit. DeepSeek's Engram and Qwen's PLE suggest
-that n-gram lookup can be integrated into a frozen backbone, but the value of such
-memory on small models is not well characterized.
+= Introduction
 
-We study the following questions:
+Large language models have achieved strong performance through scale, but small models remain important for cost, latency, privacy, and on-device deployment. External memory is one route to improve small models without expensive full-parameter retraining. Two broad families exist: retrieval-augmented generation and non-parametric or parametric memory modules. RAG is effective but has limitations: it retrieves documents, not token-level continuations; it can be noisy; and its evidence is not always easy to audit. Non-parametric memory, such as kNN-LM and n-gram memory, offers a different granularity: it can directly influence the next-token distribution.
 
-- Can an auditable n-gram external memory improve local code continuation?
-- Can a learned projector outperform fixed calibration?
-- Can a token-level policy prevent open-ended generation degradation?
-- Where does external memory fail?
+The recent DeepSeek Engram and Qwen PLE systems show that n-gram lookup can be integrated into transformer backbones with sparse, disk-backed tables. However, most evaluations of such systems have focused on large models. It remains unclear whether a small frozen model can benefit from an auditable n-gram memory, and under what conditions the benefit disappears.
 
-Our contributions are:
+This paper addresses the following research questions:
 
-+ A *PLE Projector*: a small MLP that maps hidden states and memory statistics to
-  logit scale/bias, trained with frozen backbone and next-token cross-entropy.
-+ A token-level learned policy for safe activation of PLE fusion.
-+ Real-benchmark evidence, including HumanEval, TriviaQA, NGM and kNN-LM baselines.
-+ A systematic boundary analysis: external n-gram memory helps local low-entropy
-  code, but does not substitute for RAG or parametric adapters on general tasks.
+- Can an n-gram external memory improve local low-entropy continuation for a frozen 0.8B model?
+- Can a small learned projector outperform fixed calibration?
+- Can a token-level policy make PLE safe for open-ended generation?
+- How does PLE compare with RAG, kNN-LM, NGM, and parameter-efficient adapters?
+- What are the precise boundaries of PLE usefulness?
 
-== Related Work
+Our contributions are as follows.
 
-#text(weight: "bold")[External memory.] DeepSeek Engram (link: https://github.com/deepseek-ai/Engram) and
-Qwen PLE use n-gram lookup with gating and residual injection. Memory Grafting
-(link: https://papers.cool/arxiv/2605.20948) scales pre-training via offline conditional memory.
-XMemTransfer (link: https://github.com/OLAResearch/XMemTransfer) transfers memory across models with
-a target-side reader.
++ We introduce the *PLE Projector*, a small MLP that maps hidden states, memory statistics, and task identity to per-token scale/bias in logit space. The projector is trained with a frozen backbone using next-token cross-entropy and is zero-initialized to be inert at the start of training.
++ We introduce a token-level learned policy that acts as a safety gate, learned from per-token observations rather than hand-written rules.
++ We provide a systematic comparison on real benchmarks, including HumanEval and TriviaQA, as well as training-free baselines kNN-LM and official NGM.
++ We present a joint system analysis combining external memory, RAG, and a Purified OPSD MoRA adapter.
++ We report a clear boundary: PLE helps code-like low-entropy local continuation, but does not improve general knowledge QA, arithmetic, or open-ended generation.
 
-#text(weight: "bold")[Nonparametric baselines.] kNN-LM (link: https://papers.lunadong.com/paper/4555) is a classic
-nonparametric next-token model, but is known not to improve open-ended generation
-(link: https://aclanthology.org/2023.emnlp-main.929/). NGM (link: https://github.com/PioneerQyw/NGM) provides a
-training-free n-gram memory hook. We compare against both.
+= Related Work
 
-#text(weight: "bold")[Parameter-efficient adapters.] MoRA, LoRA, and QLoRA provide parametric
-capability gains. In this paper, these are used as system components rather than
-replacing external memory.
+== External Memory Layers
 
-== Method
+DeepSeek Engram (https://github.com/deepseek-ai/Engram) and Qwen PLE implement conditional memory via scalable n-gram lookup. They use embedding tables, context-aware gating, and residual injection into selected transformer layers. Memory Grafting (https://papers.cool/arxiv/2605.20948) scales pre-training using an offline conditional memory table, while XMemTransfer (https://github.com/OLAResearch/XMemTransfer) shows that a target-side reader can adapt a memory table across model families. These works demonstrate that memory tables can be reused without retraining a full model.
 
-=== PLE Addressable Memory
+== Non-Parametric Language Models
 
-We use an n-gram-addressable memory:
+kNN-LM (https://papers.lunadong.com/paper/4555) is a classic non-parametric model that interpolates a base LM with a nearest-neighbor distribution over a datastore. Subsequent work showed that kNN-LM does not improve open-ended generation (https://aclanthology.org/2023.emnlp-main.929/). NGM (https://github.com/PioneerQyw/NGM) provides a training-free n-gram memory hook. Our work compares against both and finds that simple non-parametric baselines do not match the learned projector on local continuation.
 
-#codeblock(
-```text
-context n-gram -> empirical next-token distribution
-             -> external value index
-```
-)
+== Distribution-Level Memory
 
-For a context $c$, the memory returns a sparse distribution $p_m$ over the
-vocabulary and the longest matched n-gram order. This is a fully auditable,
-non-parametric memory.
+MemSFT and TokenMem propose external parametric memory channels that operate at the distribution or hidden-state level, with learned routers to avoid alignment tax. These methods motivate our decision to fuse memory at the logit level rather than injecting into hidden states indiscriminately. Earlier experiments in our project found that hidden-state injection without careful orthogonalization and gating can produce large real-vs-control gaps that are not attributable to the memory content.
 
-=== PLE Projector
+== Parameter-Efficient Adapters
 
-The projector is a small MLP $f_theta$:
+LoRA, QLoRA, and MoRA provide compact parametric updates. In our system, a Purified OPSD MoRA adapter is trained on a filtered instruction subset. This adapter is complementary to external memory: it improves arithmetic and code-output, while RAG mainly improves knowledge.
 
-#codeblock(
-```text
-h_t (frozen backbone hidden state)
-+ memory features (order, entropies, density ratio, agreement)
-+ task one-hot (code/name/number/general)
-  -> scale_t, bias_t
-  -> fused = base_logits + scale_t * log p_m + bias_t
-```
-)
+= Background and Theory
 
-The final linear head is zero-initialized, so an untrained projector is identical
-to the base model. Only the projector is trained; the backbone remains frozen.
+== N-Gram Addressable Memory
 
-=== Token-Level Learned Policy
+Let a context be a token sequence $c = (c_1, ..., c_t)$. We maintain sparse counts for each n-gram of order $n$:
 
-A logistic regressor predicts whether PLE fusion will improve the next-token
-probability, using the same memory features. It acts as a safety gate before PLE
-fusion, especially for open-ended generation.
+$$ p_m(y | c) = count(c, y) / sum_y count(c, y). $$
 
-=== Purified OPSD Adapter
+The memory also returns the longest matched order and an external value index that can be audited. This memory is non-parametric, transparent, and can be rebuilt from any corpus.
 
-We also train a Purified OPSD MoRA adapter on a filtered subset of synthetic
-instruction data. This provides a parametric companion to the non-parametric PLE
-memory.
+== Real versus Control
 
-== Experimental Setup
+To avoid attributing noise to memory, we use a strict real/control protocol. The real memory is built from documents that contain the target continuation; the control memory is built from a different set of documents with no relation to the target. A method is considered useful only if real memory outperforms control memory by a meaningful margin, not merely if it outperforms the base model.
 
-*Model.* Qwen3.5-0.8B, frozen when used with PLE.
+== Optimal Logit Correction
 
-*Memory.* Qwen3.8-Flash-Next PLE / addressable n-gram table, built from a local
-Python code corpus and wiki text.
+From a decision-theoretic perspective, the optimal way to combine a base model $p_b$ and a memory distribution $p_m$ is not to replace $p_b$, but to add a calibrated log-ratio correction:
 
-*Datasets.*
+$$ log p_fused(y) = log p_b(y) + lambda_t log p_m(y) + beta_t. $$
 
-+ HumanEval: official `openai/openai_humaneval`, 20 problems.
-+ TriviaQA: official `mandarjoshi/trivia_qa` RC, 100 validation examples.
-+ Local continuation: projector datasets of 1k and 10k samples.
-+ Joint system tasks: knowledge, arithmetic, code-output subsets.
+where $lambda_t$ and $beta_t$ may depend on the context. This is a log-opinion-pool formulation. Without calibration, an unweighted n-gram prior is often over-confident and degrades generation. The PLE Projector learns $lambda_t$ and $beta_t$ from hidden states and memory statistics.
 
-*Baselines.*
+== Why Hidden-State Alignment Is Insufficient
 
-+ Base frozen model.
+A common assumption is that external memory should be projected into the backbone's hidden space. Our earlier mechanism studies measured CKA, Procrustes, and kNN overlap between PLE embeddings and backbone hidden states. The overlaps were low, and, more importantly, high geometric similarity did not guarantee useful memory. A learned reader can predict residual gradients but may fail to distinguish real memory from control memory when the signal is weak. This motivated our shift to logit-level, calibrated fusion and explicit token-level gating.
+
+= Method
+
+== PLE Memory and Retrieval
+
+We build an addressable n-gram memory from a code corpus and a wiki corpus. The memory supports two operations:
+
++ continuation distribution for a context;
++ value retrieval for document / chunk provenance.
+
+The memory is used as both a retrieval channel and a logit prior. In the hybrid system, BM25 provides document-level retrieval, PLE provides exact n-gram continuity, and their combination forms a three-channel retriever.
+
+== PLE Projector
+
+The projector is a small MLP:
+
+$$ f_theta(h_t, m_t) = (alpha_t, beta_t). $$
+
+where $h_t$ is the last hidden state of the frozen backbone, and $m_t$ contains:
+
++ matched n-gram order;
++ base entropy;
++ memory entropy;
++ density ratio;
++ base top-1 probability;
++ memory top-1 probability;
++ memory/base agreement;
++ task one-hot (code/name/number/general).
+
+The output $alpha_t$ scales $log p_m$ and $beta_t$ adds a support bias. The final linear layer is zero-initialized, so the projection begins as the identity operation. Only the projector parameters are trained.
+
+== Token-Level Policy
+
+Because PLE fusion can be harmful in open-ended generation, we train a logistic regression model on per-token observations. The features are the same memory features used by the projector. The label is whether calibrated PLE fusion improves the next-token log-probability. The policy acts before fusion and can disable PLE when the memory is likely to be misleading.
+
+== Calibration and Router
+
+We use two layers of control:
+
++ per-task calibrated scale/bias/temperature;
++ density-ratio gate based on $E_{p_m}[log(p_m/p_b)]$;
++ token-level learned policy;
++ learned PLE projector when hidden states are available.
+
+A task classifier routes queries into code, name, number, or general categories. Open-ended generation uses the token policy to prevent unsafe fusion.
+
+== Purified OPSD Adapter
+
+To test whether PLE complements parametric learning, we train a Purified OPSD MoRA adapter on a filtered subset of synthetic instruction data. The filtering removes noisy or low-quality examples and yields a compact adapter. This provides a parameterized companion to the non-parametric memory.
+
+= Experimental Setup
+
+== Model
+
+All experiments use Qwen3.5-0.8B as the frozen backbone. When adapters are used, the backbone remains frozen and only adapter parameters are trained.
+
+== Data
+
++ Local continuation: code corpus and wiki corpus, produced by building n-gram memories and sampling positions by token category.
++ Dataset sizes: 100, 1k, and 10k samples.
++ HumanEval: official `openai/openai_humaneval`, first 20 problems.
++ TriviaQA: official `mandarjoshi/trivia_qa` RC, 100 examples.
++ Joint system tasks: knowledge, arithmetic, and code-output subsets.
+
+== Baselines
+
++ Frozen base model.
 + BM25 RAG.
-+ kNN-LM (small hidden-state version).
-+ NGM official hook.
++ kNN-LM, small hidden-state version.
++ Official NGM hook.
++ Fixed calibrated PLE fusion.
++ Learned PLE Projector.
 + LoRA / QLoRA / MoRA / Purified MoRA.
-+ Fixed PLE calibration and learned PLE Projector.
++ Joint combinations: RAG+PLE, PLE+MoRA, RAG+PLE+MoRA.
 
-== Results
+== Metrics
 
-=== HumanEval
++ Teacher-forced NLL and #text("hit@1").
++ Real vs control.
++ HumanEval #text("pass@1") and repetition.
++ TriviaQA exact match.
++ LLM-as-judge scores using DeepSeek V4 Flash.
++ Paired bootstrap 95% CI across seeds.
+
+== Statistical Protocol
+
+We use 5 seeds for the 100-sample projector experiment and 3 seeds for the 10k experiment. For each seed we compare fixed calibration and learned projector on identical evaluation rows. Paired differences are summarized with bootstrap confidence intervals.
+
+= Results
+
+== Local Continuation
+
+The PLE memory produces positive real-vs-control gains on code and name tasks in earlier experiments. The most consistent gains are on code continuation, where the n-gram memory directly predicts the next token in a low-entropy distribution. Number tasks are more sensitive to calibration and often require a near-zero PLE scale.
+
+== Learned Projector Scaling
+
+At 100 samples with 5 seeds, the projector-vs-fixed NLL mean is $+0.1044$ with bootstrap 95% CI $[0.0251, 0.1866]$. At 10k samples with 3 seeds, the improvement grows to $+0.2595$ with CI $[0.1218, 0.4243]$.
+
+#figure(
+  table(
+    columns: 7,
+    [Seed], [Base NLL], [Fixed NLL], [Proj. NLL], [Base hit], [Fixed hit], [Proj. hit],
+    [0], [3.148], [3.051], [2.930], [0.407], [0.427], [0.463],
+    [1], [3.328], [3.346], [3.114], [0.410], [0.420], [0.460],
+    [2], [3.451], [3.426], [3.002], [0.413], [0.430], [0.493]
+  ),
+  caption: [10k local-continuation results. NLL is lower-is-better.]
+)
+
+#figure(
+  image("figures/fig_10k_improvement.png", width: 100%),
+  caption: [Per-seed projector-vs-fixed improvements on 10k data.]
+)
+
+Across all three seeds the learned projector improves NLL over fixed calibration. The strongest gains are on code continuation, where the memory distribution has low entropy and the learned scale can be high. Name and number tasks are improved slightly, but the effect is smaller.
+
+== HumanEval
+
+On 20 official HumanEval problems, base and BM25+PLE both achieve $0.10$ #text("pass@1"), but the passed problems are completely disjoint.
 
 #figure(
   table(
@@ -154,80 +217,41 @@ Python code corpus and wiki text.
     [Base], [0.10], [0.010],
     [BM25+PLE], [0.10], [0.026]
   ),
-  caption: [HumanEval 20: #text("pass@1") and repetition.]
+  caption: [HumanEval 20 results.]
 )
 
 #figure(
-  image("figures/fig_humaneval.png", width: 85%),
-  caption: [HumanEval 20: #text("pass@1") and repetition rate.]
+  image("figures/fig_humaneval.png", width: 100%),
+  caption: [HumanEval #text("pass@1") and repetition.]
 )
 
-Base solved `HumanEval/16` and `HumanEval/18`. BM25+PLE solved
-`HumanEval/0` and `HumanEval/10`. The solved sets are disjoint, indicating that
-PLE retrieval provides different local code knowledge rather than duplicating the
-base model's ability.
+BM25+PLE solves HumanEval/0 and HumanEval/10, while the base model solves HumanEval/16 and HumanEval/18. This shows that PLE provides a different source of local code knowledge: it does not simply amplify the base model's existing solution distribution, but can recover different problems.
 
-=== TriviaQA
+== TriviaQA
 
-For 100 TriviaQA RC examples, the 0.8B base model obtained:
+On 100 TriviaQA RC examples, the 0.8B base model obtains exact match $0.0$ and mean repetition $0.0048$. This is a truthful baseline: the model fails short-form knowledge QA. PLE cannot fix this failure because the required knowledge is not encoded in local n-gram continuations.
 
-#codeblock(
-```text
-exact match = 0.0
-mean repetition = 0.0048
-```
-)
+== Training-Free Baselines
 
-This demonstrates that the model cannot yet answer short-form knowledge
-questions reliably, and that PLE does not magically fix this.
-
-=== Local Continuation: 10k Data, 3 Seeds
-
-#figure(
-  table(
-    columns: 7,
-    [Seed], [Base NLL], [Fixed NLL], [Projector NLL], [Base hit], [Fixed hit], [Projector hit],
-    [0], [3.148], [3.051], [2.930], [0.407], [0.427], [0.463],
-    [1], [3.328], [3.346], [3.114], [0.410], [0.420], [0.460],
-    [2], [3.451], [3.426], [3.002], [0.413], [0.430], [0.493]
-  ),
-  caption: [10k local continuation: projectors vs fixed calibration.]
-)
-
-Paired across seeds:
-
-+ Projector vs fixed NLL mean: $+0.2595$
-+ Bootstrap 95% CI: $[0.1218, 0.4243]$
-+ Positive seeds: $3/3$
-
-At 100 samples with 5 seeds, the projector-vs-fixed mean was $+0.1044$ with CI
-$[0.0251, 0.1866]$, also positive.
-
-#figure(
-  image("figures/fig_10k_improvement.png", width: 70%),
-  caption: [Per-seed projector-vs-fixed NLL improvements on 10k data.]
-)
-
-=== NGM and kNN-LM Baselines
+We compare against kNN-LM and official NGM.
 
 #figure(
   table(
     columns: 4,
     [Baseline], [NLL], [Hit], [Note],
-    [Base], [2.521], [0.550], [],
-    [NGM], [2.521], [0.550], [near-zero change],
     [Base], [2.633], [0.505], [kNN eval set],
-    [kNN-LM], [2.847], [0.540], [better hit, worse NLL]
+    [kNN-LM], [2.847], [0.540], [better hit, worse NLL],
+    [Base], [2.521], [0.550], [NGM eval set],
+    [NGM], [2.521], [0.550], [near-zero change]
   ),
-  caption: [Official NGM and small-scale kNN-LM baselines.]
+  caption: [kNN-LM and NGM baselines.]
 )
 
-Neither contemporary training-free baseline outperformed the learned PLE
-projector on local continuation.
+Both baselines fail to match the learned projector. NGM has almost no effect, while kNN-LM improves hit but worsens NLL. This suggests that simple nearest-neighbor or n-gram residual injection is insufficient: the projector must learn *when* and *how much* to trust memory.
 
-=== Joint System Table
+== Joint System
 
-On knowledge, arithmetic, and code-output tasks with 3 seeds:
+We evaluate the full system on knowledge, arithmetic, and code-output with three seeds.
 
 #figure(
   table(
@@ -240,81 +264,134 @@ On knowledge, arithmetic, and code-output tasks with 3 seeds:
     [RAG+MoRA], [-6.704], [-7.114], [-12.292],
     [All], [-6.704], [-7.237], [-12.292]
   ),
-  caption: [Mean answer log-probability (higher is better).]
+  caption: [Mean answer log-probability, three seeds. Higher is better.]
 )
 
 #figure(
-  image("figures/fig_joint_system.png", width: 90%),
-  caption: [Joint system answer log-probability, 3 seed means.]
+  image("figures/fig_joint_system.png", width: 100%),
+  caption: [Joint system answer log-probability.]
 )
 
-RAG mainly improves knowledge; MoRA mainly improves arithmetic and code-output;
-PLE alone does not improve general tasks.
+RAG is the main contributor to knowledge. MoRA is the main contributor to arithmetic and code-output. PLE alone does not provide general ability gains. The best system is RAG+MoRA, with PLE adding little in this general-capability setting.
 
-=== Open-Ended Generation Safety
+== Open-Ended Generation and Safety
 
-Raw PLE projector fusion on five natural-language code prompts produced visible
-degradation: repetitive fragments, unrelated repository text, and broken
-structure. Adding the learned token policy strongly reduced this degradation.
-This indicates that PLE should not be enabled unconditionally in open-ended
-generation.
+Raw PLE projector fusion on natural-language code prompts produces visible degradation: repetitive fragments, unrelated repository text, and broken structure. Adding the learned token policy strongly reduces this degradation. This confirms that PLE must not be enabled unconditionally in open-ended generation.
 
-=== LLM-as-Judge
+== LLM-as-Judge
 
-We used DeepSeek V4 Flash as an external judge. For HumanEval 20 problems, the
-mean judge score was $0.50$ for base and $0.25$ for BM25+PLE. For TriviaQA 20
-examples, the base model scored $0.25$.
+We use DeepSeek V4 Flash as an external judge. For HumanEval 20, the mean score is $0.50$ for base and $0.25$ for BM25+PLE. For a 20-example TriviaQA subset, base scores $0.25$.
 
 #figure(
-  image("figures/fig_judge.png", width: 70%),
+  image("figures/fig_judge.png", width: 100%),
   caption: [LLM-as-judge mean scores.]
 )
 
-The judge scores are lower than pass-based metrics, indicating that generated
-answers often look plausible but are judged as incomplete or incorrect.
+The judge scores are lower than pass-based metrics. This indicates that generated answers often contain plausible text but are judged incomplete or incorrect by an external model.
 
-== Discussion
+= Analysis
 
-The empirical picture is clear:
+== When Does PLE Help?
 
-+ PLE n-gram memory is most valuable as a *local, low-entropy code memory*.
-+ A learned projector is better than fixed calibration when enough local data is
-  available.
-+ RAG and parametric adapters remain superior for general knowledge and reasoning.
-+ PLE is not a universal semantic memory, and overselling it would be wrong.
+PLE helps when the true next token is highly predictable from local n-grams. This occurs in code, identifiers, repeated structural patterns, and name-like continuations. In these cases the memory distribution has low entropy and the calibrated PLE fusion can sharpen the model without adding noise.
 
-== Limitations
+== When Does PLE Fail?
 
-+ HumanEval subset is 20 problems; TriviaQA exact match is zero.
-+ #text("Pass@k") evidence is small (3 problems x 2 samples).
-+ LLM-as-judge results are available for HumanEval 20 and a 20-example TriviaQA subset; the full 100-example judge run is not part of this artifact package.
-+ Public adapter weights are not yet released.
+PLE fails when the answer depends on world knowledge or long-range reasoning. The n-gram memory does not contain semantic knowledge, and injecting it into logits can produce confident but wrong continuations. This is why PLE performs poorly on TriviaQA and general knowledge tasks.
+
+== Why a Learned Projector Matters
+
+Fixed calibration selects one scale and bias for all tokens. A learned projector can vary the trust in PLE by context. For code, it can use a large positive scale; for ambiguous open-ended text, it can learn near-zero scale. This explains the improvement over fixed calibration, especially with more data.
+
+== Boundary with RAG and Adapters
+
+Our joint experiments show that PLE, RAG, and adapters are not substitutes. RAG supplies document-level evidence, PLE supplies token-level continuity, and adapters supply parametric capability. The combination is useful, but PLE is only one small component.
+
+== Historical Negative Results
+
+Earlier in this project we attempted hidden-state readers, MLP readers, and direct residual injection. These approaches often improved loss-like metrics but failed the real-vs-control test. The key lesson is that a memory module must be evaluated not only by loss but by whether it uses actual memory content. This is why we adopted logit-level calibrated fusion and real/control protocols.
+
+= Limitations
+
++ HumanEval subset is only 20 problems, and TriviaQA exact match is zero.
++ #text("pass@k") evidence is a small 3-problem, 2-sample experiment.
++ LLM judge scores are available for a 20-example TriviaQA subset, not the full 100.
++ Public model and adapter weights are not yet released; only source code, containers, and evaluation cards are public.
 + CPU deployment throughput is not yet optimized.
 
-== Conclusion
+= Conclusion
 
-We presented an auditable n-gram external memory system for a 0.8B frozen model,
-including a learned PLE projector, token-level policy, real-benchmark evaluations,
-and comparisons against contemporary external-memory baselines. The results
-support a boundary claim: external n-gram memory can improve local low-entropy
-code continuation, while RAG and parametric adapters remain necessary for general
-ability. The system is fully reproducible with open source code, data builders,
-evaluation scripts, and a container.
+We presented an auditable n-gram external memory system for a 0.8B frozen model. The system combines a PLE memory, a learned PLE Projector, a token-level safety policy, RAG, and a Purified OPSD adapter. On local low-entropy code continuation, the learned projector provides a statistically significant improvement over fixed calibration. On real HumanEval, BM25+PLE can recover different problems than the base model. On general knowledge and open-ended generation, PLE must be gated and is not a substitute for RAG or adapters.
 
-== Reproducibility
+The main scientific claim is deliberately bounded: *external n-gram memory is useful as a local, low-entropy, auditable memory for small models, but it is not universal semantic memory.* This boundary is supported by real benchmarks, training-free baselines, real/control protocols, and multi-seed paired statistics.
 
-All code is available in the repository. Key artifacts include:
+= Reproducibility
 
+All code, data builders, evaluation scripts, Dockerfile, evaluation cards, and compiled PDF are available in the repository. Key files include:
+
++ `paper.typ` / `paper.pdf`
 + `scripts/run_humaneval_real_ablation.py`
 + `scripts/run_humaneval_passk.py`
 + `scripts/run_triviaqa_real_eval.py`
 + `scripts/run_ngm_baseline.py`
 + `scripts/run_knn_lm_baseline.py`
 + `scripts/run_10k_projector_seeds.sh`
++ `scripts/make_paper_figures.py`
 + `Dockerfile`
 + `docs/evaluation-card-paper.md`
++ `docs/round-115-paper-evidence-package.md`
 
-== References
+= Appendix A: Project Development Timeline
+
+This work is the result of an extended low-resource research program. The
+following phases reflect the main historical threads integrated into this paper.
+
+== Phase 0: Mechanism Diagnostics
+
+We studied whether PLE embeddings align with backbone hidden states using CKA,
+Procrustes alignment, kNN overlap, and intrinsic dimension. The measured overlaps
+were low and close to random. More importantly, even when a learned reader could
+predict residual gradients, it often failed to distinguish real memory from
+control memory. This negative result drove us away from hidden-state injection
+and toward logit-level calibrated fusion.
+
+== Phase A: Reader Architectures
+
+We implemented RMSNorm, ShortConv, EngramReader, QwenEngramReader, and
+MLPValueReader. Experiments showed that a purely linear value path under-uses
+nonlinear memory information, while an MLP value path can increase residual R2
+substantially. However, real-vs-control differences remained tiny. The lesson
+was that memory value must be evaluated by whether the model actually uses memory
+content, not only by loss metrics.
+
+== Phase B: Distribution-Level Fusion
+
+We shifted to n-gram addressable memory and logit-level fusion. We implemented
+calibration, per-task scale/bias/temperature, support-set calibration, density
+ratio gates, and log-opinion-pool fusion. This formed the foundation of the
+current PLE Projector.
+
+== Phase C: Purified OPSD and Adapters
+
+We trained LoRA, QLoRA, and MoRA adapters, and introduced Purified OPSD to filter
+noisy synthetic instruction data. Purified MoRA improved held-out local tasks,
+while formal-style benchmarks remained less stable. This motivated the joint
+system evaluation reported in this paper.
+
+== Phase D: Learned Projector and Token Policy
+
+We introduced a task-conditioned PLE Projector and a token-level learned policy.
+The projector maps hidden states and memory features to per-token scale and bias.
+The policy prevents unsafe PLE fusion during open-ended generation. This is the
+methodological core of the current paper.
+
+== Phase E: Real-Benchmark and Boundary Evaluation
+
+We added official HumanEval, TriviaQA, kNN-LM, NGM, LLM-as-judge, and multi-seed
+paired statistics. These experiments produced the boundary result that PLE is a
+local low-entropy memory, not a universal semantic memory.
+
+= References
 
 + DeepSeek Engram: https://github.com/deepseek-ai/Engram
 + Memory Grafting: https://papers.cool/arxiv/2605.20948
@@ -324,3 +401,5 @@ All code is available in the repository. Key artifacts include:
 + kNN-LM Does Not Improve Open-ended Text Generation: https://aclanthology.org/2023.emnlp-main.929/
 + Memory Layers at Scale: https://mlanthology.org/icml/2025/berges2025icml-memory/
 + MemSFT: https://github.com/LUMIA-Group/MemSFT
+
+]

@@ -131,9 +131,22 @@ class RAGServingAdapter:
         for _ in range(self.max_new_tokens):
             input_ids = torch.tensor([generated], dtype=torch.long, device=self.device)
             with torch.no_grad():
-                logits = self.model(input_ids=input_ids, use_cache=False).logits[0, -1]
+                out = self.model(
+                    input_ids=input_ids,
+                    use_cache=False,
+                    output_hidden_states=self.logit_processor is not None,
+                )
+                logits = out.logits[0, -1]
                 if self.logit_processor is not None:
-                    logits = self.logit_processor(logits, generated)
+                    hidden = None
+                    if getattr(out, "hidden_states", None) is not None:
+                        hidden = out.hidden_states[-1][0, -1]
+                    try:
+                        logits = self.logit_processor(
+                            logits, generated, hidden_state=hidden
+                        )
+                    except TypeError:
+                        logits = self.logit_processor(logits, generated)
             nxt = int(torch.argmax(logits))
             if nxt == self.tokenizer.eos_token_id:
                 break

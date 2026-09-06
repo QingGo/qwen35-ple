@@ -2787,3 +2787,30 @@ lazy-window gate        ✅
   - M2：1M+ 数据规模；
   - M3：真实 HumanEval/GSM8K 子集；
   - M4：CPU/量化和 serving。
+
+## Session 109：Phase A PLE Projector v0
+
+- 实现 `src/qwen35_ple/projector.py`：
+  - 输入：backbone hidden state + 7 个 memory 特征；
+  - 输出：每 token 的 PLE `scale / bias`；
+  - 零初始化 final head，未训练时等价于 base；
+  - 支持 JSON 持久化。
+- 实现训练脚本 `scripts/train_ple_projector.py`：
+  - 冻结 backbone；
+  - 以 next-token cross-entropy 训练 projector；
+  - 对比 base / fixed calibration / learned projector。
+- Serving 集成：
+  - `TaskConditionedNgramLogitProcessor` 支持 `projector` + `hidden_state`；
+  - `RAGServingAdapter._generate` 输出 hidden state 并传给 processor；
+  - 配置支持 `projector_path`。
+- Seed0 v0 实验（100 samples / 100 steps）：
+  - 总体：base NLL 2.5109 → fixed 2.0941 → projector 2.1297；
+  - hit：base 0.480 → fixed 0.547 → projector 0.600；
+  - code：projector 明显优于 fixed（NLL 1.48 vs 1.63；hit 0.73 vs 0.67）；
+  - name：projector 概率变差（NLL 5.76 vs 4.91），但 hit 略升；
+  - 结论：v0 证明“可学习条件化 PLE 投影”可行，但尚未全面超越全局标定。
+- 新增：
+  - `tests/test_projector.py`
+  - router / adapter hidden-state 通路测试
+  - `docs/round-109-ple-projector-v0.md`
+- 下一步：3 seed paired、扩大数据、任务条件、开放生成保护验证。

@@ -328,3 +328,34 @@ def test_task_conditioned_processor_uses_per_task_fusion() -> None:
     out = proc(logits, [1, 2])
     assert "per_task_fusion" in proc.state_dict()
     assert out[3] >= 5.0
+
+
+class _StubProjector:
+    """Minimal projector stub used to test the hidden-state integration path."""
+
+    def predict_np(self, hidden, features):
+        return 3.0, -0.2
+
+
+def test_task_conditioned_processor_uses_projector_with_hidden_state() -> None:
+    from qwen35_ple.router import (
+        LogDensityRatioGate,
+        TaskConditionedNgramLogitProcessor,
+    )
+
+    proc = TaskConditionedNgramLogitProcessor(
+        _memory(),
+        scale=1.0,
+        bias=3.0,
+        temperature=1.0,
+        task="code",
+        density_gate=LogDensityRatioGate(mode="expected_kl", threshold=0.0),
+        projector=_StubProjector(),
+    )
+    logits = np.zeros(10, dtype=np.float32)
+    out = proc(logits, [1, 2], hidden_state=np.zeros(4, dtype=np.float32))
+    assert out[3] != 0.0
+    assert proc.last_projector is not None
+    assert proc.last_projector["active"] is True
+    assert proc.last_projector["scale"] == 3.0
+    assert proc.last_projector["bias"] == -0.2

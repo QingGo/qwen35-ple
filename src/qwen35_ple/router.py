@@ -534,6 +534,7 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
         context_decoder: Callable[[Any], str] | None = None,
         token_policy: TokenPlePolicy | None = None,
         token_policy_threshold: float = 0.5,
+        projector: Any | None = None,
     ) -> None:
         super().__init__(
             memory,
@@ -556,6 +557,8 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
         self.context_decoder = context_decoder
         self.token_policy = token_policy
         self.token_policy_threshold = float(token_policy_threshold)
+        self.projector = projector
+        self.last_projector: dict[str, Any] | None = None
         self.last_task: str | None = None
         self.last_gate: dict[str, Any] | None = None
         self.last_policy: dict[str, Any] | None = None
@@ -570,7 +573,7 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
             return self.classifier.classify(self.context_decoder(context_ids))
         return self.default_task
 
-    def __call__(self, logits: Any, context_ids: Any) -> Any:
+    def __call__(self, logits: Any, context_ids: Any, *, hidden_state: Any = None) -> Any:
         if not self.enabled:
             return logits
 
@@ -643,16 +646,32 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
         if not gate["active"]:
             return logits
 
-        task_params = self.per_task_fusion.get(task)
-        if task_params is not None:
-            scale = float(task_params.get("scale", self.scale))
-            bias = float(task_params.get("bias", self.bias))
-            temperature = float(task_params.get("temperature", self.temperature))
+        temperature = self.temperature
+        if self.projector is not None and hidden_state is not None:
+            feature_dict = _memory_feature_dict(logits_np, dist, matched_order)
+            try:
+                scale, bias = self.projector.predict_np(hidden_state, feature_dict)
+            except (AttributeError, RuntimeError, TypeError, ValueError) as exc:  # pragma: no cover - defensive fallback
+                scale = self.scale
+                bias = self.bias
+                self.last_projector = {"active": False, "error": str(exc)}
+            else:
+                self.last_projector = {
+                    "active": True,
+                    "scale": float(scale),
+                    "bias": float(bias),
+                    "features": feature_dict,
+                }
         else:
-            factor = self.task_scale.get(task, 1.0)
-            scale = self.scale * factor
-            bias = self.bias
-            temperature = self.temperature
+            task_params = self.per_task_fusion.get(task)
+            if task_params is not None:
+                scale = float(task_params.get("scale", self.scale))
+                bias = float(task_params.get("bias", self.bias))
+                temperature = float(task_params.get("temperature", self.temperature))
+            else:
+                factor = self.task_scale.get(task, 1.0)
+                scale = self.scale * factor
+                bias = self.bias
         fused_np = fuse_ngram_logits(
             logits_np,
             dist,
@@ -681,6 +700,7 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
                 "density_gate": self.density_gate.state_dict(),
                 "last_task": self.last_task,
                 "last_policy": self.last_policy,
+                "last_projector": self.last_projector,
                 "token_policy_threshold": self.token_policy_threshold,
             }
         )
@@ -821,6 +841,12 @@ def build_task_conditioned_processor(
     policy_path = router.get("token_policy_path")
     if policy_path:
         token_policy = TokenPlePolicy(policy_path)
+    projector = None
+    projector_path = router.get("projector_path")
+    if projector_path:
+        from qwen35_ple.projector import load_projector
+
+        projector = load_projector(projector_path)
     return TaskConditionedNgramLogitProcessor(
         memory,
         scale=fusion.get("scale", 1.0),
@@ -837,7 +863,32 @@ def build_task_conditioned_processor(
         context_decoder=None if tokenizer is None else lambda ids: tokenizer.decode(ids),
         token_policy=token_policy,
         token_policy_threshold=float(router.get("token_policy_threshold", 0.5)),
+        projector=projector,
     )
+
+
+def _memory_feature_dict(
+    logits_np: np.ndarray,
+    dist: dict[int, float],
+    matched_order: int | None,
+) -> dict[str, float]:
+    """Build the scalar feature dict consumed by an optional PLE projector."""
+    log_pb = _log_softmax(logits_np)
+    pb = np.exp(log_pb)
+    base_top1 = int(np.argmax(logits_np))
+    mem_top1 = max(dist, key=dist.get)
+    return {
+        "matched_order": matched_order if matched_order is not None else 0,
+        "base_entropy": float(-np.sum(pb * np.log(np.maximum(pb, 1e-12)))),
+        "memory_entropy": float(-sum(p * math.log(p) for p in dist.values() if p > 0)),
+        "density_ratio": float(sum(
+            p * (math.log(p) - float(log_pb[tok]))
+            for tok, p in dist.items() if 0 <= tok < len(log_pb) and p > 0
+        )),
+        "base_top1_prob": float(pb[base_top1]),
+        "memory_top1_prob": float(dist[mem_top1]),
+        "memory_top1_agree_base": bool(mem_top1 == base_top1),
+    }
 
 
 __all__ = [

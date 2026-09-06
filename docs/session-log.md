@@ -2717,11 +2717,17 @@ lazy-window gate        ✅
   - Code：PLE 均值 +0.343 > BM25 +0.194 > n-gram +0.184，但 seed2 中 BM25 反超；
   - Name：BM25 三 seed 均大幅领先（均值 +0.893），PLE 仅 +0.085；
   - Number：BM25 三 seed 均领先（均值 +0.134），PLE 仅 +0.003，但 PLE 稳定强于 n-gram retrieval；
+- 完成 BM25+PLE 混合测试（3 seed）：
+  - Code：混合均值约 +0.355，强于 PLE +0.331 和 BM25 +0.166；
+  - Name：混合与 BM25 接近（+0.859 vs +0.893），远高于 PLE 单独；
+  - Number：混合 +0.098，优于 PLE 单独 +0.003，弱于 BM25 +0.134；
+  - 结论：PLE 最合理用法是叠加在 BM25/RAG 上，而不是替代 RAG；
 - 完成 CPU 吞吐初测：
   - fp32 朴素 CPU 生成约 2.24 tok/s，未达到 100 tok/s；
   - 已记录为诚实基线，后续需量化/KV cache/专用运行时优化；
 - 结论：
-  - PLE 只在部分 code 任务上有优势，不是普适不可替代；
+  - PLE 最有价值的用法是叠加在 BM25/RAG 上，作为可审计 logit 先验，尤其适合 code；
+  - 不建议把 PLE 作为独立普适记忆替代品；
   - Purified OPSD 不是稳定的通用能力提升；
   - 建议转向“低资源可审计混合记忆系统”定位；
 - 新增脚本：

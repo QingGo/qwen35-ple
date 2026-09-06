@@ -179,10 +179,10 @@ def _aggregate(entries: list[dict]) -> dict:
     if not entries:
         return {}
     out: dict[str, float] = {}
-    for key in ["base_logprob", "bm25_logprob", "ngram_retrieval_logprob", "ple_logprob", "ngram_raw_logprob"]:
+    for key in ["base_logprob", "bm25_logprob", "ngram_retrieval_logprob", "ple_logprob", "bm25_ple_logprob", "ngram_raw_logprob"]:
         vals = [e[key] for e in entries if e.get(key) is not None and not math.isinf(e[key])]
         out[key] = float(np.mean(vals)) if vals else None
-    for key in ["base_hit", "bm25_hit", "ngram_retrieval_hit", "ple_hit", "ngram_raw_hit"]:
+    for key in ["base_hit", "bm25_hit", "ngram_retrieval_hit", "ple_hit", "bm25_ple_hit", "ngram_raw_hit"]:
         vals = [1.0 if e.get(key) else 0.0 for e in entries]
         out[key] = float(np.mean(vals)) if vals else None
     out["n"] = len(entries)
@@ -209,6 +209,21 @@ def _aggregate(entries: list[dict]) -> dict:
     out["delta_ple_vs_ngram_retrieval"] = (
         out["ple_logprob"] - out["ngram_retrieval_logprob"]
         if out.get("ple_logprob") is not None and out.get("ngram_retrieval_logprob") is not None
+        else None
+    )
+    out["delta_bm25_ple_vs_base"] = (
+        out["bm25_ple_logprob"] - out["base_logprob"]
+        if out.get("bm25_ple_logprob") is not None and out.get("base_logprob") is not None
+        else None
+    )
+    out["delta_bm25_ple_vs_bm25"] = (
+        out["bm25_ple_logprob"] - out["bm25_logprob"]
+        if out.get("bm25_ple_logprob") is not None and out.get("bm25_logprob") is not None
+        else None
+    )
+    out["delta_bm25_ple_vs_ple"] = (
+        out["bm25_ple_logprob"] - out["ple_logprob"]
+        if out.get("bm25_ple_logprob") is not None and out.get("ple_logprob") is not None
         else None
     )
     return out
@@ -342,6 +357,20 @@ def evaluate_task(
             ple_lp = base_lp
             ple_hit = base_hit
 
+        # BM25 + PLE: use BM25 context to condition the base model, then apply
+        # the calibrated PLE n-gram prior on top of the resulting logits.
+        bm25_ple_lp = bm25_lp
+        bm25_ple_hit = bm25_hit
+        if dist and bm25_ids:
+            ids = torch.tensor([bm25_ids + context], dtype=torch.long, device=device)
+            with torch.no_grad():
+                logits = model(input_ids=ids, use_cache=False).logits[0, -1].float().cpu().numpy()
+            fused = fuse_ngram_logits(
+                logits, dist, scale=scale, bias=bias, temperature=global_temp
+            )
+            bm25_ple_lp = _logprob(fused, target)
+            bm25_ple_hit = bool(int(np.argmax(fused)) == target)
+
         # Raw n-gram memory distribution (no base model).
         if dist:
             ngram_raw_lp = float(math.log(max(dist.get(target, 0.0), 1e-12)))
@@ -360,6 +389,8 @@ def evaluate_task(
                 "ngram_retrieval_hit": ngram_ctx_hit,
                 "ple_logprob": ple_lp,
                 "ple_hit": ple_hit,
+                "bm25_ple_logprob": bm25_ple_lp,
+                "bm25_ple_hit": bm25_ple_hit,
                 "ngram_raw_logprob": ngram_raw_lp,
                 "ngram_raw_hit": ngram_raw_hit,
             }
@@ -494,8 +525,10 @@ def main() -> int:
         )
         print(json.dumps({k: results[task_name].get(k) for k in [
             "n", "base_logprob", "bm25_logprob", "ngram_retrieval_logprob",
-            "ple_logprob", "delta_bm25_vs_base", "delta_ngram_retrieval_vs_base",
-            "delta_ple_vs_base", "delta_ple_vs_bm25", "delta_ple_vs_ngram_retrieval",
+            "ple_logprob", "bm25_ple_logprob", "delta_bm25_vs_base",
+            "delta_ngram_retrieval_vs_base", "delta_ple_vs_base",
+            "delta_ple_vs_bm25", "delta_ple_vs_ngram_retrieval",
+            "delta_bm25_ple_vs_base", "delta_bm25_ple_vs_bm25", "delta_bm25_ple_vs_ple",
         ]}, ensure_ascii=False), flush=True)
 
     out = Path(args.output)

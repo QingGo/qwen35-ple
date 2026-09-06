@@ -199,6 +199,26 @@
 - PLE 在“通用 QA/数学/代码问答”上基本无增益，甚至在 arithmetic 上小幅拉低；
 - 这进一步说明：**PLE 不能作为通用系统增强组件无脑叠加；它的价值局限于同域、局部、低熵的续写场景（如 code corpus 上的 P0 实验）**。
 
+### 3.8 端到端生成观察（code corpus）
+
+在 code corpus 上做了一次简单生成对比：
+
+- 查询：“Write a Python function that returns the sum of two numbers.”
+- BM25-only：
+  - 生成 `def sum(a, b): return a + b`，正确。
+- BM25 + ngram retrieval + PLE logit fusion：
+  - 生成退化为 `def sum(a, b) -> sum:` 并开始复读上下文，明显变差。
+
+**观察**：
+
+- PLE 在 P0 的“teacher-forced 续写 logprob”上有帮助；
+- 但在“自然语言 → 开放代码生成”的端到端 greedy 生成中，直接叠加 PLE 可能伤害生成质量；
+- 当前 PLE 更适合：
+  - 同域低熵续写；
+  - 可审计的局部 n-gram 先验；
+  - 不应该无脑用于开放生成任务。
+- 这解释了为什么需要更强的 task router / gate：**PLE 应在局部续写场景开启，在开放生成任务关闭或只做检索重排，不做 logit 修改**。
+
 ---
 
 ## 4. CPU 吞吐初测（诚实基线）

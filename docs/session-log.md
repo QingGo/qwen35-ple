@@ -2727,6 +2727,10 @@ lazy-window gate        ✅
   - Arithmetic：MoRA 是主要收益（-7.37 → -7.11），PLE 反而略降；
   - Code-output：MoRA 主要收益（-14.25 → -12.29），PLE 无增益；
   - 结论：PLE 不能作为通用系统组件无脑叠加，只适合同域局部续写场景；
+- 完成端到端生成观察：
+  - BM25-only 能从 code corpus 生成正确 sum 函数；
+  - 加 PLE logit fusion 后生成退化、复读上下文；
+  - 说明 PLE 适合 teacher-forced 续写，不适合开放生成直接 logit 修改；
 - 完成 CPU 吞吐初测：
   - fp32 朴素 CPU 生成约 2.24 tok/s，未达到 100 tok/s；
   - 已记录为诚实基线，后续需量化/KV cache/专用运行时优化；

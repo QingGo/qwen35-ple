@@ -112,6 +112,12 @@ def _load_dataset(path: str) -> list[dict]:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            dist = obj.get("dist") or {}
+            obj["dist"] = {int(k): float(v) for k, v in dist.items()}
+            obj["context"] = [int(x) for x in obj.get("context", [])]
+            obj["target"] = int(obj.get("target", 0))
+            if obj.get("order") is not None:
+                obj["order"] = int(obj["order"])
             rows.append(obj)
     return rows
 

@@ -2704,3 +2704,27 @@ lazy-window gate        ✅
   - 否则转向系统/边界论文，主卖点改为 Purified OPSD + 低资源部署；
   - Purified OPSD 多 seed 稳定正提升则作为第二创新点。<｜end▁of▁thinking｜>
 
+## Session 107：有限资源实验执行（多 seed + PLE 基线）
+
+- 完成 Purified OPSD MoRA-80 多 seed：
+  - 新增 seed1 / seed2；
+  - CAP-1 held-out 39 条三个 seed 均正且显著：+0.085 / +0.099 / +0.097；
+  - 正式风格基准不稳定：seed0 正、seed1/seed2 在 GSM/MATH 显著回退；
+- 完成 Purified OPSD 下 LoRA / QLoRA / MoRA 对照：
+  - CAP-1 全部正：LoRA +0.111、QLoRA +0.100、MoRA +0.085~0.099；
+  - 正式基准仅 MoRA seed0 正，LoRA/QLoRA 明显回退；
+- 完成 PLE 不可替代性基线：
+  - Code：PLE +0.528 > BM25 +0.290 > n-gram retrieval +0.261；
+  - Name：BM25 +0.721 远超 PLE +0.066；
+  - Number：BM25 +0.154 > PLE +0.009 > n-gram retrieval -0.338；
+- 结论：
+  - PLE 只在 code 类任务上表现出不可替代性；
+  - Purified OPSD 不是稳定的通用能力提升；
+  - 建议转向“低资源可审计混合记忆系统”定位；
+- 新增脚本：
+  - `scripts/run_cap1_formal_eval.py`
+  - `scripts/analyze_seed_peritem.py`
+  - `scripts/run_ple_baseline_ablation.py`
+  - `scripts/run_purified_seed_evals.sh`
+- 文档：`docs/round-107-limited-resource-experiments.md`；
+- 下一步：code 类多 seed paired、真实基准子集、CPU 100 tok/s、误差分析。

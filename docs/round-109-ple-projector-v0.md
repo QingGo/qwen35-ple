@@ -44,7 +44,7 @@
   - `projector`：learned per-token scale/bias。
 - 输出：
   - `outputs/ple-projector-v0-seed0.json` 实验报告；
-  - `outputs/ple-projector-v0.json` 训练好的 projector artifact。
+  - `outputs/ple-projector-v0-seed0.projector.json` 训练好的 projector artifact（本次修复后的命名；旧版为 `outputs/ple-projector-v0.json`）。
 
 ### Serving 集成
 
@@ -120,5 +120,5 @@ scripts/train_ple_projector.py
 tests/test_projector.py
 docs/round-109-ple-projector-v0.md
 outputs/ple-projector-v0-seed0.json
-outputs/ple-projector-v0.json
+outputs/ple-projector-v0-seed0.projector.json
 ```

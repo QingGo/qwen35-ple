@@ -526,6 +526,8 @@ def main() -> int:
     parser.add_argument("--max-per-doc-code", type=int, default=6)
     parser.add_argument("--max-per-doc-wiki", type=int, default=4)
     parser.add_argument("--max-samples", type=int, default=120)
+    parser.add_argument("--max-train-samples", type=int, default=None)
+    parser.add_argument("--max-eval-samples", type=int, default=None)
     parser.add_argument("--max-order", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--steps", type=int, default=200)
@@ -561,6 +563,10 @@ def main() -> int:
         n_train = int(len(rows) * args.train_frac)
         train_samples = rows[:n_train]
         eval_samples = rows[n_train:]
+        if args.max_train_samples is not None:
+            train_samples = train_samples[: args.max_train_samples]
+        if args.max_eval_samples is not None:
+            eval_samples = eval_samples[: args.max_eval_samples]
         print(
             f"[ple-projector] dataset={args.dataset} rows={len(rows)} "
             f"train={len(train_samples)} eval={len(eval_samples)}",

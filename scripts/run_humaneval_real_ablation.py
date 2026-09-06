@@ -115,6 +115,16 @@ def _generate(
     return tokenizer.decode(generated[len(input_ids):], skip_special_tokens=True)
 
 
+def _repetition_rate(text: str, n: int = 3) -> float:
+    tokens = text.split()
+    if len(tokens) < n + 1:
+        return 0.0
+    grams = [" ".join(tokens[i : i + n]) for i in range(len(tokens) - n + 1)]
+    if not grams:
+        return 0.0
+    return 1.0 - len(set(grams)) / len(grams)
+
+
 def _run_test(prompt: str, completion: str, test_code: str) -> bool:
     code = prompt + completion
     script = code + "\n" + test_code
@@ -181,6 +191,7 @@ def main() -> int:
                 "completion": completion,
                 "passed": passed,
                 "length": len(completion),
+                "repetition_rate": _repetition_rate(completion),
             }
             print(
                 f"[humaneval] {tid} {name} pass={passed} len={len(completion)}",
@@ -191,10 +202,12 @@ def main() -> int:
     summary = {}
     for name in ["base", "bm25", "base_ple", "bm25_ple"]:
         passed = sum(1 for r in results.values() if r[name]["passed"])
+        reps = [r[name]["repetition_rate"] for r in results.values()]
         summary[name] = {
             "n": len(results),
             "pass@1": passed / max(1, len(results)),
             "passed": passed,
+            "mean_repetition_rate": float(sum(reps) / len(reps)) if reps else 0.0,
         }
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)

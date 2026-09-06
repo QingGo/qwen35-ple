@@ -34,7 +34,15 @@ def _paired_ttest(deltas: np.ndarray) -> dict[str, float]:
     else:
         t = mean / se
     p = 2.0 * (1.0 - _normal_cdf(abs(t)))
-    return {"t": t, "p": p, "mean": mean, "n": len(deltas), "se": se}
+    low, high = _bootstrap_ci(deltas)
+    return {
+        "t": t,
+        "p": p,
+        "mean": mean,
+        "n": len(deltas),
+        "se": se,
+        "ci95": [low, high],
+    }
 
 
 def _normal_cdf(x: float) -> float:
@@ -48,6 +56,22 @@ def _normal_cdf(x: float) -> float:
         + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429)))
     )
     return 1.0 - p
+
+
+def _bootstrap_ci(
+    values: np.ndarray,
+    *,
+    n_iter: int = 2000,
+    seed: int = 0,
+) -> tuple[float, float]:
+    if len(values) < 2:
+        return (float(np.mean(values)), float(np.mean(values)))
+    rng = np.random.default_rng(seed)
+    means = []
+    for _ in range(n_iter):
+        idx = rng.integers(0, len(values), size=len(values))
+        means.append(float(np.mean(values[idx])))
+    return (float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5)))
 
 
 def _aggregate_rows(rows: list[dict]) -> dict:
@@ -119,6 +143,7 @@ def main() -> int:
     proj_means = [s["aggregate"]["proj_vs_fixed_nll"]["mean"] for s in seeds]
     fixed_means = [s["aggregate"]["fixed_vs_base_nll"]["mean"] for s in seeds]
     base_means = [s["aggregate"]["proj_vs_base_nll"]["mean"] for s in seeds]
+    ci_low, ci_high = _bootstrap_ci(np.asarray(proj_means, dtype=np.float64))
     summary = {
         "n_seeds": len(seeds),
         "fixed_vs_base_nll_mean": float(np.mean(fixed_means)),
@@ -127,6 +152,7 @@ def main() -> int:
         "proj_vs_fixed_std": (
             float(np.std(proj_means, ddof=1)) if len(proj_means) > 1 else 0.0
         ),
+        "proj_vs_fixed_ci95": [ci_low, ci_high],
         "proj_vs_fixed_positive_seeds": int(np.sum(np.asarray(proj_means) > 0)),
         "seeds": seeds,
     }

@@ -2861,3 +2861,28 @@ lazy-window gate        ✅
   4. 5 seed + bootstrap；
   5. 10k 训练；
   6. 开放生成质量指标与 public artifact。
+
+## Session 112：P0/P1 —— 真实基准、kNN 基线、5 seed 统计、联合系统表
+
+- P0 真实 HumanEval：
+  - 下载官方 `openai/openai_humaneval` 前 5 题；
+  - base pass@1=0.2，bm25=0，base_ple=0，bm25_ple=0.2；
+  - BM25+PLE 恢复了一个真实 HumanEval 通过，是首个真实代码基准信号。
+- P0 kNN-LM：
+  - 小型 hidden-state kNN-LM：NLL 2.847 vs base 2.633；hit 0.540 vs 0.505；
+  - 说明简单 kNN 不是强基线。
+- P1 5 seed：
+  - 补跑 seed3/4；
+  - projector vs fixed mean +0.1044；
+  - bootstrap 95% CI [0.0251, 0.1866]；
+  - 4/5 seed 为正。
+- P1 联合系统表：
+  - 汇总已有 `ms-purified-mora-s{0,1,2}`；
+  - RAG 对 knowledge 主要，MoRA 对 arithmetic/code-output 主要；
+  - PLE 单独在通用任务上无收益，定位为局部低熵记忆。
+- 新增：
+  - `scripts/run_humaneval_real_ablation.py`
+  - `scripts/run_knn_lm_baseline.py`
+  - analyzer 增加 bootstrap CI
+  - `docs/round-112-p0-p1-real-baselines-stats.md`
+- 下一步：10k training、公开 artifact、CPU 效率、生成质量 judge。

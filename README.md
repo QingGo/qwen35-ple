@@ -107,6 +107,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-102-p1-p2-tooling.md](docs/round-102-p1-p2-tooling.md) | P1/P2 工具链：正式评测、Purified OPSD、CPU 基准 |
 | [docs/round-103-purified-opsd-results.md](docs/round-103-purified-opsd-results.md) | Purified OPSD 实跑：正式基准 + held-out 结果 |
 | [docs/round-104-systematic-rethink-v5.md](docs/round-104-systematic-rethink-v5.md) | 系统性复盘 v5：组件证据、技术债、联合评测与产品化计划 |
+| [docs/round-105-publication-readiness-gap.md](docs/round-105-publication-readiness-gap.md) | 顶刊发表差距分析：实验/基线/统计/理论/可复现 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

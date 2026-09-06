@@ -2668,5 +2668,21 @@ lazy-window gate        ✅
   - P1b：联合系统评测；
   - P1c：在线 Hedge router + 污染审计；
   - PROD：量化/CPU 100 tok/s/bundle/e2e；
-- 借鉴矩阵已更新。<｜end▁of▁thinking｜>
+- 借鉴矩阵已更新。
+
+
+## Session 105：顶刊发表差距分析
+
+- 完成 20+ 轮搜索，围绕顶会评审、RAG/记忆论文评估、统计严谨性、可复现性、理论与效率；
+- 新增 `docs/round-105-publication-readiness-gap.md`；
+- 结论：
+  - 当前缺真实正式基准（GSM8K/MATH/HumanEval/MBPP + 长上下文记忆基准）；
+  - 缺强基线：kNN-LM、NGM、MemSFT、TokenMem、Memory Grafting、全参/大 rank LoRA 等；
+  - 缺统计显著性和置信区间；
+  - 缺组件级消融：router/gate/calibration/bank/order/size/context；
+  - 缺理论假设的实证验证；
+  - 缺误差分析、case study、人类评估；
+  - 缺效率/延迟/量化/100 tok/s 证据；
+  - 缺可复现 artifact/manifest；
+- 最核心审稿风险：**PLE 是否不可替代、是否只是 n-gram/kNN/BM25 的另一种实现**。<｜end▁of▁thinking｜>
 

@@ -2766,3 +2766,24 @@ lazy-window gate        ✅
   - `scripts/run_purified_seed_evals.sh`
 - 文档：`docs/round-107-limited-resource-experiments.md`；
 - 下一步：code 类多 seed paired、真实基准子集、CPU 100 tok/s 优化（量化/KV cache）、误差分析。
+
+## Session 108：系统性下一步计划（多轮调研）
+
+- 完成多轮搜索调研，覆盖：
+  - DeepSeek Engram / Qwen PLE 原生 gating；
+  - Memory Grafting；
+  - XMemTransfer target-side reader；
+  - 多模态投影器/Q-Former 对齐；
+  - RAGRouter-Bench / X-Router / TokenMem；
+  - Bitter Lesson。
+- 形成核心判断：
+  - 下一步不是继续调 PLE 超参；
+  - 而是实现 **PLE Projector**（可学习记忆头）+ **learned token/ngram router**；
+  - 用局部低熵任务对齐，不追求通用语义；
+  - 用数据替代关键词。
+- 新增：`docs/round-108-systematic-next-plan.md`；
+- 里程碑：
+  - M1：PLE Projector v0 对比 fixed calibration / learned gate；
+  - M2：1M+ 数据规模；
+  - M3：真实 HumanEval/GSM8K 子集；
+  - M4：CPU/量化和 serving。

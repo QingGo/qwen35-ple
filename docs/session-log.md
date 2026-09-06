@@ -2629,5 +2629,21 @@ lazy-window gate        ✅
   - CPU tokens/sec 基准；
 - 所有新脚本已加入 CI lint；
 - 本地验证：90 passed, 9 skipped, 1 xfailed；
-- 下一步：GPU 可用时跑正式评测和 Purified OPSD 训练。<｜end▁of▁thinking｜>
+- 下一步：GPU 可用时跑正式评测和 Purified OPSD 训练。
+
+
+## Session 103：CI 修复 + Purified OPSD 实跑
+
+- 修复 GitHub CI：
+  - ruff 0.16 EXE001/I001/RUF046/BLE001/S112/UP035/RUF012/TRY004/RUF022；
+  - 当前 CI success，commit `da1c35c`；
+- 远程 GPU 实跑：
+  - 构建正式基准：GSM8K-like / MATH-like / HumanEval-like / MBPP-like；
+  - `run_purified_opsd.py` 过滤 CAP1-160：保留 138 / 拒绝 22；
+  - 训练 Purified MoRA-80；
+- 结果：
+  - CAP-1 held-out：base -1.3370，原始 MoRA-160 -1.2361，Purified MoRA-80 -1.2522；
+  - 正式基准：Purified MoRA-80 在 GSM8K-like +0.289、HumanEval-like +0.096、MBPP-like +0.124，MATH-like -0.048；
+- 新增 `docs/round-103-purified-opsd-results.md`；
+- 下一步：多 seed Purified OPSD、QLoRA/LoRA 对照、PLE 联合评测、CPU 产品化。<｜end▁of▁thinking｜>
 

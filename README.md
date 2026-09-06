@@ -105,6 +105,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-100-p0-ple-evidence-results.md](docs/round-100-p0-ple-evidence-results.md) | P0 PLE 证据修复结果：真局部任务 + 同域 bank + per-task 校准 |
 | [docs/round-101-per-task-calibration-serving.md](docs/round-101-per-task-calibration-serving.md) | Per-task 校准参数持久化并接入 Serving |
 | [docs/round-102-p1-p2-tooling.md](docs/round-102-p1-p2-tooling.md) | P1/P2 工具链：正式评测、Purified OPSD、CPU 基准 |
+| [docs/round-103-purified-opsd-results.md](docs/round-103-purified-opsd-results.md) | Purified OPSD 实跑：正式基准 + held-out 结果 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

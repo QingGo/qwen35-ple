@@ -2722,11 +2722,17 @@ lazy-window gate        ✅
   - Name：混合与 BM25 接近（+0.859 vs +0.893），远高于 PLE 单独；
   - Number：混合 +0.098，优于 PLE 单独 +0.003，弱于 BM25 +0.134；
   - 结论：PLE 最合理用法是叠加在 BM25/RAG 上，而不是替代 RAG；
+- 完成多源系统消融（Purified MoRA + RAG + PLE，3 seed）：
+  - Knowledge：RAG 是主要收益来源（-8.14 → -6.75），PLE 无增益；
+  - Arithmetic：MoRA 是主要收益（-7.37 → -7.11），PLE 反而略降；
+  - Code-output：MoRA 主要收益（-14.25 → -12.29），PLE 无增益；
+  - 结论：PLE 不能作为通用系统组件无脑叠加，只适合同域局部续写场景；
 - 完成 CPU 吞吐初测：
   - fp32 朴素 CPU 生成约 2.24 tok/s，未达到 100 tok/s；
   - 已记录为诚实基线，后续需量化/KV cache/专用运行时优化；
 - 结论：
-  - PLE 最有价值的用法是叠加在 BM25/RAG 上，作为可审计 logit 先验，尤其适合 code；
+  - PLE 最有价值的用法是叠加在 BM25/RAG 上，作为可审计 logit 先验，尤其适合同域 code 续写；
+  - 在通用 QA/数学/代码问答上 PLE 无增益，不能无脑叠加；
   - 不建议把 PLE 作为独立普适记忆替代品；
   - Purified OPSD 不是稳定的通用能力提升；
   - 建议转向“低资源可审计混合记忆系统”定位；

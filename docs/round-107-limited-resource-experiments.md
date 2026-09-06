@@ -178,6 +178,29 @@
 
 ---
 
+### 3.7 多源系统消融（Purified MoRA + RAG + PLE，3 seed）
+
+在合成 QA 多源消融（knowledge / arithmetic / code-output，每 seed 50 条）上：
+
+| Combo | Knowledge | Arithmetic | Code-output |
+|---|---:|---:|---:|
+| base | -8.140 | -7.365 | -14.250 |
+| +RAG | -6.748 | -7.365 | -14.250 |
+| +PLE | -8.140 | -7.492 | -14.250 |
+| +Purified MoRA | -7.691 | -7.114 | -12.292 |
+| +RAG+MoRA | -6.704 | -7.114 | -12.292 |
+| +PLE+MoRA | -7.691 | -7.237 | -12.292 |
+| +all（RAG+PLE+MoRA） | -6.704 | -7.237 | -12.292 |
+
+**含义**：
+
+- RAG 是 knowledge 的主要收益来源；
+- Purified MoRA 是 arithmetic/code-output 的主要收益来源；
+- PLE 在“通用 QA/数学/代码问答”上基本无增益，甚至在 arithmetic 上小幅拉低；
+- 这进一步说明：**PLE 不能作为通用系统增强组件无脑叠加；它的价值局限于同域、局部、低熵的续写场景（如 code corpus 上的 P0 实验）**。
+
+---
+
 ## 4. CPU 吞吐初测（诚实基线）
 
 - 脚本：`scripts/bench_cpu_tok_s.py`

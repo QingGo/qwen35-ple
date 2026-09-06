@@ -110,6 +110,7 @@ LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目�
 | [docs/round-105-publication-readiness-gap.md](docs/round-105-publication-readiness-gap.md) | 顶刊发表差距分析：实验/基线/统计/理论/可复现 |
 | [docs/round-106-limited-resource-next-steps.md](docs/round-106-limited-resource-next-steps.md) | 资源有限现状下的下一步方向与资源分配 |
 | [docs/round-107-limited-resource-experiments.md](docs/round-107-limited-resource-experiments.md) | 有限资源实验执行：Purified OPSD 多 seed + PLE 基线消融结果 |
+| [docs/reproducibility-manifest.md](docs/reproducibility-manifest.md) | 可复现清单：环境、数据、命令、固定随机性、输出文件 |
 | [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
 
 ## EngramDB 配置即用（自动注入）

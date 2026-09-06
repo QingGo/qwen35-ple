@@ -2732,9 +2732,10 @@ lazy-window gate        ✅
   - 加 PLE logit fusion 后结果不稳定：有的退化、有的生成更规范；
   - 结论：PLE 检索通道安全，开放生成不应默认加 PLE logit fusion；
   - 建议 PLE logit fusion 仅用于低熵续写，开放生成只使用检索/重排；
-- 实现 TaskClassifier 安全路由：
+- 实现 TaskClassifier 安全路由（config-driven，非源码硬编码）：
   - NL 代码生成指令归类为 semantic，自动关闭 PLE logit fusion；
   - 重新验证 sum 生成恢复正确，检索通道仍保留；
+  - 规则放在 router JSON，源码默认空；长期替换为 learned router；
 - 完成 CPU 吞吐初测：
   - fp32 朴素 CPU 生成约 2.24 tok/s，未达到 100 tok/s；
   - 已记录为诚实基线，后续需量化/KV cache/专用运行时优化；

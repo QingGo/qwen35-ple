@@ -56,7 +56,17 @@ def test_task_classifier_routes_semantic_code_number_name() -> None:
 def test_task_classifier_disables_ple_for_nl_code_generation() -> None:
     from qwen35_ple.router import TaskClassifier
 
-    clf = TaskClassifier()
+    # This is intentionally config-driven, not a hardcoded default, so the
+    # policy can be learned/replaced later without changing core code.
+    clf = TaskClassifier(generation_keywords=[
+        "write a ",
+        "write the ",
+        "implement a ",
+        "create a ",
+        "generate a ",
+        "code that ",
+        "function that ",
+    ])
     assert clf.classify("Write a Python function that returns the sum of two numbers.") == "semantic"
     assert clf.classify("def foo():\n    return 1") == "code"
     assert clf.classify("implement a Python function that reverses a string") == "semantic"

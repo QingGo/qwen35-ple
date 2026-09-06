@@ -229,6 +229,13 @@
 - 重新验证：之前退化的 sum 问题在 fusion-enabled 路径上恢复正确生成 `def sum(a, b): return a + b`；
 - 即：**PLE 检索仍保留，PLE logit fusion 只在非开放生成场景启用**。
 
+**关于“The Bitter Lesson”的取舍**：
+
+- 当前这个过滤规则没有再硬编码在源码里，而是放在 `configs/ngram-fusion-router.json` 的 `classifier.generation_keywords` 中，成为可配置策略；
+- 源码默认 `generation_keywords` 为空，避免把手工规则固化为不可变默认；
+- 长期方向应是：从线上生成数据中学习“何时该用 PLE fusion”的 router，而不是继续增加关键词表；
+- 现阶段它只是一个 **可替换的临时策略**，不是最终架构。
+
 ---
 
 ## 4. CPU 吞吐初测（诚实基线）

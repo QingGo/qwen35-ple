@@ -103,7 +103,16 @@
         "city",
         "river"
       ],
-      "default_task": "general"
+      "default_task": "general",
+      "generation_keywords": [
+        "write a ",
+        "write the ",
+        "implement a ",
+        "create a ",
+        "generate a ",
+        "code that ",
+        "function that "
+      ]
     },
     "channel_weights": {
       "semantic": {

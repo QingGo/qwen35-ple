@@ -106,6 +106,11 @@ _DEFAULT_NAME_KEYWORDS = (
     "river",
 )
 
+# Compatibility stopgap: open-generation keyword routing should eventually be
+# learned from logged data rather than maintained as a hardcoded list.  Keep
+# the default empty and configure it through router JSON when needed.
+_DEFAULT_GENERATION_KEYWORDS: tuple[str, ...] = ()
+
 
 def _to_numpy_logits(logits: Any) -> np.ndarray:
     """Convert torch/numpy logits to a float32 numpy array."""
@@ -180,32 +185,21 @@ class TaskClassifier:
         semantic_keywords: tuple[str, ...] | list[str] | None = None,
         number_keywords: tuple[str, ...] | list[str] | None = None,
         name_keywords: tuple[str, ...] | list[str] | None = None,
+        generation_keywords: tuple[str, ...] | list[str] | None = None,
         default_task: str = "general",
     ) -> None:
         self.code_keywords = tuple(code_keywords or _DEFAULT_CODE_KEYWORDS)
         self.semantic_keywords = tuple(semantic_keywords or _DEFAULT_SEMANTIC_KEYWORDS)
         self.number_keywords = tuple(number_keywords or _DEFAULT_NUMBER_KEYWORDS)
         self.name_keywords = tuple(name_keywords or _DEFAULT_NAME_KEYWORDS)
+        self.generation_keywords = tuple(generation_keywords or _DEFAULT_GENERATION_KEYWORDS)
         self.default_task = default_task
 
     def classify(self, text: str) -> str:
         t = str(text).lower()
-        # Natural-language code-generation instructions should be treated as
-        # semantic/open-generation tasks so PLE logit fusion is not applied
-        # during open-ended generation (PLE is better for low-entropy
-        # continuation, not for generating code from NL instructions).
-        if any(
-            k in t
-            for k in (
-                "write a ",
-                "write the ",
-                "implement a ",
-                "create a ",
-                "generate a ",
-                "code that ",
-                "function that ",
-            )
-        ):
+        # Open-generation phrases are configurable (and, longer term, should be
+        # learned) rather than hardcoded as the only way to protect generation.
+        if any(k in t for k in self.generation_keywords):
             return "semantic"
         if any(k in t for k in self.code_keywords):
             return "code"
@@ -227,6 +221,7 @@ class TaskClassifier:
             "semantic_keywords": list(self.semantic_keywords),
             "number_keywords": list(self.number_keywords),
             "name_keywords": list(self.name_keywords),
+            "generation_keywords": list(self.generation_keywords),
             "default_task": self.default_task,
         }
 
@@ -711,6 +706,7 @@ def build_task_router_from_config(
         semantic_keywords=classifier_cfg.get("semantic_keywords"),
         number_keywords=classifier_cfg.get("number_keywords"),
         name_keywords=classifier_cfg.get("name_keywords"),
+        generation_keywords=classifier_cfg.get("generation_keywords"),
         default_task=router.get("default_task", "general"),
     )
     return TaskRouter(
@@ -735,6 +731,7 @@ def build_task_conditioned_processor(
         semantic_keywords=classifier_cfg.get("semantic_keywords"),
         number_keywords=classifier_cfg.get("number_keywords"),
         name_keywords=classifier_cfg.get("name_keywords"),
+        generation_keywords=classifier_cfg.get("generation_keywords"),
         default_task=router.get("default_task", "general"),
     )
     gate = LogDensityRatioGate(

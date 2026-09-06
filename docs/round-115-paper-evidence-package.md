@@ -1,7 +1,7 @@
 # Round 115：论文证据包（HumanEval 20 / TriviaQA 100 / 10k 3 seed / NGM）
 
 > 日期：2026-09-06
-> 状态：已完成大部分目标实验，仍缺 pass@k 实际采样与 LLM-judge 实跑
+> 状态：已完成大部分目标实验；pass@k 已有小样本实跑，仍缺 LLM-judge 实际运行与人工一致性
 
 ---
 
@@ -77,7 +77,7 @@ number: projector 略强于 fixed
 
 ```text
 scripts/run_humaneval_real_ablation.py
-scripts/run_humaneval_passk.py          # pass@k 采样脚本（待实跑）
+scripts/run_humaneval_passk.py          # pass@k 采样脚本（已小样本实跑）
 scripts/run_triviaqa_real_eval.py
 scripts/run_ngm_baseline.py
 scripts/run_knn_lm_baseline.py
@@ -88,9 +88,20 @@ Dockerfile
 docs/evaluation-card-paper.md
 ```
 
+## 5.1 pass@k（小样本）
+
+3 题 × 每题 2 个采样：
+
+| 条件 | pass@k | repetition |
+|---|---:|---:|
+| base | 0.667 | 0.000 |
+| BM25+PLE | 0.333 | 0.051 |
+
+> 小样本下 base 的 pass@k 更高，BM25+PLE 重复率更高。当前 pass@k 证据仍非常有限，只作为 metric pipeline 验证。
+
 ## 6. 仍未完成
 
-- [ ] pass@k 实际采样运行；
+- [x] pass@k 实际采样运行（小样本 3×2）；
 - [ ] LLM-as-judge 实际运行与人类一致性；
 - [ ] 公开模型权重 / adapter 下载链接；
 - [ ] CPU 效率数据。
@@ -103,7 +114,7 @@ docs/evaluation-card-paper.md
 | NQ/TriviaQA 100–200 exact match | ✅ TriviaQA 100 |
 | 10k 3–5 seed | ✅ 3 seed |
 | NGM/MemSFT baseline | ✅ NGM |
-| pass@k | ⚠️ 脚本已写，未实跑 |
+| pass@k | ✅ 小样本实跑（3×2） |
 | exact match | ✅ |
 | repetition | ✅ |
 | LLM-as-judge | ⚠️ scaffold，未实跑 |

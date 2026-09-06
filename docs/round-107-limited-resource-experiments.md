@@ -222,6 +222,13 @@
   - 在低熵局部续写中：可以使用 PLE logit fusion；
   - 需要更强的 task router / gate 来区分这两种模式。
 
+**已实现的安全路由**：
+
+- 更新 `TaskClassifier`：自然语言代码生成指令（如 “Write a Python function…”）被归类为 `semantic`；
+- 因此 `TaskConditionedNgramLogitProcessor` 会自动关闭 PLE logit fusion；
+- 重新验证：之前退化的 sum 问题在 fusion-enabled 路径上恢复正确生成 `def sum(a, b): return a + b`；
+- 即：**PLE 检索仍保留，PLE logit fusion 只在非开放生成场景启用**。
+
 ---
 
 ## 4. CPU 吞吐初测（诚实基线）

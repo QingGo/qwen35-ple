@@ -190,6 +190,23 @@ class TaskClassifier:
 
     def classify(self, text: str) -> str:
         t = str(text).lower()
+        # Natural-language code-generation instructions should be treated as
+        # semantic/open-generation tasks so PLE logit fusion is not applied
+        # during open-ended generation (PLE is better for low-entropy
+        # continuation, not for generating code from NL instructions).
+        if any(
+            k in t
+            for k in (
+                "write a ",
+                "write the ",
+                "implement a ",
+                "create a ",
+                "generate a ",
+                "code that ",
+                "function that ",
+            )
+        ):
+            return "semantic"
         if any(k in t for k in self.code_keywords):
             return "code"
         if any(k in t for k in self.semantic_keywords):

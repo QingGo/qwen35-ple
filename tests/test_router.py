@@ -53,6 +53,15 @@ def test_task_classifier_routes_semantic_code_number_name() -> None:
     assert clf.classify("random unrelated prose") == "general"
 
 
+def test_task_classifier_disables_ple_for_nl_code_generation() -> None:
+    from qwen35_ple.router import TaskClassifier
+
+    clf = TaskClassifier()
+    assert clf.classify("Write a Python function that returns the sum of two numbers.") == "semantic"
+    assert clf.classify("def foo():\n    return 1") == "code"
+    assert clf.classify("implement a Python function that reverses a string") == "semantic"
+
+
 def test_log_density_ratio_is_positive_for_informative_memory() -> None:
     from qwen35_ple.router import log_density_ratio
 

@@ -2713,15 +2713,15 @@ lazy-window gate        ✅
 - 完成 Purified OPSD 下 LoRA / QLoRA / MoRA 对照：
   - CAP-1 全部正：LoRA +0.111、QLoRA +0.100、MoRA +0.085~0.099；
   - 正式基准仅 MoRA seed0 正，LoRA/QLoRA 明显回退；
-- 完成 PLE 不可替代性基线：
-  - Code：PLE +0.528 > BM25 +0.290 > n-gram retrieval +0.261；
-  - Name：BM25 +0.721 远超 PLE +0.066；
-  - Number：BM25 +0.154 > PLE +0.009 > n-gram retrieval -0.338；
+- 完成 PLE 不可替代性基线（seed 0/1/2）：
+  - Code：PLE 均值 +0.343 > BM25 +0.194 > n-gram +0.184，但 seed2 中 BM25 反超；
+  - Name：BM25 三 seed 均大幅领先（均值 +0.893），PLE 仅 +0.085；
+  - Number：BM25 三 seed 均领先（均值 +0.134），PLE 仅 +0.003，但 PLE 稳定强于 n-gram retrieval；
 - 完成 CPU 吞吐初测：
   - fp32 朴素 CPU 生成约 2.24 tok/s，未达到 100 tok/s；
   - 已记录为诚实基线，后续需量化/KV cache/专用运行时优化；
 - 结论：
-  - PLE 只在 code 类任务上表现出不可替代性；
+  - PLE 只在部分 code 任务上有优势，不是普适不可替代；
   - Purified OPSD 不是稳定的通用能力提升；
   - 建议转向“低资源可审计混合记忆系统”定位；
 - 新增脚本：

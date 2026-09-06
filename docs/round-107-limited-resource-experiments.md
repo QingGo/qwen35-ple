@@ -22,10 +22,10 @@
      - CAP-1 held-out 39 条
      - 正式风格基准：GSM8K-like / MATH-like / HumanEval-like / MBPP-like
 
-3. **PLE 不可替代性基线脚本**
+3. **PLE 不可替代性基线脚本与实测**
    - 新增 `scripts/run_ple_baseline_ablation.py`
    - 对比：base / BM25 context / n-gram retrieval context / PLE logit fusion / raw n-gram
-   - 同域 code / name / number 局部任务
+   - 同域 code / name / number 局部任务，seed 0/1/2
    - 修复第一次运行时 BM25 长文档导致 OOM：检索上下文截断到 `--max-rag-tokens`（默认 256）
 
 4. **Purified OPSD 下 LoRA / QLoRA / MoRA 对照**
@@ -91,8 +91,9 @@
 ## 3. PLE 不可替代性基线结果
 
 - 脚本：`scripts/run_ple_baseline_ablation.py`
-- 配置：seed 0，code/wiki 同域 train/test split，context_len=32，top-k=3，max-rag-tokens=256
+- 配置：seed 0/1/2，code/wiki 同域 train/test split，context_len=32，top-k=3，max-rag-tokens=256
 - 指标：answer-token mean logprob（越高越好），top-1 hit
+- 下面 3.1–3.3 以 seed 0 为例展示；3.4 给出三 seed 汇总。
 
 ### 3.1 Code（代码续写，n=80）
 
@@ -137,17 +138,25 @@
 
 **数字任务上 PLE 只比 base 略好，且不如 BM25；但显著优于 n-gram retrieval。**
 
-### 3.4 基线结论
+### 3.4 三 seed 汇总（Δ vs base，mean-logprob）
+
+| Task | PLE | BM25 | n-gram retrieval | PLE − BM25 |
+|---|---:|---:|---:|---:|
+| Code | +0.528 / +0.316 / +0.184 | +0.290 / +0.003 / +0.291 | +0.261 / +0.105 / +0.187 | +0.238 / +0.313 / −0.106 |
+| Name | +0.066 / −0.038 / +0.226 | +0.721 / +0.696 / +1.261 | +0.085 / +0.137 / +0.637 | −0.654 / −0.734 / −1.035 |
+| Number | +0.009 / +0.091 / −0.091 | +0.154 / +0.146 / +0.102 | −0.338 / −0.231 / −0.278 | −0.145 / −0.054 / −0.193 |
+
+### 3.5 基线结论
 
 > PLE 不是在所有局部任务上都不可替代。
 >
-> - **Code**：PLE 是价值来源，强于 BM25 和 n-gram retrieval；
-> - **Name**：BM25 明显更有效，PLE 不可替代性不成立；
-> - **Number**：PLE 弱于 BM25，但强于 n-gram retrieval。
+> - **Code**：3 seed 中 2 seed PLE 强于 BM25；均值 PLE +0.343 略高于 BM25 +0.194，但 seed 2 中 BM25 反超。因此只能说“在代码任务上有一定优势”，不是绝对不可替代。
+> - **Name**：BM25 三 seed 全部大幅领先（均值 +0.893 vs PLE +0.085），PLE 不可替代性不成立。
+> - **Number**：BM25 三 seed 全部领先（均值 +0.134 vs PLE +0.003），PLE 仅稳定强于 n-gram retrieval（均值 −0.282）。
 >
 > 结合 Purified OPSD 多 seed 在正式基准上的不稳定性，当前证据不支持把 PLE 作为唯一的、普适的主创新卖点。更合适的定位是：
 >
-> **“可审计的局部/低熵外部记忆，在特定 code 类任务上有优势，但在通用知识/名字类任务上不能替代传统 RAG。”**
+> **“可审计的局部/低熵外部记忆，在部分 code 类任务上有优势，但在通用知识/名字/数字类任务上不能替代传统 RAG。”**
 
 ---
 

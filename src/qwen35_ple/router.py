@@ -648,7 +648,7 @@ class TaskConditionedNgramLogitProcessor(CalibratedNgramLogitProcessor):
 
         temperature = self.temperature
         if self.projector is not None and hidden_state is not None:
-            feature_dict = _memory_feature_dict(logits_np, dist, matched_order)
+            feature_dict = _memory_feature_dict(logits_np, dist, matched_order, task=task)
             try:
                 scale, bias = self.projector.predict_np(hidden_state, feature_dict)
             except (AttributeError, RuntimeError, TypeError, ValueError) as exc:  # pragma: no cover - defensive fallback
@@ -871,13 +871,15 @@ def _memory_feature_dict(
     logits_np: np.ndarray,
     dist: dict[int, float],
     matched_order: int | None,
+    *,
+    task: str | None = None,
 ) -> dict[str, float]:
     """Build the scalar feature dict consumed by an optional PLE projector."""
     log_pb = _log_softmax(logits_np)
     pb = np.exp(log_pb)
     base_top1 = int(np.argmax(logits_np))
     mem_top1 = max(dist, key=dist.get)
-    return {
+    out = {
         "matched_order": matched_order if matched_order is not None else 0,
         "base_entropy": float(-np.sum(pb * np.log(np.maximum(pb, 1e-12)))),
         "memory_entropy": float(-sum(p * math.log(p) for p in dist.values() if p > 0)),
@@ -889,6 +891,10 @@ def _memory_feature_dict(
         "memory_top1_prob": float(dist[mem_top1]),
         "memory_top1_agree_base": bool(mem_top1 == base_top1),
     }
+    task = str(task or "general")
+    for name in ("code", "name", "number", "general"):
+        out[f"task_{name}"] = 1.0 if task == name else 0.0
+    return out
 
 
 __all__ = [

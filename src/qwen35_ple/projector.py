@@ -32,6 +32,9 @@ from torch import nn
 
 SCHEMA = "ple-projector-v1"
 
+TASK_NAMES = ["code", "name", "number", "general"]
+TASK_FEATURE_NAMES = [f"task_{name}" for name in TASK_NAMES]
+
 FEATURE_NAMES = [
     "matched_order",
     "base_entropy",
@@ -40,7 +43,23 @@ FEATURE_NAMES = [
     "base_top1_prob",
     "memory_top1_prob",
     "memory_top1_agree_base",
-]
+] + TASK_FEATURE_NAMES
+
+
+def add_task_features(
+    features: dict[str, Any],
+    task: str | None,
+) -> dict[str, Any]:
+    """Return a copy of ``features`` with one-hot task indicators added.
+
+    The extra keys are ignored by older projectors whose ``feature_names`` do
+    not include task features, so this is backward compatible.
+    """
+    out = dict(features)
+    task = str(task or "general")
+    for name in TASK_NAMES:
+        out[f"task_{name}"] = 1.0 if task == name else 0.0
+    return out
 
 
 def _as_numpy(x: Any) -> np.ndarray:
@@ -289,7 +308,10 @@ def apply_projector_to_logits(
 __all__ = [
     "FEATURE_NAMES",
     "SCHEMA",
+    "TASK_FEATURE_NAMES",
+    "TASK_NAMES",
     "PleProjector",
+    "add_task_features",
     "apply_projector_to_logits",
     "compute_memory_features",
     "load_projector",

@@ -1,0 +1,71 @@
+{
+  "schema": "ngram-fusion-router-v1",
+  "source": "Phase A PLE projector open-generation safety probe",
+  "fusion": {
+    "scale": 1.0,
+    "bias": -1.0,
+    "temperature": 0.5,
+    "enabled": true
+  },
+  "router": {
+    "mode": "expected_kl",
+    "min_log_density_ratio": 0.0,
+    "semantic_tasks": [
+      "semantic",
+      "knowledge",
+      "qa"
+    ],
+    "ple_tasks": [
+      "code",
+      "name",
+      "number",
+      "low_entropy"
+    ],
+    "default_task": "general",
+    "classifier": {
+      "code_keywords": [
+        "def ",
+        "class ",
+        "import ",
+        "return ",
+        "function",
+        "lambda",
+        "code",
+        "program",
+        "script",
+        "write ",
+        "implement"
+      ],
+      "semantic_keywords": [
+        "what",
+        "who",
+        "why",
+        "how",
+        "explain",
+        "describe",
+        "meaning",
+        "capital",
+        "country"
+      ],
+      "number_keywords": [
+        "number",
+        "count",
+        "sum",
+        "calculate",
+        "math",
+        "digit"
+      ],
+      "name_keywords": [
+        "name",
+        "called",
+        "author",
+        "person",
+        "city",
+        "river"
+      ],
+      "default_task": "general",
+      "generation_keywords": []
+    },
+    "projector_path": "outputs/ple-projector-v1-seed0.projector.json"
+  }
+}

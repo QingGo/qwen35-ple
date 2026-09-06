@@ -2814,3 +2814,34 @@ lazy-window gate        ✅
   - router / adapter hidden-state 通路测试
   - `docs/round-109-ple-projector-v0.md`
 - 下一步：3 seed paired、扩大数据、任务条件、开放生成保护验证。
+
+## Session 110：PLE Projector v1 —— 3 seed paired + 1k 数据 + 开放生成安全
+
+- 增加任务 one-hot 特征：
+  - code / name / number / general；
+  - router serving 与训练特征一致。
+- 3 seed paired（100 samples / 100 steps）：
+  - projector vs fixed NLL mean = +0.0688；
+  - 2/3 seed 为正；
+  - code 是主要收益来源；
+  - name 三 seed 均略差；
+  - 未达统计显著，但方向正确。
+- 扩大数据：
+  - 构建 1k / 10k 数据集：
+    - `data/ple-projector-dataset-1k.jsonl`
+    - `data/ple-projector-dataset-10k.jsonl`
+  - 1k seed0 训练：
+    - fixed NLL 1.397 → projector NLL 1.189；
+    - hit 0.724 → 0.782；
+    - code 上 improvement 明显（1.228 → 0.986）。
+- 开放生成验证：
+  - raw projector 会明显退化；
+  - 加 learned token policy 后大幅抑制，但仍有少量长尾泄漏；
+  - 结论：open generation 必须由 learned policy / task routing 保护。
+- 新增：
+  - `scripts/analyze_ple_projector_paired.py`
+  - `scripts/build_ple_projector_dataset.py`
+  - `configs/ngram-fusion-router-projector-open.json`
+  - `configs/ngram-fusion-router-projector-policy.json`
+  - `docs/round-110-ple-projector-v1.md`
+- 下一步：10k 训练、name 专项校准、生成质量标签 policy、M2。

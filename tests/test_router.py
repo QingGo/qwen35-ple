@@ -359,3 +359,32 @@ def test_task_conditioned_processor_uses_projector_with_hidden_state() -> None:
     assert proc.last_projector["active"] is True
     assert proc.last_projector["scale"] == 3.0
     assert proc.last_projector["bias"] == -0.2
+
+class _RecordingProjector:
+    def __init__(self) -> None:
+        self.features: dict | None = None
+
+    def predict_np(self, hidden, features):
+        self.features = features
+        return 0.0, 0.0
+
+
+def test_projector_receives_task_one_hot_features() -> None:
+    from qwen35_ple.router import (
+        LogDensityRatioGate,
+        TaskConditionedNgramLogitProcessor,
+    )
+
+    stub = _RecordingProjector()
+    proc = TaskConditionedNgramLogitProcessor(
+        _memory(),
+        task="code",
+        density_gate=LogDensityRatioGate(mode="expected_kl", threshold=0.0),
+        projector=stub,
+    )
+    proc(np.zeros(10, dtype=np.float32), [1, 2], hidden_state=np.zeros(4))
+    assert stub.features is not None
+    assert stub.features["task_code"] == 1.0
+    assert stub.features["task_name"] == 0.0
+    assert stub.features["task_number"] == 0.0
+    assert stub.features["task_general"] == 0.0

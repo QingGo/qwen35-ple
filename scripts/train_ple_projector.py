@@ -24,7 +24,11 @@ import torch.nn.functional as F
 
 from qwen35_ple.addressable_memory import AddressableNgramMemory
 from qwen35_ple.fusion import calibrate_ngram_fusion, fuse_ngram_logits, softmax
-from qwen35_ple.projector import PleProjector, compute_memory_features
+from qwen35_ple.projector import (
+    PleProjector,
+    add_task_features,
+    compute_memory_features,
+)
 
 
 def _load_model(model_path: str, adapter: str | None, device: str):
@@ -76,6 +80,40 @@ def _load_wiki_docs(path: str, max_docs: int | None) -> list[str]:
             if max_docs is not None and len(docs) >= max_docs:
                 break
     return docs
+
+
+def _load_code_corpus(path: str | None) -> list[str]:
+    if not path:
+        return []
+    texts = []
+    with Path(path).open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            text = str(obj.get("text") or "")
+            if text.strip():
+                texts.append(text.strip())
+    return texts
+
+
+def _load_dataset(path: str) -> list[dict]:
+    rows = []
+    with Path(path).open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            rows.append(obj)
+    return rows
 
 
 def _split_texts(texts: list[str], train_frac: float, seed: int):
@@ -210,9 +248,10 @@ def _make_samples(
 
 
 def _features_from_sample(logits: np.ndarray, sample: dict) -> dict[str, float]:
-    return compute_memory_features(
+    features = compute_memory_features(
         logits, sample["dist"], matched_order=sample.get("order")
     )
+    return add_task_features(features, sample.get("task"))
 
 
 def _eval_condition(
@@ -262,6 +301,102 @@ def _eval_condition(
             }
             for k, v in per_task.items()
         },
+    }
+
+
+def _eval_paired(
+    model,
+    samples: list[dict],
+    device: str,
+    *,
+    projector: PleProjector,
+    fixed_scale: float,
+    fixed_bias: float,
+    temperature: float = 1.0,
+) -> dict:
+    """Evaluate base/fixed/projector on the same samples and return paired rows."""
+    rows = []
+    for sample in samples:
+        logits, hidden = _forward(model, sample["context"], device)
+        dist = sample["dist"]
+        target = sample["target"]
+        base_p = softmax(logits)
+        base_nll = -math.log(max(float(base_p[target]), 1e-12))
+        base_hit = 1.0 if int(np.argmax(logits)) == target else 0.0
+
+        fixed = fuse_ngram_logits(
+            logits, dist, scale=fixed_scale, bias=fixed_bias, temperature=temperature
+        )
+        fixed_p = softmax(fixed)
+        fixed_nll = -math.log(max(float(fixed_p[target]), 1e-12))
+        fixed_hit = 1.0 if int(np.argmax(fixed)) == target else 0.0
+
+        features = _features_from_sample(logits, sample)
+        proj_scale, proj_bias = projector.predict_np(hidden, features)
+        proj = fuse_ngram_logits(
+            logits, dist, scale=proj_scale, bias=proj_bias, temperature=temperature
+        )
+        proj_p = softmax(proj)
+        proj_nll = -math.log(max(float(proj_p[target]), 1e-12))
+        proj_hit = 1.0 if int(np.argmax(proj)) == target else 0.0
+
+        rows.append({
+            "task": sample["task"],
+            "target": target,
+            "base_nll": base_nll,
+            "base_hit": base_hit,
+            "fixed_nll": fixed_nll,
+            "fixed_hit": fixed_hit,
+            "fixed_scale": fixed_scale,
+            "fixed_bias": fixed_bias,
+            "proj_nll": proj_nll,
+            "proj_hit": proj_hit,
+            "proj_scale": proj_scale,
+            "proj_bias": proj_bias,
+        })
+
+    def _mean(key: str) -> float:
+        return float(np.mean([r[key] for r in rows]))
+
+    def _mean_bool(key: str) -> float:
+        return float(np.mean([r[key] for r in rows]))
+
+    per_task: dict[str, dict[str, float]] = {}
+    for r in rows:
+        t = r["task"]
+        b = per_task.setdefault(t, {"n": 0.0, "base_nll": 0.0, "fixed_nll": 0.0, "proj_nll": 0.0, "base_hit": 0.0, "fixed_hit": 0.0, "proj_hit": 0.0})
+        b["n"] += 1
+        b["base_nll"] += r["base_nll"]
+        b["fixed_nll"] += r["fixed_nll"]
+        b["proj_nll"] += r["proj_nll"]
+        b["base_hit"] += r["base_hit"]
+        b["fixed_hit"] += r["fixed_hit"]
+        b["proj_hit"] += r["proj_hit"]
+
+    return {
+        "n": len(rows),
+        "base_nll": _mean("base_nll"),
+        "fixed_nll": _mean("fixed_nll"),
+        "proj_nll": _mean("proj_nll"),
+        "base_hit": _mean_bool("base_hit"),
+        "fixed_hit": _mean_bool("fixed_hit"),
+        "proj_hit": _mean_bool("proj_hit"),
+        "delta_fixed_vs_base_nll": _mean("base_nll") - _mean("fixed_nll"),
+        "delta_proj_vs_fixed_nll": _mean("fixed_nll") - _mean("proj_nll"),
+        "delta_proj_vs_base_nll": _mean("base_nll") - _mean("proj_nll"),
+        "per_task": {
+            k: {
+                "n": int(v["n"]),
+                "base_nll": v["base_nll"] / v["n"],
+                "fixed_nll": v["fixed_nll"] / v["n"],
+                "proj_nll": v["proj_nll"] / v["n"],
+                "base_hit": v["base_hit"] / v["n"],
+                "fixed_hit": v["fixed_hit"] / v["n"],
+                "proj_hit": v["proj_hit"] / v["n"],
+            }
+            for k, v in per_task.items()
+        },
+        "rows": rows,
     }
 
 
@@ -367,12 +502,10 @@ def _train_projector(
             )
 
     return {
+        "projector": projector,
         "projector_dict": projector.to_dict(),
         "train": _eval_condition(
             model, train_samples[:40], device, projector=projector, temperature=temperature
-        ),
-        "eval": _eval_condition(
-            model, eval_samples, device, projector=projector, temperature=temperature
         ),
         "loss_history": history,
     }
@@ -383,6 +516,8 @@ def main() -> int:
     parser.add_argument("--model", default="data/models/Qwen3.5-0.8B")
     parser.add_argument("--adapter", default=None)
     parser.add_argument("--code-root", default=".")
+    parser.add_argument("--code-corpus", default=None, help="optional JSONL code corpus")
+    parser.add_argument("--dataset", default=None, help="optional prebuilt projector dataset JSONL")
     parser.add_argument("--wiki-path", default="data/sources/wikitext.jsonl")
     parser.add_argument("--max-code-files", type=int, default=200)
     parser.add_argument("--max-wiki-docs", type=int, default=400)
@@ -414,10 +549,25 @@ def main() -> int:
             text = ""
         if text.strip():
             code_texts.append(text)
+    if args.code_corpus:
+        code_texts.extend(_load_code_corpus(args.code_corpus))
     wiki_texts = _load_wiki_docs(args.wiki_path, args.max_wiki_docs)
     print(f"[ple-projector] code={len(code_texts)} wiki={len(wiki_texts)}", flush=True)
 
-    train_samples, eval_samples = _make_samples(
+    if args.dataset:
+        rows = _load_dataset(args.dataset)
+        rng = random.Random(args.seed)
+        rng.shuffle(rows)
+        n_train = int(len(rows) * args.train_frac)
+        train_samples = rows[:n_train]
+        eval_samples = rows[n_train:]
+        print(
+            f"[ple-projector] dataset={args.dataset} rows={len(rows)} "
+            f"train={len(train_samples)} eval={len(eval_samples)}",
+            flush=True,
+        )
+    else:
+        train_samples, eval_samples = _make_samples(
         model,
         tokenizer,
         code_texts=code_texts,
@@ -444,24 +594,6 @@ def main() -> int:
         flush=True,
     )
 
-    base_eval = _eval_condition(model, eval_samples, args.device, temperature=args.temperature)
-    fixed_eval = _eval_condition(
-        model,
-        eval_samples,
-        args.device,
-        fixed_scale=float(calib.get("best_scale", 0.0)),
-        fixed_bias=float(calib.get("best_bias", 0.0)),
-        temperature=args.temperature,
-    )
-    print(
-        f"[ple-projector] base nll={base_eval['nll']:.4f} hit={base_eval['hit']:.4f}",
-        flush=True,
-    )
-    print(
-        f"[ple-projector] fixed nll={fixed_eval['nll']:.4f} hit={fixed_eval['hit']:.4f}",
-        flush=True,
-    )
-
     trained = _train_projector(
         model,
         train_samples,
@@ -475,19 +607,38 @@ def main() -> int:
         seed=args.seed,
         temperature=args.temperature,
     )
-    print(
-        f"[ple-projector] projector nll={trained['eval']['nll']:.4f} "
-        f"hit={trained['eval']['hit']:.4f}",
-        flush=True,
+    paired_eval = _eval_paired(
+        model,
+        eval_samples,
+        args.device,
+        projector=trained["projector"],
+        fixed_scale=float(calib.get("best_scale", 0.0)),
+        fixed_bias=float(calib.get("best_bias", 0.0)),
+        temperature=args.temperature,
     )
-
+    base_eval = {
+        "n": paired_eval["n"],
+        "nll": paired_eval["base_nll"],
+        "hit": paired_eval["base_hit"],
+    }
+    fixed_eval = {
+        "n": paired_eval["n"],
+        "nll": paired_eval["fixed_nll"],
+        "hit": paired_eval["fixed_hit"],
+    }
+    projector_eval = {
+        "n": paired_eval["n"],
+        "nll": paired_eval["proj_nll"],
+        "hit": paired_eval["proj_hit"],
+    }
     result = {
-        "schema": "ple-projector-v0-experiment",
+        "schema": "ple-projector-v1-experiment",
         "config": vars(args),
         "fixed_calibration": calib,
         "base_eval": base_eval,
         "fixed_eval": fixed_eval,
-        "projector_eval": trained["eval"],
+        "projector_eval": projector_eval,
+        "paired_eval": paired_eval,
         "projector_train": trained["train"],
         "loss_history": trained["loss_history"],
         "runtime_seconds": time.time() - t0,

@@ -73,6 +73,13 @@ extracted_contains
 
 并输出 JSON + Markdown 报告。
 
+新增批处理入口：`scripts/run_phase1_matrix.sh`
+
+- 遍历六个 Phase 1 语料；
+- 每个语料跑 3 seeds × real/control/no-reader；
+- 使用长生成（默认 96 tokens）与 `--qa` 对数似然；
+- 输出可被 `evaluate_generated_answers.py` 重评分的 JSON。
+
 ## 2. 配套修改
 
 - `scripts/build_mix.py`：新增 `code` / `stem` 两类语料源，支持纯领域语料构建。

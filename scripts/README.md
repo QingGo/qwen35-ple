@@ -31,6 +31,7 @@
 | `build_phase1_corpora.py` | Phase 1 语料矩阵：PURE_WIKI/FINEWEB/STEM/CODE + FW_CODE/FW_STEM，token 级混合与 manifest |
 | `build_phase1_kb_split.py` | Phase 1 KB/QA 四 split：kb.train/eval、qa.train/eval + 双向污染审计 |
 | `evaluate_generated_answers.py` | Phase 1 评测协议重评分：strict exact / contains / extracted contains + Markdown 报告 |
+| `run_phase1_matrix.sh` | Phase 2 批处理入口：六个 Phase 1 语料 × 3 seeds × real/control/no-reader × 长生成 QA |
 | `audit_contamination.py` | 严格 QA 污染审计：答案/问题/QA n-gram 重叠，输出逐题和汇总报告 |
 | `run_mix_batch.sh` | WSL 批量跑 M1–M5：`run_phase0.py --live-store` + 150 QA exact-match 三线 |
 | `run_mix_one_wrapper.sh` | 单 mix 后台 wrapper：配合 Windows Scheduled Task 长任务托管 |

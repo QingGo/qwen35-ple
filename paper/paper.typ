@@ -1,9 +1,9 @@
 #import "sty/icml2024.typ": icml2024
 
 #show: icml2024.with(
-  title: [Auditable N-Gram External Memory for Small Language Models: A Low-Resource Study of Capabilities, Calibration, and Boundaries],
+  title: [Auditable N-Gram Memory for Small Language Models],
   authors: (
-    ((name: "QingGo", affl: "affl1", email: "qinggo@example.com"),),
+    ((name: "QingGo", affl: "affl1", email: "zyqingjohn@qq.com"),),
     (affl1: ("Independent Researcher",),)
   ),
   abstract: [
@@ -88,6 +88,7 @@ A common assumption is that external memory should be projected into the backbon
 We build an addressable n-gram memory from a code corpus and a wiki corpus. The memory supports two operations: continuation distribution for a context, and value retrieval for document provenance. The memory is used as both a retrieval channel and a logit prior. In the hybrid system, BM25 @bm252009 provides document-level retrieval, PLE provides exact n-gram continuity, and their combination forms a three-channel retriever.
 
 #figure(
+  scope: "parent",
   image("figures/architecture_diagram.svg", width: 100%),
   caption: [System architecture. The frozen backbone, RAG, and PLE memory provide three complementary evidence channels; the PLE Projector and token policy control logit-level fusion.]
 )
@@ -105,6 +106,7 @@ where $h_t$ is the last hidden state of the frozen backbone, and $m_t$ contains 
 Because PLE fusion can be harmful in open-ended generation, we train a logistic regression model on per-token observations. The features are the same memory features used by the projector. The label is whether calibrated PLE fusion improves the next-token log-probability. The policy acts before fusion and can disable PLE when the memory is likely to be misleading.
 
 #figure(
+  scope: "parent",
   image("figures/inference_pipeline.svg", width: 90%),
   caption: [Inference pipeline. The token policy decides whether to apply the learned PLE Projector or bypass it with base logits only.]
 )

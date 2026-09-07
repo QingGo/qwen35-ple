@@ -68,7 +68,7 @@
 
 #let make_figure(caption_above: false, it) = {
   // set align(center + top)
-  place(center + top, float: true,
+  place(center + top, float: true, scope: it.scope,
   block(breakable: false, width: 100%, {
     if caption_above {
       it.caption

@@ -1,11 +1,11 @@
 #import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge
 #import fletcher.shapes: diamond
-#set page(width: auto, height: auto, margin: 6mm, fill: white)
-#set text(size: 8pt, font: "New Computer Modern")
+#set page(width: auto, height: auto, margin: 10mm, fill: white)
+#set text(size: 9.5pt, font: "New Computer Modern")
 
 #let step(pos, label, fill: rgb("#eef4ff"), stroke: rgb("#33507a"), ..args) = node(
   pos, align(center, label),
-  width: 34mm, height: 8mm,
+  width: 35mm, height: 9mm,
   fill: fill, stroke: 0.9pt + stroke,
   corner-radius: 3pt,
   ..args,
@@ -15,6 +15,11 @@
   node(enclose: pos, fill: fill, stroke: 0.8pt + stroke, inset: 5pt, corner-radius: 5pt)
 }
 
+#let panel_label(pos, label) = node(
+  pos, align(center, text(size: 8.5pt, weight: "bold", label)),
+  width: auto, height: auto, fill: none, stroke: none
+)
+
 #diagram(
   spacing: 7pt,
   cell-size: (10mm, 11mm),
@@ -23,6 +28,9 @@
 
   panel(((0,0), (0,3)), rgb("#f6f9fc"), rgb("#7a9bb5")),
   panel(((0,6), (1,8)), rgb("#f9f6fc"), rgb("#9b7ab5")),
+
+  panel_label((0,-0.55), [Retrieval & Features]),
+  panel_label((0,5.35), [Fusion & Generation]),
 
   step((0,0), [Query / Prompt], fill: rgb("#f3f7ff")),
   step((0,1), [Task Classifier], fill: rgb("#fff4d6"), stroke: rgb("#8a6d1a")),

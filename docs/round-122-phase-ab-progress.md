@@ -31,7 +31,19 @@ bootstrap 95% CI = [0.1436, 0.3255]
 positive seeds = 5 / 5
 ```
 
-### 1.3 LLM judge 已有数据补全
+### 1.3 Phase A：HumanEval 50 完成
+
+```text
+base      pass@1 = 0.22 (11/50), rep = 0.0250
+BM25+PLE  pass@1 = 0.10 (5/50),  rep = 0.0412
+```
+
+- base 通过：16,18,23,25,32,33,38,41,43,46,49；
+- BM25+PLE 通过：0,10,27,35,41；
+- 两者仅共同通过 41；
+- BM25+PLE 仍恢复了 4 个 base 未通过题，但整体在 50 题上不如 base。
+
+### 1.4 LLM judge 已有数据补全
 
 | 数据 | 样本 | mean judge score |
 |---|---:|---:|
@@ -51,14 +63,12 @@ dynamic int8 CPU: 2.03 tok/s
 
 ## 2. 进行中
 
-- HumanEval 50（`outputs/humaneval-real-50-fast.json`）；
 - TriviaQA 200（`outputs/triviaqa-real-200.json`）；
-- 后续将跑：
+- 后续将跑（自动化链已挂起）：
   - pass@k 扩大样本；
   - LLM judge 全量 HumanEval 50 / TriviaQA 200；
-  - sensitivity sweep（n-gram order / memory size / data size）；
-  - token policy on/off 消融（已有早期 open/policy 输出可复用）；
-  - CPU 量化/吞吐已补充 float32 与 int8 基线。
+  - sensitivity sweep（n-gram order / memory size）；
+  - token policy on/off 消融（已有早期 open/policy 输出可复用）。
 
 ---
 

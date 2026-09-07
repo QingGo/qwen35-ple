@@ -57,6 +57,7 @@ REPO_FILES = {
         "scripts/analyze_ple_projector_paired.py",
         "scripts/run_sensitivity_sweep.sh",
         "scripts/run_ple_evidence_p0.py",
+        "scripts/build_judge_input.py",
         "scripts/build_hf_artifact_release.py",
     ],
     "root_files": [

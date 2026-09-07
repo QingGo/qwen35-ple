@@ -3,9 +3,11 @@
 > 日期：2026-09-08
 > 目的：梳理 qwen35-ple 中哪些逻辑和结论值得上移到 engram-peft、EngramDB、LLM-CompileForge，避免实验代码与核心能力长期耦合。
 >
-> 状态：已开始沉淀。第一批已上移到 engram-peft：
-> `fusion.py`、`projector.py`、`policy.py` 及对应单测。
-> engram-peft 提交：`b674155`。
+> 状态：P0 全部完成。
+>
+> - engram-peft `b674155`：`fusion.py`、`projector.py`、`policy.py` + 单测。
+> - EngramDB `e9c0d52`：`addressable_memory.py` + 导出 + 单测。
+> - LLM-CompileForge `ba12764`：`memory_fusion.py` + `docs/external-memory-fusion.md` + 单测。
 
 ---
 

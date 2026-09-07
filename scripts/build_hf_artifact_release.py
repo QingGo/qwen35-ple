@@ -66,6 +66,19 @@ REPO_FILES = {
         "AGENTS.md",
         "docs/round-122-phase-ab-progress.md",
     ],
+    "results": [
+        "outputs/humaneval-real-50-fast.json",
+        "outputs/triviaqa-real-200.json",
+        "outputs/llm-judge-humaneval50.json",
+        "outputs/llm-judge-triviaqa200.json",
+        "outputs/ple-projector-paired-analysis-5seed.json",
+        "outputs/humaneval-passk-10x3.json",
+        "outputs/cpu-bench.json",
+        "outputs/cpu-bench-quant.json",
+        "outputs/code-gen-projector-open.json",
+        "outputs/code-gen-projector-policy.json",
+        "outputs/code-gen-projector-policy2.json",
+    ],
 }
 
 
@@ -176,6 +189,14 @@ def main() -> int:
                 dst = bundle / "docs" / Path(rel).name
                 _copy_tree(src2, dst)
                 manifest["files"].append({"path": str(dst.relative_to(bundle)), "sha256": _sha256(dst), "bytes": dst.stat().st_size})
+
+    # Evaluation result files
+    for rel in REPO_FILES["results"]:
+        src = root / rel
+        if src.exists():
+            dst = bundle / "results" / Path(rel).name
+            _copy_tree(src, dst)
+            manifest["files"].append({"path": str(dst.relative_to(bundle)), "sha256": _sha256(dst), "bytes": dst.stat().st_size})
 
     manifest_path = bundle / "artifact-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

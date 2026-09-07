@@ -51,14 +51,34 @@ exact match = 0.005
 mean repetition rate = 0.0076
 ```
 
-### 1.5 LLM judge 已有数据补全
+### 1.5 Phase A：pass@k 扩大样本完成
+
+```text
+10 problems × 3 samples, 2 conditions
+base      pass@k = 0.40 (4/10), rep = 0.0014
+BM25+PLE  pass@k = 0.70 (7/10), rep = 0.0083
+```
+
+> 采样下 BM25+PLE 明显高于 base；与 greedy pass@1 的负向结果形成对比，说明
+> 该记忆对多样性搜索模式有不同影响。
+
+### 1.6 LLM judge 补全
 
 | 数据 | 样本 | mean judge score |
 |---|---:|---:|
 | HumanEval 20（base+bm25_ple） | 40 | 0.375 |
+| HumanEval 50（base+bm25_ple） | 100 | 0.300 |
 | TriviaQA 100 | 100 | 0.450 |
+| TriviaQA 200 | 200 | 0.430 |
 
-### 1.6 CPU 基线
+### 1.7 Sensitivity / Ablation
+
+- n-gram order sweep：`outputs/sens-order-{2,3,4,5}.json`
+- memory bank size sweep：`outputs/sens-mem-c{40,120,300}-w{80,240,600}.json`
+- token policy on/off：已有 `outputs/code-gen-projector-open.json`、
+  `code-gen-projector-policy.json`、`code-gen-projector-policy2.json`
+
+### 1.8 CPU 基线
 
 ```text
 float32 CPU: 1.63 tok/s
@@ -69,13 +89,12 @@ dynamic int8 CPU: 2.03 tok/s
 
 ---
 
-## 2. 进行中
+## 2. 当前状态
 
-- 自动化链已挂起：
-  - sensitivity sweep（n-gram order / memory size）；
-  - pass@k 扩大样本；
-  - LLM judge 全量 HumanEval 50 / TriviaQA 200；
-  - token policy on/off 消融（已有早期 open/policy 输出可复用）。
+Phase A 主实验已全部跑完：
+- HumanEval 50 / TriviaQA 200 / 10k 5 seeds / pass@k / full LLM judge / sensitivity / token-policy 复用；
+- 自动化链已生成 HumanEval/TriviaQA judge 与 sensitivity 数据；
+- 下一步：把结果整理进论文、重新上传完整 artifact bundle，并补最终 CI 验证。
 
 ---
 
@@ -84,4 +103,5 @@ dynamic int8 CPU: 2.03 tok/s
 ```text
 scripts/build_hf_artifact_release.py   # HF 打包上传
 scripts/run_sensitivity_sweep.sh       # sensitivity sweep 入口
+scripts/build_judge_input.py           # HumanEval judge 输入构建
 ```

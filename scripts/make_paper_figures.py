@@ -16,7 +16,7 @@ def _load(path: str) -> dict:
 
 
 def main() -> int:
-    out = Path("figures")
+    out = Path("paper/figures")
     out.mkdir(parents=True, exist_ok=True)
 
     # Figure 1: 10k projector vs fixed improvements.

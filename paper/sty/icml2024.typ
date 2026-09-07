@@ -410,14 +410,15 @@
   })
   show figure.where(kind: "algorithm"): it => {
     let render() = block(breakable: false, width: 100%, {
+        set align(left)
         set block(spacing: 0em)
         line(length: 100%, stroke: (thickness: 0.08em))
-        v(0.35em, weak: true)
+        v(0.3em, weak: true)
         block(width: 100%, spacing: 0.18em, it.caption)
-        v(0.15em, weak: true)
+        v(0.45em, weak: true)
         line(length: 100%, stroke: (thickness: 0.05em))
-        v(0.35em, weak: true)
-        it.body
+        v(0.3em, weak: true)
+        block(width: 100%, it.body)
         v(0.4em, weak: true)
         line(length: 100%, stroke: (thickness: 0.08em))
       })

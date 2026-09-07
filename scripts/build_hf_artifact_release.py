@@ -82,6 +82,24 @@ REPO_FILES = {
 }
 
 
+def _sanitize_json(path: Path) -> None:
+    """Remove likely secret fields from JSON files before public release."""
+    if path.suffix != ".json":
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    secret_keys = {"api_key", "apikey", "api-key", "token", "access_token", "authorization", "password", "secret", "hf_token"}
+    def scrub(obj):
+        if isinstance(obj, dict):
+            return {k: ("REDACTED" if isinstance(k, str) and k.lower() in secret_keys else scrub(v)) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [scrub(v) for v in obj]
+        return obj
+    path.write_text(json.dumps(scrub(data), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -196,6 +214,7 @@ def main() -> int:
         if src.exists():
             dst = bundle / "results" / Path(rel).name
             _copy_tree(src, dst)
+            _sanitize_json(dst)
             manifest["files"].append({"path": str(dst.relative_to(bundle)), "sha256": _sha256(dst), "bytes": dst.stat().st_size})
 
     manifest_path = bundle / "artifact-manifest.json"

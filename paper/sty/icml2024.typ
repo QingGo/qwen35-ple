@@ -412,9 +412,10 @@
     let render() = block(breakable: false, width: 100%, {
         set block(spacing: 0em)
         line(length: 100%, stroke: (thickness: 0.08em))
-        block(spacing: 0.4em, it.caption)  // NOTE: No idea why we need it.
+        block(spacing: 0.1em, it.caption)  // NOTE: No idea why we need it.
         line(length: 100%, stroke: (thickness: 0.05em))
         it.body
+        v(0.3em, weak: true)
         line(length: 100%, stroke: (thickness: 0.08em))
       })
     if it.placement == none {

@@ -25,6 +25,7 @@ def main() -> int:
     parser.add_argument("--prompt", default="What is the capital of France?")
     parser.add_argument("--new-tokens", type=int, default=32)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--quantize", action="store_true", help="apply dynamic int8 quantization to Linear layers")
     args = parser.parse_args()
 
     import os
@@ -39,6 +40,13 @@ def main() -> int:
     )
     model.to(args.device)
     model.eval()
+    quantized = False
+    if args.quantize:
+        from torch import nn
+        model = torch.quantization.quantize_dynamic(
+            model, {nn.Linear}, dtype=torch.qint8
+        )
+        quantized = True
 
     ids = tokenizer.encode(args.prompt, add_special_tokens=False)
     generated = list(ids)
@@ -62,6 +70,7 @@ def main() -> int:
         "elapsed_seconds": elapsed,
         "tokens_per_second": tok_s,
         "target": 100.0,
+        "quantized": quantized,
     }
     print(result, flush=True)
     return 0

@@ -20,13 +20,15 @@
   - `artifact-manifest.json` + `SHA256SUMS`。
 - 打包脚本：`scripts/build_hf_artifact_release.py`
 
-### 1.2 Phase A：新增 10k seeds 3、4（5 seeds 完）
+### 1.2 Phase A：10k PLE Projector 5 seeds 完成
 
-已运行：
+已运行 seed 3、4，并汇总 5 seeds：
 
 ```text
-seed3: ple-projector-10k-seed3.json
-seed4: ple-projector-10k-seed4.json
+seeds 0-4
+projector vs fixed NLL mean = +0.2249
+bootstrap 95% CI = [0.1436, 0.3255]
+positive seeds = 5 / 5
 ```
 
 ### 1.3 LLM judge 已有数据补全
@@ -40,9 +42,10 @@ seed4: ple-projector-10k-seed4.json
 
 ```text
 float32 CPU: 1.63 tok/s
+dynamic int8 CPU: 2.03 tok/s
 ```
 
-> 这是未优化的真实基线；100 tok/s 仍是产品目标，距离尚远。
+> 这是未优化基线；100 tok/s 仍是产品目标，距离尚远。
 
 ---
 
@@ -54,8 +57,8 @@ float32 CPU: 1.63 tok/s
   - pass@k 扩大样本；
   - LLM judge 全量 HumanEval 50 / TriviaQA 200；
   - sensitivity sweep（n-gram order / memory size / data size）；
-  - token policy on/off 消融；
-  - CPU 量化/吞吐补充。
+  - token policy on/off 消融（已有早期 open/policy 输出可复用）；
+  - CPU 量化/吞吐已补充 float32 与 int8 基线。
 
 ---
 

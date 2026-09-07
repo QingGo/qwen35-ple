@@ -89,7 +89,7 @@ We build an addressable n-gram memory from a code corpus and a wiki corpus. The 
 
 #figure(
   scope: "parent",
-  image("figures/architecture_diagram.svg", width: 100%),
+  image("figures/system_architecture_dd.svg", width: 100%),
   caption: [System architecture. The frozen backbone, RAG, and PLE memory provide three complementary evidence channels; the PLE Projector and token policy control logit-level fusion.]
 )
 
@@ -107,7 +107,7 @@ Because PLE fusion can be harmful in open-ended generation, we train a logistic 
 
 #figure(
   scope: "parent",
-  image("figures/inference_pipeline.svg", width: 90%),
+  image("figures/inference_pipeline_dd.svg", width: 90%),
   caption: [Inference pipeline. The token policy decides whether to apply the learned PLE Projector or bypass it with base logits only.]
 )
 

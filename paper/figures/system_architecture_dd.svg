@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 760" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="arch-title arch-desc">
+  <title id="arch-title">PLE system architecture</title>
+  <desc id="arch-desc">Architecture of a frozen small language model combined with BM25 retrieval, PLE n-gram memory, and a learned PLE Projector for logit-level fusion.</desc>
+  <defs>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.9" fill="rgba(45,49,66,0.10)"/>
+    </pattern>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#f5f5f5"/>
+  <rect width="100%" height="100%" fill="url(#dots)" opacity="0.55"/>
+
+  <!-- zones behind -->
+  <rect x="40" y="100" width="260" height="340" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <rect x="60" y="104" width="60" height="12" rx="2" fill="#f5f5f5"/>
+  <text x="90" y="114" fill="rgba(45,49,66,0.40)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">INPUT</text>
+
+  <rect x="380" y="80" width="280" height="440" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <rect x="400" y="84" width="88" height="12" rx="2" fill="#f5f5f5"/>
+  <text x="444" y="94" fill="rgba(45,49,66,0.40)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">EVIDENCE</text>
+
+  <rect x="960" y="80" width="260" height="640" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <rect x="980" y="84" width="72" height="12" rx="2" fill="#f5f5f5"/>
+  <text x="1016" y="94" fill="rgba(45,49,66,0.40)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">FUSION</text>
+
+  <!-- arrows behind nodes -->
+  <line x1="170" y1="204" x2="170" y2="300" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <line x1="270" y1="332" x2="330" y2="332" stroke="#4f5d75" stroke-width="1.2"/>
+  <path d="M 330,332 V 152 M 330,332 V 392" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+  <line x1="330" y1="152" x2="410" y2="152" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="330" y1="272" x2="410" y2="272" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="330" y1="392" x2="410" y2="392" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <line x1="610" y1="152" x2="650" y2="152" stroke="#4f5d75" stroke-width="1.2"/>
+  <line x1="610" y1="272" x2="650" y2="272" stroke="#4f5d75" stroke-width="1.2"/>
+  <line x1="610" y1="392" x2="650" y2="392" stroke="#4f5d75" stroke-width="1.2"/>
+  <path d="M 650,152 V 392" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+  <line x1="650" y1="252" x2="720" y2="252" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <line x1="940" y1="252" x2="990" y2="252" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+  <line x1="1090" y1="284" x2="1090" y2="340" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="1090" y1="404" x2="1090" y2="460" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="1090" y1="524" x2="1090" y2="580" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- INPUT nodes -->
+  <rect x="70" y="140" width="200" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="170" y="168" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Query / Prompt</text>
+  <text x="170" y="184" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">user request</text>
+
+  <rect x="70" y="300" width="200" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="170" y="328" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Task Router</text>
+  <text x="170" y="344" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">task routing</text>
+
+  <!-- EVIDENCE nodes -->
+  <rect x="410" y="120" width="200" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="510" y="148" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">BM25 / RAG</text>
+  <text x="510" y="164" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">document evidence</text>
+
+  <rect x="410" y="240" width="200" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="510" y="268" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">PLE / Engram</text>
+  <text x="510" y="284" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">n-gram memory</text>
+
+  <rect x="410" y="360" width="200" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="510" y="388" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Backbone + MoRA</text>
+  <text x="510" y="404" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">parametric adapter</text>
+
+  <!-- Context features -->
+  <rect x="720" y="220" width="220" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="830" y="248" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Context Features</text>
+  <text x="830" y="264" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">hidden + memory feats</text>
+
+  <!-- FUSION nodes -->
+  <rect x="990" y="220" width="200" height="64" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="1090" y="248" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">PLE Projector</text>
+  <text x="1090" y="264" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">alpha / beta</text>
+
+  <rect x="990" y="340" width="200" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="1090" y="368" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Token Policy</text>
+  <text x="1090" y="384" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">safety gate</text>
+
+  <rect x="990" y="460" width="200" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="1090" y="488" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Logit Fusion</text>
+  <text x="1090" y="504" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">calibrated logits</text>
+
+  <rect x="990" y="580" width="200" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="1090" y="608" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Output</text>
+  <text x="1090" y="624" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">generated text</text>
+</svg>

@@ -14,8 +14,8 @@ lint: ## ruff 检查（与 CI 相同范围）
 test: ## pytest 冒烟
 	uv run pytest -q
 
-paper-diagrams: ## 用 Typst/Fletcher 重新生成论文架构图
-	bash scripts/make_paper_diagrams.sh
+paper-diagrams: ## 从 Diagram Design HTML 重新导出 SVG
+	python3 scripts/extract_dd_svgs.py
 
 paper: paper-diagrams ## 编译论文 PDF
 	/usr/local/bin/typst compile paper/paper.typ paper.pdf

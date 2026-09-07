@@ -61,7 +61,7 @@ LoRA @lora2022, QLoRA @qlora2023, and MoRA @mora2024 provide compact parametric 
 
 Let a context be a token sequence $c = (c_1, ..., c_t)$. We maintain sparse counts for each n-gram of order $n$:
 
-$$ p_m(y | c) = count(c, y) / sum_y count(c, y). $$
+$ p_m(y | c) = "count"(c, y) / sum_y "count"(c, y). $
 
 The memory also returns the longest matched order and an external value index that can be audited. This memory is non-parametric, transparent, and can be rebuilt from any corpus.
 
@@ -73,7 +73,7 @@ To avoid attributing noise to memory, we use a strict real/control protocol. The
 
 From a decision-theoretic perspective, the optimal way to combine a base model and a memory distribution is not to replace the base model, but to add a calibrated log-ratio correction @logopinion1986:
 
-$$ log p_fused(y) = log p_b(y) + lambda_t log p_m(y) + beta_t. $$
+$ log p_{"fused"}(y) = log p_b(y) + lambda_t log p_m(y) + beta_t. $
 
 This is a log-opinion-pool formulation. Without calibration, an unweighted n-gram prior is often over-confident and degrades generation @knnopen2023. The PLE Projector learns $lambda_t$ and $beta_t$ from hidden states and memory statistics.
 
@@ -91,7 +91,7 @@ We build an addressable n-gram memory from a code corpus and a wiki corpus. The 
 
 The projector is a small MLP:
 
-$$ f_theta(h_t, m_t) = (alpha_t, beta_t). $$
+$ f_theta(h_t, m_t) = (alpha_t, beta_t). $
 
 where $h_t$ is the last hidden state of the frozen backbone, and $m_t$ contains matched n-gram order, base entropy, memory entropy, density ratio, base top-1 probability, memory top-1 probability, memory/base agreement, and task one-hot. The output $alpha_t$ scales $log p_m$ and $beta_t$ adds a support bias. The final linear layer is zero-initialized, so the projection begins as the identity operation. Only the projector parameters are trained.
 

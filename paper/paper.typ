@@ -41,19 +41,43 @@ Our contributions are as follows.
 
 == External Memory Layers
 
-DeepSeek Engram @engram2026 and Qwen PLE implement conditional memory via scalable n-gram lookup. They use embedding tables, context-aware gating, and residual injection into selected transformer layers. Memory Grafting @memorygrafting2026 scales pre-training using an offline conditional memory table, while XMemTransfer @xmemtransfer2026 shows that a target-side reader can adapt a memory table across model families. Memory Layers at Scale @memorylayers2025 demonstrates that memory layers can be integrated into large models without full retraining.
+DeepSeek Engram @engram2026 and Qwen PLE implement conditional memory via scalable n-gram lookup. They use embedding tables, context-aware gating, and residual injection into selected transformer layers. Memory Grafting @memorygrafting2026 scales pre-training using an offline conditional memory table, while XMemTransfer @xmemtransfer2026 shows that a target-side reader can adapt a memory table across model families. Memory Layers at Scale @memorylayers2025 demonstrates that memory layers can be integrated into large models without full retraining. Product-key memory layers @productkeys2019 provide a related sparse lookup mechanism, and recent latent n-gram architectures such as Lngram v2 @lngramv2 and Tensorizing Engram @tensorizingengram improve the parameter efficiency and interpretability of discrete memory addressing. In the small-model regime, PEMA @pema2023, memory-augmented training @trainmem2022, Knowledge-in-Context @knowincontext2022, and plug-and-play knowledge injection @pipknowledge2023 show that external memory can be adapted after pretraining without full retraining.
+
+== Long-Term and Agent Memory
+
+A parallel line of work treats memory as a first-class agent resource. MemGPT @memgpt2023 introduces operating-system-style memory paging for LLM agents; HippoRAG @hipporag2024 and From RAG to Memory @fromragtomemory2025 convert retrieval corpora into long-term memory structures; Zep @zep2025, Memori @memori2026, and MemOrb @memorb2025 provide persistent or plug-and-play memory layers for conversational and agentic settings. These systems target long-range semantic memory, whereas our work focuses on a narrower, auditable token-level n-gram memory that is useful in low-entropy local continuations.
 
 == Non-Parametric Language Models
 
-kNN-LM @knnlm2020 is a classic non-parametric model that interpolates a base LM with a nearest-neighbor distribution over a datastore. Subsequent work showed that kNN-LM does not improve open-ended generation @knnopen2023. NGM @ngm2026 provides a training-free n-gram memory hook. Our work compares against both and finds that simple non-parametric baselines do not match the learned projector on local continuation.
+kNN-LM @knnlm2020 is a classic non-parametric model that interpolates a base LM with a nearest-neighbor distribution over a datastore. Efficient kNN-LM @efficientknn2021 reduces the inference cost of the datastore, and subsequent analysis asks why nearest-neighbor language models work @whyknn2023. Later work showed that kNN-LM does not improve open-ended generation @knnopen2023. NGM @ngm2026 provides a training-free n-gram memory hook. Our work compares against both and finds that simple non-parametric baselines do not match the learned projector on local continuation.
 
 == Distribution-Level Memory
 
-MemSFT @memsft2026 and TokenMem @tokenmem2026 propose external parametric memory channels that operate at the distribution or hidden-state level, with learned routers to avoid alignment tax. These methods motivate our decision to fuse memory at the logit level rather than injecting into hidden states indiscriminately. Earlier experiments in our project found that hidden-state injection without careful orthogonalization and gating can produce large real-vs-control gaps that are not attributable to the memory content.
+MemSFT @memsft2026 and TokenMem @tokenmem2026 propose external parametric memory channels that operate at the distribution or hidden-state level, with learned routers to avoid alignment tax. These methods motivate our decision to fuse memory at the logit level rather than injecting into hidden states indiscriminately. Related work on memory-augmented language models also highlights the difficulty of distinguishing genuine memory use from shallow parametric recall @dismemreason2024. Long-context evaluations show that models often fail to use information placed in the middle of long contexts @lostmiddle2023, and memory-based models can still struggle on reasoning-in-a-haystack tasks @haystackmem2025 @needlehaystack2024. LongBench @longbench2024 provides a broad bilingual long-context suite, while MemTrapBench @memtrap2026 probes cognitive traps in memory-heavy settings. Earlier experiments in our project found that hidden-state injection without careful orthogonalization and gating can produce large real-vs-control gaps that are not attributable to the memory content.
+
+== Retrieval Reliability and Calibration
+
+Adaptive retrieval methods such as Self-RAG @selfrag2023 and FAIR-RAG @fairrag2025 decide when retrieval is necessary; reliability-aware RAG systems further estimate whether retrieved evidence should be trusted @ragreliability2024 @era2026 @reliablerag2026, and RAGRouter-Bench @ragrouter2026 benchmarks learned query-routing policies. Calibration research has shown that language models are often overconfident, which motivates token-level safety gates and uncertainty-aware fusion @calibsample2024. On the code side, benchmarks such as HumanEval Pro @humanevalpro2024 extend classic #text("pass@k") evaluation to more challenging self-invoking settings.
 
 == Parameter-Efficient Adapters
 
 LoRA @lora2022, QLoRA @qlora2023, and MoRA @mora2024 provide compact parametric updates. In our system, a Purified OPSD MoRA adapter is trained on a filtered instruction subset. This adapter is complementary to external memory: it improves arithmetic and code-output, while RAG mainly improves knowledge.
+
+= Problem Setting
+
+We consider a frozen small language model with next-token distribution $p_b(y | c)$, where $c$ is the current token context. A sparse n-gram memory provides a complementary distribution $p_m(y | c)$ that can be audited by inspecting the matched n-gram and its source document. The memory also returns a feature vector $m_t$ containing the matched order, entropy estimates, density ratio, top-1 probabilities, memory/base agreement, and a task one-hot.
+
+Our goal is to compute a per-token fused distribution:
+
+$ p_{"fused"}(y) = "softmax"[ log p_b(y) + alpha_t log p_m(y) + beta_t ]. $
+
+We call $(alpha_t, beta_t)$ the PLE correction. A token-level safety policy $g_t$ determines whether the correction is active:
+
+$ g_t = "sigmoid"(w dot m_t + b). $
+
+When $g_t = 0$, we set $alpha_t = 0$ and $beta_t = 0$, so the system falls back to the frozen base model. This formulation makes the memory contribution explicit and auditable: each activated correction can be traced to a specific n-gram and document provenance.
+
+We evaluate with a strict real/control protocol. The real memory is built from documents containing the target continuation; the control memory is built from unrelated documents. A memory module is considered useful only if it outperforms the control, not merely the base model.
 
 = Background and Theory
 
@@ -131,7 +155,7 @@ All experiments use Qwen3.5-0.8B as the frozen backbone. When adapters are used,
 + Dataset sizes: 100, 1k, and 10k samples.
 + HumanEval: official @humaneval2021, first 20 problems.
 + TriviaQA: official @triviaqa2017, 100 examples.
-+ Joint system tasks: knowledge, arithmetic, and code-output subsets.
++ Joint system tasks: knowledge, arithmetic, and code-output subsets, with arithmetic probes inspired by GSM8K and MATH style benchmarks @gsm8k2021 @math2021.
 
 == Baselines
 
@@ -163,7 +187,7 @@ We use 5 seeds for the 100-sample projector experiment and 3 seeds for the 10k e
 
 The PLE memory produces positive real-vs-control gains on code and name tasks in earlier experiments. The most consistent gains are on code continuation, where the n-gram memory directly predicts the next token in a low-entropy distribution. Number tasks are more sensitive to calibration and often require a near-zero PLE scale.
 
-== Learned Projector Scaling
+=== Projector Scaling
 
 At 100 samples with 5 seeds, the projector-vs-fixed NLL mean is $+0.1044$ with bootstrap 95% CI $[0.0251, 0.1866]$. At 10k samples with 3 seeds, the improvement grows to $+0.2595$ with CI $[0.1218, 0.4243]$.
 
@@ -268,6 +292,23 @@ We use DeepSeek V4 Flash as an external judge @llmjudge2024. For HumanEval 20, t
 
 The judge scores are lower than pass-based metrics. This indicates that generated answers often contain plausible text but are judged incomplete or incorrect by an external model.
 
+== Error Analysis and Sensitivity
+
+The available evidence identifies three recurring failure modes and the corresponding mitigations.
+
+#figure(
+  table(
+    columns: 3,
+    [Failure mode], [Observed evidence], [Mitigation],
+    [Over-confident n-gram prior], [Open-ended repetition and repository fragments], [Learned token policy],
+    [Missing world knowledge], [TriviaQA exact match equals 0], [RAG and parametric adapters],
+    [Hidden-state misalignment], [Real-vs-control gains near zero], [Logit-level calibrated fusion]
+  ),
+  caption: [Error analysis and mitigating mechanisms.]
+)
+
+On sensitivity, the paired projector results show a clear data-size trend: the mean projector-vs-fixed NLL improvement grows from $+0.1044$ at 100 samples with five seeds to $+0.2595$ at 10k samples with three seeds. The token policy is the main safety control for open-ended generation, while per-task calibration is the main control for number-like tasks. Systematic sweeps over memory size and n-gram order are not yet available and are left to future work.
+
 = Analysis
 
 == When Does PLE Help?
@@ -303,6 +344,16 @@ Earlier in this project we attempted hidden-state readers, MLP readers, and dire
 We presented an auditable n-gram external memory system for a 0.8B frozen model. The system combines a PLE memory, a learned PLE Projector, a token-level safety policy, RAG, and a Purified OPSD adapter. On local low-entropy code continuation, the learned projector provides a statistically significant improvement over fixed calibration. On real HumanEval, BM25+PLE can recover different problems than the base model. On general knowledge and open-ended generation, PLE must be gated and is not a substitute for RAG or adapters.
 
 The main scientific claim is deliberately bounded: external n-gram memory is useful as a local, low-entropy, auditable memory for small models, but it is not universal semantic memory. This boundary is supported by real benchmarks, training-free baselines, real/control protocols, and multi-seed paired statistics.
+
+= Acknowledgement
+
+We thank the open-source community for the PLE/Engram, Qwen, and related memory infrastructure used in this study. This work was carried out as an independent low-resource research project.
+
+= Data Availability
+
+All source code, evaluation scripts, container definitions, and evaluation cards are publicly available in the project repository. The PLE memory tables can be rebuilt from the published corpus construction scripts. Public model and adapter weights are not yet released; we plan to release projector weights and a full reproducibility checklist in a future version.
+
+#set heading(numbering: none)
 
 = Appendix
 

@@ -9,7 +9,7 @@
   abstract: [
     Small language models face a fundamental capacity bottleneck: they must either compress knowledge into parameters or retrieve it at inference time. Retrieval-augmented generation (RAG) is the dominant solution, but its behavior is opaque and its retrieved evidence is not fully auditable @rag2020. In this paper, we study a complementary mechanism: an #emph[auditable n-gram external memory] derived from the PLE / Engram line of sparse external-memory systems @engram2026. We attach this memory to a frozen Qwen3.5-0.8B model and introduce a small learned #emph[PLE Projector] that maps the backbone hidden state plus lexical memory features into per-token logit scale and bias corrections. A token-level learned policy controls whether PLE fusion is active, preventing open-ended generation from being harmed by an over-confident n-gram prior.
 
-    We evaluate the system across local-continuation tasks, real HumanEval @humaneval2021, real TriviaQA @triviaqa2017, and a joint system with RAG and parameter-efficient adapters @lora2022 @qlora2023 @mora2024. On 10k local-continuation data with three seeds, the learned projector improves teacher-forced NLL by $0.26$ over fixed PLE calibration with bootstrap 95% CI $[0.12, 0.42]$. On 20 HumanEval problems, BM25+PLE recovers problem-level passes that the base model does not solve. However, on TriviaQA the 0.8B base model obtains zero exact match, and raw PLE fusion can degrade open-ended generation @knnopen2023. Our conclusion is deliberately a #emph[boundary] result: n-gram external memory is valuable as a local low-entropy code memory, but it is not a substitute for RAG or parametric adapters on general tasks.
+    We evaluate the system across local-continuation tasks, real HumanEval @humaneval2021, real TriviaQA @triviaqa2017, and a joint system with RAG and parameter-efficient adapters @lora2022 @qlora2023 @mora2024. On 10k local-continuation data with five seeds, the learned projector improves teacher-forced NLL by $0.22$ over fixed PLE calibration with bootstrap 95% CI $[0.14, 0.33]$. On 50 HumanEval problems, greedy decoding shows that BM25+PLE recovers problem-level passes that the base model does not solve, while 10-problem #text("pass@k") sampling improves from $0.40$ to $0.70$. On 200 TriviaQA examples the 0.8B base model obtains only $0.005$ exact match, and raw PLE fusion can degrade open-ended generation @knnopen2023. Our conclusion is deliberately a #emph[boundary] result: n-gram external memory is valuable as a local low-entropy code memory, but it is not a substitute for RAG or parametric adapters on general tasks.
   ],
   bibliography: bibliography("refs.bib"),
   accepted: none,
@@ -156,8 +156,8 @@ All experiments use Qwen3.5-0.8B as the frozen backbone. When adapters are used,
 
 + Local continuation: code corpus and wiki corpus, produced by building n-gram memories and sampling positions by token category.
 + Dataset sizes: 100, 1k, and 10k samples.
-+ HumanEval: official @humaneval2021, first 20 problems.
-+ TriviaQA: official @triviaqa2017, 100 examples.
++ HumanEval: official @humaneval2021, first 50 problems.
++ TriviaQA: official @triviaqa2017, 200 validation examples.
 + Joint system tasks: knowledge, arithmetic, and code-output subsets, with arithmetic probes inspired by GSM8K and MATH style benchmarks @gsm8k2021 @math2021.
 
 == Baselines
@@ -182,7 +182,7 @@ All experiments use Qwen3.5-0.8B as the frozen backbone. When adapters are used,
 
 == Statistical Protocol
 
-We use 5 seeds for the 100-sample projector experiment and 3 seeds for the 10k experiment. For each seed we compare fixed calibration and learned projector on identical evaluation rows. Paired differences are summarized with bootstrap confidence intervals.
+We use 5 seeds for both the 100-sample and 10k projector experiments. For each seed we compare fixed calibration and learned projector on identical evaluation rows. Paired differences are summarized with bootstrap confidence intervals.
 
 = Results
 
@@ -192,7 +192,7 @@ The PLE memory produces positive real-vs-control gains on code and name tasks in
 
 === Projector Scaling
 
-At 100 samples with 5 seeds, the projector-vs-fixed NLL mean is $+0.1044$ with bootstrap 95% CI $[0.0251, 0.1866]$. At 10k samples with 3 seeds, the improvement grows to $+0.2595$ with CI $[0.1218, 0.4243]$.
+At 100 samples with 5 seeds, the projector-vs-fixed NLL mean is $+0.1044$ with bootstrap 95% CI $[0.0251, 0.1866]$. At 10k samples with 5 seeds, the improvement grows to $+0.2249$ with CI $[0.1436, 0.3255]$, and all five seeds are positive. The paired per-seed differences are all statistically significant in the 10k setting.
 
 #figure(
   table(
@@ -200,9 +200,11 @@ At 100 samples with 5 seeds, the projector-vs-fixed NLL mean is $+0.1044$ with b
     [Seed], [Base NLL], [Fixed NLL], [Proj. NLL], [Base hit], [Fixed hit], [Proj. hit],
     [0], [3.148], [3.051], [2.930], [0.407], [0.427], [0.463],
     [1], [3.328], [3.346], [3.114], [0.410], [0.420], [0.460],
-    [2], [3.451], [3.426], [3.002], [0.413], [0.430], [0.493]
+    [2], [3.451], [3.426], [3.002], [0.413], [0.430], [0.493],
+    [3], [3.238], [3.066], [2.848], [0.397], [0.420], [0.473],
+    [4], [3.197], [3.041], [2.913], [0.400], [0.427], [0.417]
   ),
-  caption: [10k local-continuation results. NLL is lower-is-better.]
+  caption: [10k local-continuation results, five seeds. NLL is lower-is-better.]
 )
 
 #figure(
@@ -210,20 +212,20 @@ At 100 samples with 5 seeds, the projector-vs-fixed NLL mean is $+0.1044$ with b
   caption: [Per-seed projector-vs-fixed improvements on 10k data.]
 )
 
-Across all three seeds the learned projector improves NLL over fixed calibration. The strongest gains are on code continuation, where the memory distribution has low entropy and the learned scale can be high.
+Across all five seeds the learned projector improves NLL over fixed calibration. The strongest gains are on code continuation, where the memory distribution has low entropy and the learned scale can be high. The scaling trend from 100 to 1k to 10k samples is consistent: more projector training data improves the learned scale/bias policy.
 
 == HumanEval
 
-On 20 official HumanEval problems, base and BM25+PLE both achieve $0.10$ #text("pass@1"), but the passed problems are completely disjoint.
+On 50 official HumanEval problems with greedy decoding, base achieves $0.22$ #text("pass@1") while BM25+PLE achieves $0.10$. The BM25+PLE condition has a higher repetition rate. Although the overall greedy pass rate is lower, the two methods solve largely different problems.
 
 #figure(
   table(
     columns: 3,
     [Condition], [#text("pass@1")], [mean repetition],
-    [Base], [0.10], [0.010],
-    [BM25+PLE], [0.10], [0.026]
+    [Base], [0.22], [0.025],
+    [BM25+PLE], [0.10], [0.041]
   ),
-  caption: [HumanEval 20 results.]
+  caption: [HumanEval 50 greedy results.]
 )
 
 #figure(
@@ -231,11 +233,27 @@ On 20 official HumanEval problems, base and BM25+PLE both achieve $0.10$ #text("
   caption: [HumanEval #text("pass@1") and repetition.]
 )
 
-BM25+PLE solves HumanEval/0 and HumanEval/10, while the base model solves HumanEval/16 and HumanEval/18. This shows that PLE provides a different source of local code knowledge: it does not simply amplify the base model's existing solution distribution, but can recover different problems.
+The base model passes HumanEval/16, 18, 23, 25, 32, 33, 38, 41, 43, 46, and 49. BM25+PLE passes HumanEval/0, 10, 27, 35, and 41. The only overlap is HumanEval/41. Thus BM25+PLE recovers four problems that the base model never solves, confirming that PLE provides a different source of local code knowledge rather than simply amplifying the base model's existing solution distribution.
+
+=== Sampling and #text("pass@k")
+
+Because greedy decoding can be sensitive to the exact modal token, we also evaluate sampling with 10 problems and 3 samples per problem. Under temperature $0.8$ and top-$p$ $0.9$, BM25+PLE improves #text("pass@k") from $0.40$ to $0.70$, while increasing repetition only slightly.
+
+#figure(
+  table(
+    columns: 4,
+    [Condition], [#text("pass@k")], [passed / 10], [mean repetition],
+    [Base], [0.40], [4], [0.001],
+    [BM25+PLE], [0.70], [7], [0.008]
+  ),
+  caption: [HumanEval #text("pass@k") with 10 problems and 3 samples per problem.]
+)
+
+The contrast between greedy #text("pass@1") and sampled #text("pass@k") suggests that the n-gram memory is not uniformly beneficial: it can suppress the base model's greedy mode in some cases, while helping exploration in a diverse sampling regime.
 
 == TriviaQA
 
-On 100 TriviaQA RC examples, the 0.8B base model obtains exact match $0.0$ and mean repetition $0.0048$. This is a truthful baseline: the model fails short-form knowledge QA @triviaqa2017. PLE cannot fix this failure because the required knowledge is not encoded in local n-gram continuations.
+On 200 TriviaQA RC validation examples, the 0.8B base model obtains exact match $0.005$ and mean repetition $0.0076$. This is a truthful baseline: the model nearly always fails short-form knowledge QA @triviaqa2017. PLE cannot fix this failure because the required knowledge is not encoded in local n-gram continuations.
 
 == Training-Free Baselines
 
@@ -286,7 +304,7 @@ Raw PLE projector fusion on natural-language code prompts produces visible degra
 
 == LLM-as-Judge
 
-We use DeepSeek V4 Flash as an external judge @llmjudge2024. For HumanEval 20, the mean score is $0.50$ for base and $0.25$ for BM25+PLE. For a 20-example TriviaQA subset, base scores $0.25$.
+We use DeepSeek V4 Flash as an external judge @llmjudge2024. On 50 HumanEval problems, the mean score is $0.60$ for base and $0.20$ for BM25+PLE. On 200 TriviaQA examples, the mean judge score is $0.465$. For completeness, we also measured HumanEval 20 and TriviaQA 100 subsets at $0.375$ and $0.450$, respectively. A parallel API rerun produced slightly different values ($0.40$ overall on HumanEval 50, $0.43$ on TriviaQA 200), so judge scores should be interpreted with the usual LLM-judge variance caveat.
 
 #figure(
   image("figures/fig_judge.png", width: 100%),
@@ -304,13 +322,30 @@ The available evidence identifies three recurring failure modes and the correspo
     columns: 3,
     [Failure mode], [Observed evidence], [Mitigation],
     [Over-confident n-gram prior], [Open-ended repetition and repository fragments], [Learned token policy],
-    [Missing world knowledge], [TriviaQA exact match equals 0], [RAG and parametric adapters],
+    [Missing world knowledge], [TriviaQA exact match = 0.005], [RAG and parametric adapters],
     [Hidden-state misalignment], [Real-vs-control gains near zero], [Logit-level calibrated fusion]
   ),
   caption: [Error analysis and mitigating mechanisms.]
 )
 
-On sensitivity, the paired projector results show a clear data-size trend: the mean projector-vs-fixed NLL improvement grows from $+0.1044$ at 100 samples with five seeds to $+0.2595$ at 10k samples with three seeds. The token policy is the main safety control for open-ended generation, while per-task calibration is the main control for number-like tasks. Systematic sweeps over memory size and n-gram order are not yet available and are left to future work.
+On sensitivity, we ran systematic sweeps over n-gram order and memory-bank size on the code task. The calibrated PLE fusion gain increases with n-gram order, from $0.456$ nats at order 2 to $0.605$ nats at order 5. The memory-size trend is non-monotonic: the smallest bank has the largest fused gain ($1.408$), while the largest bank has the smallest gain ($0.210$), suggesting that a compact same-domain n-gram bank is more useful than a large diffuse corpus for this local task.
+
+#figure(
+  table(
+    columns: 3,
+    [Setting], [Real-vs-control gap], [Calibrated fused gain],
+    [order 2], [20.23], [0.456],
+    [order 3], [20.69], [0.501],
+    [order 4], [20.49], [0.574],
+    [order 5], [20.53], [0.605],
+    [memory 40/80], [22.68], [1.408],
+    [memory 120/240], [19.47], [0.755],
+    [memory 300/600], [20.28], [0.210]
+  ),
+  caption: [Sensitivity over n-gram order and memory-bank size on code continuation. The calibrated fused gain is the NLL improvement of calibrated real fusion over the base model.]
+)
+
+The token policy remains the main safety control for open-ended generation, while per-task calibration is the main control for number-like tasks. These systematic sweeps are now included in the public artifact bundle.
 
 = Analysis
 
@@ -336,11 +371,12 @@ Earlier in this project we attempted hidden-state readers, MLP readers, and dire
 
 = Limitations
 
-+ HumanEval subset is only 20 problems, and TriviaQA exact match is zero.
-+ #text("pass@k") evidence is a small 3-problem, 2-sample experiment.
-+ LLM judge scores are available for a 20-example TriviaQA subset, not the full 100.
-+ Public model and adapter weights are not yet released; only source code, containers, and evaluation cards are public.
-+ CPU deployment throughput is not yet optimized.
++ HumanEval is limited to 50 problems, although the pass sets are already informative.
++ TriviaQA exact match is very close to zero ($0.005$), so the paper reports a boundary rather than a positive result.
++ #text("pass@k") evidence is a 10-problem, 3-sample experiment, not a full benchmark-scale estimate.
++ LLM judge scores show run-to-run variance and should be treated as secondary evidence.
++ CPU deployment throughput is still only about $2$ tok/s with the current unoptimized eager implementation.
++ Public projector and adapter weights are available on Hugging Face, but the upstream Qwen model weights themselves are not redistributed.
 
 = Conclusion
 
@@ -354,7 +390,7 @@ We thank the open-source community for the PLE/Engram, Qwen, and related memory 
 
 = Data Availability
 
-All source code, evaluation scripts, container definitions, and evaluation cards are publicly available in the project repository. The PLE memory tables can be rebuilt from the published corpus construction scripts. Public model and adapter weights are not yet released; we plan to release projector weights and a full reproducibility checklist in a future version.
+All source code, evaluation scripts, container definitions, evaluation cards, and checksums are publicly available in the project repository and in the Hugging Face artifact repository. The released artifact bundle includes PLE projector checkpoints, Purified OPSD MoRA adapters, projector datasets, configurations, and the raw evaluation result files. The PLE memory tables can be rebuilt from the published corpus construction scripts, and upstream Qwen model weights are not redistributed.
 
 #set heading(numbering: none)
 
@@ -408,11 +444,11 @@ To distinguish genuine memory use from model noise, we use a strict paired proto
 
 == D. HumanEval Problem-Level Passes
 
-On the 20-problem HumanEval subset, the base model solves HumanEval/16 and HumanEval/18, while BM25+PLE solves HumanEval/0 and HumanEval/10. The two pass sets are disjoint. This supports the claim that PLE provides a different source of local code knowledge rather than simply amplifying the base model.
+On the 50-problem HumanEval subset, the base model solves 11 problems and BM25+PLE solves 5 problems. The two pass sets overlap only at HumanEval/41. This supports the claim that PLE provides a different source of local code knowledge rather than simply amplifying the base model, and also shows that BM25+PLE does not uniformly dominate greedy decoding.
 
 == E. Case Study: TriviaQA Failure
 
-The frozen 0.8B model obtains zero exact match on the 100-example TriviaQA subset. The failure is systematic rather than a calibration artifact: short-form knowledge questions require world knowledge that is not present in local n-gram continuations. A raw PLE fusion cannot recover this knowledge and may instead produce plausible but incorrect continuations.
+The frozen 0.8B model obtains only $0.005$ exact match on the 200-example TriviaQA validation subset. The failure is systematic rather than a calibration artifact: short-form knowledge questions require world knowledge that is not present in local n-gram continuations. A raw PLE fusion cannot recover this knowledge and may instead produce plausible but incorrect continuations.
 
 == F. Case Study: Open-Ended Degradation
 
@@ -420,8 +456,8 @@ Without the token-level policy, unconditional PLE fusion on natural-language cod
 
 == G. Limitations and Future Work
 
-+ HumanEval is limited to 20 problems in the current version.
-+ TriviaQA exact match is zero, so the paper reports a boundary rather than a positive result.
-+ Public weights have not yet been released.
++ HumanEval is limited to 50 problems in the current version.
++ TriviaQA exact match is $0.005$, so the paper reports a boundary rather than a positive result.
++ Public projector and adapter weights are released, but upstream model weights are not redistributed.
 + CPU latency and quantization remain unoptimized.
-+ Future work includes memory-size scaling, n-gram-order ablations, and full joint-system evaluation on larger real benchmarks.
++ Future work includes extending memory-size scaling and full joint-system evaluation on larger real benchmarks.

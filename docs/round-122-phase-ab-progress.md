@@ -67,9 +67,11 @@ BM25+PLE  pass@k = 0.70 (7/10), rep = 0.0083
 | 数据 | 样本 | mean judge score |
 |---|---:|---:|
 | HumanEval 20（base+bm25_ple） | 40 | 0.375 |
-| HumanEval 50（base+bm25_ple） | 100 | 0.300 |
+| HumanEval 50（base+bm25_ple） | 100 | 0.400 |
 | TriviaQA 100 | 100 | 0.450 |
-| TriviaQA 200 | 200 | 0.430 |
+| TriviaQA 200 | 200 | 0.465 |
+
+> 并行 API 复跑得到 HumanEval 0.300 / TriviaQA 0.430，说明 judge 存在一定波动；论文中应报告多次运行或说明单次值。
 
 ### 1.7 Sensitivity / Ablation
 

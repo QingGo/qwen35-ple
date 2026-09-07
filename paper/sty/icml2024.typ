@@ -403,7 +403,7 @@
   // Configure algorithm rendering.
   counter(figure.where(kind: "algorithm")).update(0)
   show figure.caption.where(kind: "algorithm"): it => block(width: 100%, {
-    set align(left)
+    set align(center)
     context { strong[#it.supplement #it.counter.display(it.numbering)] }
     [ ]
     it.body
@@ -412,10 +412,13 @@
     let render() = block(breakable: false, width: 100%, {
         set block(spacing: 0em)
         line(length: 100%, stroke: (thickness: 0.08em))
-        block(spacing: 0.1em, it.caption)  // NOTE: No idea why we need it.
+        v(0.35em, weak: true)
+        block(width: 100%, spacing: 0.18em, it.caption)
+        v(0.15em, weak: true)
         line(length: 100%, stroke: (thickness: 0.05em))
+        v(0.35em, weak: true)
         it.body
-        v(0.3em, weak: true)
+        v(0.4em, weak: true)
         line(length: 100%, stroke: (thickness: 0.08em))
       })
     if it.placement == none {

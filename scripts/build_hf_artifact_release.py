@@ -57,6 +57,13 @@ REPO_FILES = {
         "scripts/analyze_ple_projector_paired.py",
         "scripts/run_sensitivity_sweep.sh",
         "scripts/run_ple_evidence_p0.py",
+        "scripts/build_hf_artifact_release.py",
+    ],
+    "root_files": [
+        "Dockerfile",
+        "Makefile",
+        "AGENTS.md",
+        "docs/round-122-phase-ab-progress.md",
     ],
 }
 
@@ -153,6 +160,21 @@ def main() -> int:
             dst = bundle / "scripts" / Path(rel).name
             _copy_tree(src, dst)
             manifest["files"].append({"path": str(dst.relative_to(bundle)), "sha256": _sha256(dst), "bytes": dst.stat().st_size})
+
+    # Root-level release files
+    for rel in REPO_FILES["root_files"]:
+        src = root / rel
+        if src.exists():
+            dst = bundle / "root" / Path(rel).name
+            _copy_tree(src, dst)
+            manifest["files"].append({"path": str(dst.relative_to(bundle)), "sha256": _sha256(dst), "bytes": dst.stat().st_size})
+        elif Path(rel).suffix == ".md":
+            # Keep docs under docs/ when a top-level file is missing.
+            src2 = root / "docs" / Path(rel).name
+            if src2.exists():
+                dst = bundle / "docs" / Path(rel).name
+                _copy_tree(src2, dst)
+                manifest["files"].append({"path": str(dst.relative_to(bundle)), "sha256": _sha256(dst), "bytes": dst.stat().st_size})
 
     manifest_path = bundle / "artifact-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

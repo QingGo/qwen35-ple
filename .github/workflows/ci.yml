@@ -55,3 +55,23 @@ jobs:
 
       - name: Lazy-window synthetic gate
         run: uv run python scripts/bench_lazy_windows.py --synthetic --synthetic-tokens 512 --seq-len 64 --step 64 --max-batch-s 0.05
+
+  pdf-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qwen35-ple
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: qwen35-ple
+
+      - uses: typst-community/setup-typst@v3
+
+      - name: Compile paper PDF
+        run: typst compile paper/paper.typ paper.pdf
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paper-pdf
+          path: paper.pdf

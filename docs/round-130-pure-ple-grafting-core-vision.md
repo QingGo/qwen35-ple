@@ -72,22 +72,36 @@ install_disk_multi_head_embedding(store)
 
 | 已有尝试 | 是否 A0/A1 | 新计划是否重复 |
 |---|---|---|
-| CPU/合成小素数 PLE 表，A0/A1 各 10 步 | 不完整 A0/A1 | **不重复**，新计划用真表 |
+| CPU/合成小素数 PLE 表，A0/A1 各 10 步 | 不完整 A0/A1 | **不重复** |
+| 1M tokens / 真实 qwen38-rows / official reader + 2层MLP / layer 8 / 500 steps / 3 seeds | **已完成 A1 级 1M** | **不重复** |
 | logit-level PLE Projector，10k 样本 | 不是 PLE 层注入 | **不重复** |
 | hidden-state reader / MLP reader | 窄通道 | **不重复** |
 | RAG + BM25 + PLE 混合 | 系统层 | **不做核心** |
 | Purified OPSD / MoRA | 能力手段 | 仅作为后备手段 |
 | 蒸馏 teacher-text | 能力手段 | 仅作为后备手段 |
 
-新计划只做此前没有真正做过的：
+已经完成的 1M 纯 reader 实验：
 
 ```text
-真实 48GB PLE 表
-+ 注入 0.8B 第 2 层
-+ 只训练记忆层内适配器
-+ 1M/5M/20M tokens
-+ 无 RAG
-+ 通用任务评测
+模型：Qwen3.5-0.8B
+表：qwen38-rows（真实 48GB）
+Reader：OfficialSourceQwenReader + 2 层 MLP bridge/out_proj
+注入层：layer 8
+训练：1M tokens, 500 steps, 3 seeds
+三线：no-reader / real / control
+结果：PPL real > control > no-reader
+QA 9题：real 51.85% > control 48.15% > no-reader 44.44%
+```
+
+所以 1M 已经做过，**不要重复**。
+
+新计划真正未做的：
+
+```text
+5M / 20M tokens
++ 更标准的 QA 集（≥50题/任务）
++ 可选：layer 2 vs layer 8 注入位置对比
++ 可选：更多 reader 变体
 ```
 
 ---
@@ -121,11 +135,10 @@ A3：A1 + 小 LoRA（仅作实现手段，不是核心）
 - 长上下文：长文档
 ```
 
-训练规模阶梯：
+训练规模阶梯（因为 1M 已做过）：
 
 ```text
-1M tokens  → 快速 smoke
-5M tokens  → 初步判断
+5M tokens  → 初步判断（1M 已有基线）
 20M tokens → 关键判断
 ```
 
@@ -237,27 +250,33 @@ A3：A1 + 小 LoRA（仅作实现手段，不是核心）
 
 ## 8. 下一步行动
 
-### 第一步（本周）
+### 第一步（本周，基于已有 1M 结果）
 
-用真实 PLE 表 + engram-peft 在 0.8B 上：
+1. 确定 5M 正式协议：
+   - 3 seeds；
+   - real / control / no-reader；
+   - PPL；
+   - 标准 QA 集（≥50 题/任务）；
+   - 代码/数学/长上下文；
+2. 直接跑 5M tokens 的 memory-layer-only 训练；
+3. 与已有 1M 结果比较收益曲线。
 
-1. 跑通 A1 真表层注入 forward；
-2. 验证无 NaN、无严重退化；
-3. 跑 1M tokens 的 memory-layer-only 训练；
-4. 在通用 held-out + real/control 上评测。
-
-### 第二步（如果 1M 有信号）
-
-```text
-5M tokens
-```
-
-### 第三步（关键判断）
+### 第二步（如果 5M 有信号）
 
 ```text
 20M tokens
-A1/A2 vs A0
-real vs control
+```
+
+### 第三步（如果 5M 仍不够）
+
+```text
+比较注入层：
+- layer 2
+- layer 8
+比较 reader 变体：
+- official reader + MLP
+- 更深的 reader
+- minimal target-side reader
 ```
 
 ### 第四步（根据结果决定）
@@ -277,7 +296,8 @@ real vs control
 >
 > **核心问题只有一个：真实 PLE 层注入 0.8B，少量训练，能否显著提升通用性能。**
 >
-> 这还没有被真正测试过。
+> 1M 纯 reader 已经测过（PPL 正，QA 小样本方向性正）；
+> 但 5M/20M 和标准 QA 集还没有真正做过。
 >
-> 我们有 48GB 真实 PLE 表、engram-peft 支持、0.8B 模型。
-> 下一步就该直接做这个实验。
+> 我们有 48GB 真实 PLE 表、已有 1M 基线、engram-peft 支持、0.8B 模型。
+> 下一步应直接做 5M 正式矩阵，而不是重复 1M。

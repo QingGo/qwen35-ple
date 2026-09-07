@@ -15,6 +15,9 @@
   accepted: none,
 )
 
+#set enum(indent: 1em, spacing: 0.55em)
+#set list(indent: 1em, spacing: 0.55em)
+
 = Introduction
 
 Large language models have achieved strong performance through scale, but small models remain important for cost, latency, privacy, and on-device deployment. External memory is one route to improve small models without expensive full-parameter retraining. Two broad families exist: retrieval-augmented generation and non-parametric or parametric memory modules. RAG is effective but has limitations: it retrieves documents, not token-level continuations; it can be noisy; and its evidence is not always easy to audit @rag2020. Non-parametric memory, such as kNN-LM @knnlm2020 and n-gram memory, offers a different granularity: it can directly influence the next-token distribution.
@@ -354,6 +357,8 @@ We thank the open-source community for the PLE/Engram, Qwen, and related memory 
 All source code, evaluation scripts, container definitions, and evaluation cards are publicly available in the project repository. The PLE memory tables can be rebuilt from the published corpus construction scripts. Public model and adapter weights are not yet released; we plan to release projector weights and a full reproducibility checklist in a future version.
 
 #set heading(numbering: none)
+
+#pagebreak()
 
 = Appendix
 

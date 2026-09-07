@@ -209,10 +209,34 @@ def main() -> int:
 
     readme = bundle / "README.md"
     readme.write_text(
-        """# qwen35-ple Auditable N-Gram Memory Artifacts
+        """---
+language:
+  - en
+license: apache-2.0
+tags:
+  - n-gram
+  - external-memory
+  - small-language-models
+  - auditable-memory
+  - ple
+  - engram
+  - low-resource
+library_name: custom
+pipeline_tag: text-generation
+---
+
+# qwen35-ple Auditable N-Gram Memory Artifacts
 
 This release contains the reproducible artifacts for the paper
 **Auditable N-Gram Memory for Small Language Models**.
+
+## Links
+
+- Code repository: https://github.com/QingGo/qwen35-ple
+- Paper source: https://github.com/QingGo/qwen35-ple/blob/main/paper/paper.typ
+- Compiled PDF: https://github.com/QingGo/qwen35-ple/blob/main/paper.pdf
+- Evaluation card: https://github.com/QingGo/qwen35-ple/blob/main/docs/evaluation-card-paper.md
+- Reproducibility manifest: https://github.com/QingGo/qwen35-ple/blob/main/docs/reproducibility-manifest.md
 
 ## Contents
 
@@ -221,6 +245,7 @@ This release contains the reproducible artifacts for the paper
 - `datasets/`: PLE projector local-continuation datasets (1k and 10k).
 - `configs/`: N-gram fusion router / token policy / projector configs.
 - `scripts/`: Evaluation, training, fairness/sensitivity scripts.
+- `results/`: HumanEval, TriviaQA, pass@k, LLM judge, sensitivity, CPU benchmark results.
 - `docs/`: Evaluation card, reproducibility manifest, evidence notes.
 - `artifact-manifest.json` / `SHA256SUMS`: checksums and provenance.
 

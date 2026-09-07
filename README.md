@@ -15,6 +15,15 @@ EngramDB     (存储: PLE/Engram n-gram 行表, badge 布局, Store-P 视图, C 
 LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目标)
 ```
 
+## 公开 Artifact
+
+- Hugging Face 模型/artifact 仓库：
+  [DefEki/qwen35-ple-auditable-ngram-memory](https://huggingface.co/DefEki/qwen35-ple-auditable-ngram-memory)
+- 论文源码：`paper/paper.typ`
+- 编译 PDF：`paper.pdf`
+- 可复现清单：`docs/reproducibility-manifest.md`
+- 评测卡：`docs/evaluation-card-paper.md`
+
 ## 关键文档
 
 | 文档 | 内容 |

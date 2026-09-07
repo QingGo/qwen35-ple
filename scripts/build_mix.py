@@ -44,7 +44,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-CATEGORIES = ("general", "chat", "wiki", "cot", "tool")
+CATEGORIES = ("general", "chat", "wiki", "cot", "tool", "code", "stem")
 DEFAULT_RATIOS = {
     "general": 50,
     "chat": 20,
@@ -62,8 +62,9 @@ def _log(msg: str) -> None:
 
 
 def _parse_ratios(raw: str | None) -> dict[str, float]:
-    ratios = dict(DEFAULT_RATIOS)
+    ratios = {cat: 0.0 for cat in CATEGORIES}
     if not raw:
+        ratios.update(DEFAULT_RATIOS)
         return ratios
     for part in raw.split(","):
         part = part.strip()
@@ -428,6 +429,8 @@ def main() -> int:
     parser.add_argument("--wiki", action="append", default=[], help="wiki/encyclopedia source (repeatable)")
     parser.add_argument("--cot", action="append", default=[], help="chain-of-thought source (repeatable)")
     parser.add_argument("--tool", action="append", default=[], help="tool/agent source (repeatable)")
+    parser.add_argument("--code", action="append", default=[], help="code source (repeatable)")
+    parser.add_argument("--stem", action="append", default=[], help="STEM/QA source (repeatable)")
     parser.add_argument("--max-records-per-category", type=int, default=None)
     parser.add_argument("--chunk-tokens", type=int, default=DEFAULT_CHUNK_TOKENS)
     parser.add_argument("--chunk-chars", type=int, default=DEFAULT_CHUNK_CHARS)
@@ -525,7 +528,7 @@ def main() -> int:
     total_selected = 0
 
     for cat in CATEGORIES:
-        budget = int(round(args.target_tokens * ratios[cat] / sum(ratios.values())))
+        budget = round(args.target_tokens * ratios[cat] / sum(ratios.values()))
         texts, lengths = all_texts[cat], all_lengths[cat]
         if not texts:
             _log(f"{cat}: no source, budget={budget}, selected=0")
@@ -534,7 +537,7 @@ def main() -> int:
             selected_records[cat] = 0
             shortfalls[cat] = budget
             continue
-        sel_texts, sel_lengths, used = _select_for_budget(
+        sel_texts, _sel_lengths, used = _select_for_budget(
             texts,
             lengths,
             budget,

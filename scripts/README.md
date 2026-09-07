@@ -27,7 +27,10 @@
 | `qwen4_ple_custom_loader.py` | Phase B：官方 Qwen4Exp 模型加载时跳过 ngram shard，并安装磁盘 PLE adapter（支持 dry-run） |
 | `run_real_fp8_e2e.py` | 真实 FP8 Store-I + 配置驱动 engram-peft 自动注入的 CPU forward/generate e2e |
 | `download_mix_sources.py` | 可复现下载 M1–M5 使用的 ModelScope 语料来源（alpaca/wiki/cot/msagent） |
-| `build_mix.py` | 可复现 1M token 混合语料构建：general/chat/wiki/cot/tool 按比例采样、Qwen tokenizer 产出 `tokens.npy`、manifest + 污染过滤 |
+| `build_mix.py` | 可复现 1M token 混合语料构建：general/chat/wiki/cot/tool/code/stem 按比例采样、Qwen tokenizer 产出 `tokens.npy`、manifest + 污染过滤 |
+| `build_phase1_corpora.py` | Phase 1 语料矩阵：PURE_WIKI/FINEWEB/STEM/CODE + FW_CODE/FW_STEM，token 级混合与 manifest |
+| `build_phase1_kb_split.py` | Phase 1 KB/QA 四 split：kb.train/eval、qa.train/eval + 双向污染审计 |
+| `evaluate_generated_answers.py` | Phase 1 评测协议重评分：strict exact / contains / extracted contains + Markdown 报告 |
 | `audit_contamination.py` | 严格 QA 污染审计：答案/问题/QA n-gram 重叠，输出逐题和汇总报告 |
 | `run_mix_batch.sh` | WSL 批量跑 M1–M5：`run_phase0.py --live-store` + 150 QA exact-match 三线 |
 | `run_mix_one_wrapper.sh` | 单 mix 后台 wrapper：配合 Windows Scheduled Task 长任务托管 |

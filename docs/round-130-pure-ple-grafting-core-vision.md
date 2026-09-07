@@ -250,18 +250,44 @@ A3：A1 + 小 LoRA（仅作实现手段，不是核心）
 
 ## 8. 下一步行动
 
-### 第一步（本周，基于已有 1M 结果）
+### 第一步：先选语料配比（关键）
 
-1. 确定 5M 正式协议：
-   - 3 seeds；
-   - real / control / no-reader；
-   - PPL；
-   - 标准 QA 集（≥50 题/任务）；
-   - 代码/数学/长上下文；
-2. 直接跑 5M tokens 的 memory-layer-only 训练；
-3. 与已有 1M 结果比较收益曲线。
+已有证据显示：
 
-### 第二步（如果 5M 有信号）
+```text
+1M M1 混合语料：
+val loss real < control < no-reader
+QA EM  no-reader 53.3% > control 52.7% > real 50.7%
+```
+
+说明“loss 降了但任务不涨”，很有可能是：
+
+```text
+训练语料来源/配比与目标任务格式不匹配。
+```
+
+1M 时只跑过 M1，M2–M5 还未系统跑三线。
+
+所以第一步应做：
+
+```text
+M1–M5 1M 配比矩阵
+3 seeds
+real / control / no-reader
+标准 QA 提取 + 更长生成 + 归一化匹配
+选出“任务格式最匹配”的 mix
+```
+
+### 第二步：用选出的 mix 做 5M
+
+```text
+3 seeds
+real / control / no-reader
+PPL + 标准 QA
+代码/数学/长上下文
+```
+
+### 第三步（如果 5M 有信号）
 
 ```text
 20M tokens

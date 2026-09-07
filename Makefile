@@ -1,4 +1,4 @@
-.PHONY: help sync lint test check
+.PHONY: help sync lint test check paper paper-diagrams
 
 help: ## 显示帮助
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -13,5 +13,11 @@ lint: ## ruff 检查（与 CI 相同范围）
 
 test: ## pytest 冒烟
 	uv run pytest -q
+
+paper-diagrams: ## 用 Typst/Fletcher 重新生成论文架构图
+	bash scripts/make_paper_diagrams.sh
+
+paper: paper-diagrams ## 编译论文 PDF
+	/usr/local/bin/typst compile paper/paper.typ paper.pdf
 
 check: lint test ## lint + test

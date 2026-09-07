@@ -87,6 +87,11 @@ A common assumption is that external memory should be projected into the backbon
 
 We build an addressable n-gram memory from a code corpus and a wiki corpus. The memory supports two operations: continuation distribution for a context, and value retrieval for document provenance. The memory is used as both a retrieval channel and a logit prior. In the hybrid system, BM25 @bm252009 provides document-level retrieval, PLE provides exact n-gram continuity, and their combination forms a three-channel retriever.
 
+#figure(
+  image("figures/architecture_diagram.svg", width: 100%),
+  caption: [System architecture. The frozen backbone, RAG, and PLE memory provide three complementary evidence channels; the PLE Projector and token policy control logit-level fusion.]
+)
+
 == PLE Projector
 
 The projector is a small MLP:
@@ -98,6 +103,11 @@ where $h_t$ is the last hidden state of the frozen backbone, and $m_t$ contains 
 == Token-Level Policy
 
 Because PLE fusion can be harmful in open-ended generation, we train a logistic regression model on per-token observations. The features are the same memory features used by the projector. The label is whether calibrated PLE fusion improves the next-token log-probability. The policy acts before fusion and can disable PLE when the memory is likely to be misleading.
+
+#figure(
+  image("figures/inference_pipeline.svg", width: 90%),
+  caption: [Inference pipeline. The token policy decides whether to apply the learned PLE Projector or bypass it with base logits only.]
+)
 
 == Calibration and Router
 

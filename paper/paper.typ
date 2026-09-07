@@ -304,30 +304,68 @@ We presented an auditable n-gram external memory system for a 0.8B frozen model.
 
 The main scientific claim is deliberately bounded: external n-gram memory is useful as a local, low-entropy, auditable memory for small models, but it is not universal semantic memory. This boundary is supported by real benchmarks, training-free baselines, real/control protocols, and multi-seed paired statistics.
 
-= Appendix: Project Development Timeline
+= Appendix
 
-This work is the result of an extended low-resource research program. The following phases reflect the main historical threads integrated into this paper.
+== A. Algorithm: PLE Projector Inference
 
-== Phase 0: Mechanism Diagnostics
+The projector produces a per-token logit correction without modifying the frozen backbone. The learned variables are $alpha_t$ (memory trust) and $beta_t$ (support bias).
 
-We studied whether PLE embeddings align with backbone hidden states using CKA, Procrustes alignment, kNN overlap, and intrinsic dimension. The measured overlaps were low and close to random. More importantly, even when a learned reader could predict residual gradients, it often failed to distinguish real memory from control memory.
+#figure(
+  kind: "algorithm",
+  supplement: [Algorithm],
+  caption: [PLE Projector inference],
+  [
+    + Input: context $c$, hidden state $h_t$, memory features $m_t$, memory distribution $p_m$.
+    + Compute $alpha_t, beta_t = f_theta(h_t, m_t)$.
+    + Form the corrected distribution $p_{"fused"}(y) = p_b(y) dot p_m(y)^(alpha_t) dot exp(beta_t)$.
+    + Evaluate the token policy $g_t in {0, 1}$.
+    + If $g_t = 0$, reset $alpha_t <- 0$ and $beta_t <- 0$.
+    + Normalize and return $p_{"fused"}$.
+  ]
+)
 
-== Phase A: Reader Architectures
+== B. Algorithm: Token-Level Policy and Safety Gate
 
-We implemented RMSNorm, ShortConv, EngramReader, QwenEngramReader, and MLPValueReader. Experiments showed that a purely linear value path under-uses nonlinear memory information, while an MLP value path can increase residual R2 substantially. However, real-vs-control differences remained tiny.
+The policy is a small binary classifier trained on the same memory features used by the projector. It decides whether the n-gram memory should contribute to the current token.
 
-== Phase B: Distribution-Level Fusion
+#figure(
+  kind: "algorithm",
+  supplement: [Algorithm],
+  caption: [Token-level policy and safety gate],
+  [
+    + Train a logistic classifier on paired real/control observations.
+    + At inference, compute features $m_t$ from the current context.
+    + Predict $g_t = P("helpful" | m_t)$.
+    + If $g_t < tau$, disable PLE fusion and use base logits only.
+    + Otherwise, apply the learned projector correction and continue decoding.
+  ]
+)
 
-We shifted to n-gram addressable memory and logit-level fusion. We implemented calibration, per-task scale/bias/temperature, support-set calibration, density ratio gates, and log-opinion-pool fusion @logopinion1986. This formed the foundation of the current PLE Projector.
+== C. Real-vs-Control Protocol
 
-== Phase C: Purified OPSD and Adapters
+To distinguish genuine memory use from model noise, we use a strict paired protocol.
 
-We trained LoRA, QLoRA, and MoRA adapters, and introduced Purified OPSD to filter noisy synthetic instruction data @lora2022 @qlora2023 @mora2024. Purified MoRA improved held-out local tasks, while formal-style benchmarks remained less stable.
++ The real memory is built from documents containing the target continuation.
++ The control memory is built from an unrelated document set with no target relation.
++ A method is considered useful only if it outperforms the control memory by a meaningful margin.
++ All projector results in the paper are paired across identical evaluation rows.
 
-== Phase D: Learned Projector and Token Policy
+== D. HumanEval Problem-Level Passes
 
-We introduced a task-conditioned PLE Projector and a token-level learned policy. The projector maps hidden states and memory features to per-token scale and bias. The policy prevents unsafe PLE fusion during open-ended generation.
+On the 20-problem HumanEval subset, the base model solves HumanEval/16 and HumanEval/18, while BM25+PLE solves HumanEval/0 and HumanEval/10. The two pass sets are disjoint. This supports the claim that PLE provides a different source of local code knowledge rather than simply amplifying the base model.
 
-== Phase E: Real-Benchmark and Boundary Evaluation
+== E. Case Study: TriviaQA Failure
 
-We added official HumanEval @humaneval2021, TriviaQA @triviaqa2017, kNN-LM @knnlm2020, NGM @ngm2026, LLM-as-judge @llmjudge2024, and multi-seed paired statistics. These experiments produced the boundary result that PLE is a local low-entropy memory, not a universal semantic memory.
+The frozen 0.8B model obtains zero exact match on the 100-example TriviaQA subset. The failure is systematic rather than a calibration artifact: short-form knowledge questions require world knowledge that is not present in local n-gram continuations. A raw PLE fusion cannot recover this knowledge and may instead produce plausible but incorrect continuations.
+
+== F. Case Study: Open-Ended Degradation
+
+Without the token-level policy, unconditional PLE fusion on natural-language code prompts produces repetitive fragments, unrelated repository text, and broken structure. The learned policy suppresses PLE on tokens where the n-gram prior is not clearly beneficial, which substantially reduces this degradation.
+
+== G. Limitations and Future Work
+
++ HumanEval is limited to 20 problems in the current version.
++ TriviaQA exact match is zero, so the paper reports a boundary rather than a positive result.
++ Public weights have not yet been released.
++ CPU latency and quantization remain unoptimized.
++ Future work includes memory-size scaling, n-gram-order ablations, and full joint-system evaluation on larger real benchmarks.

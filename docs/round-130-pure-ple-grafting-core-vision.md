@@ -68,6 +68,30 @@ install_disk_multi_head_embedding(store)
 
 ---
 
+## 2.1 已有尝试与新计划的关键区别
+
+| 已有尝试 | 是否 A0/A1 | 新计划是否重复 |
+|---|---|---|
+| CPU/合成小素数 PLE 表，A0/A1 各 10 步 | 不完整 A0/A1 | **不重复**，新计划用真表 |
+| logit-level PLE Projector，10k 样本 | 不是 PLE 层注入 | **不重复** |
+| hidden-state reader / MLP reader | 窄通道 | **不重复** |
+| RAG + BM25 + PLE 混合 | 系统层 | **不做核心** |
+| Purified OPSD / MoRA | 能力手段 | 仅作为后备手段 |
+| 蒸馏 teacher-text | 能力手段 | 仅作为后备手段 |
+
+新计划只做此前没有真正做过的：
+
+```text
+真实 48GB PLE 表
++ 注入 0.8B 第 2 层
++ 只训练记忆层内适配器
++ 1M/5M/20M tokens
++ 无 RAG
++ 通用任务评测
+```
+
+---
+
 ## 3. 纯 PLE 嫁接的标准实验设计
 
 ### 3.1 对比

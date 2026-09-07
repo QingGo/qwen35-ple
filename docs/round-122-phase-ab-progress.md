@@ -43,14 +43,22 @@ BM25+PLE  pass@1 = 0.10 (5/50),  rep = 0.0412
 - 两者仅共同通过 41；
 - BM25+PLE 仍恢复了 4 个 base 未通过题，但整体在 50 题上不如 base。
 
-### 1.4 LLM judge 已有数据补全
+### 1.4 Phase A：TriviaQA 200 完成
+
+```text
+n=200
+exact match = 0.005
+mean repetition rate = 0.0076
+```
+
+### 1.5 LLM judge 已有数据补全
 
 | 数据 | 样本 | mean judge score |
 |---|---:|---:|
 | HumanEval 20（base+bm25_ple） | 40 | 0.375 |
 | TriviaQA 100 | 100 | 0.450 |
 
-### 1.4 CPU 基线
+### 1.6 CPU 基线
 
 ```text
 float32 CPU: 1.63 tok/s
@@ -63,11 +71,10 @@ dynamic int8 CPU: 2.03 tok/s
 
 ## 2. 进行中
 
-- TriviaQA 200（`outputs/triviaqa-real-200.json`）；
-- 后续将跑（自动化链已挂起）：
+- 自动化链已挂起：
+  - sensitivity sweep（n-gram order / memory size）；
   - pass@k 扩大样本；
   - LLM judge 全量 HumanEval 50 / TriviaQA 200；
-  - sensitivity sweep（n-gram order / memory size）；
   - token policy on/off 消融（已有早期 open/policy 输出可复用）。
 
 ---

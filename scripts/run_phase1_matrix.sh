@@ -36,6 +36,8 @@ READER="${READER:-official}"
 DEVICE="${DEVICE:-cuda}"
 SCALE="${SCALE:-}"
 QA_BATCH_SIZE="${QA_BATCH_SIZE:-16}"
+BRIDGE_MLP="${BRIDGE_MLP:-1}"
+OUT_MLP="${OUT_MLP:-1}"
 OFFICIAL_READER_PATH="${OFFICIAL_READER_PATH:-data/official_ple_reader.pt}"
 FORCE="${FORCE:-0}"
 SKIP_QA="${SKIP_QA:-0}"
@@ -80,6 +82,14 @@ if [[ -n "$SCALE" ]]; then
   SCALE_ARG="--scale $SCALE"
 fi
 
+MLP_ARG=""
+if [[ "$BRIDGE_MLP" == "1" ]]; then
+  MLP_ARG="$MLP_ARG --bridge-mlp"
+fi
+if [[ "$OUT_MLP" == "1" ]]; then
+  MLP_ARG="$MLP_ARG --out-mlp"
+fi
+
 for C in $CORPORA; do
   TOKENS="data/phase1/${C}/tokens.npy"
   if [[ ! -f "$TOKENS" ]]; then
@@ -104,6 +114,7 @@ for C in $CORPORA; do
       --reader "$READER" \
       --device "$DEVICE" \
       $SCALE_ARG \
+      $MLP_ARG \
       --official-reader-path "$OFFICIAL_READER_PATH" \
       --steps "$STEPS" \
       --seq-len "$SEQ_LEN" \
@@ -121,6 +132,7 @@ for C in $CORPORA; do
       --reader "$READER" \
       --device "$DEVICE" \
       $SCALE_ARG \
+      $MLP_ARG \
       --official-reader-path "$OFFICIAL_READER_PATH" \
       --steps "$STEPS" \
       --seq-len "$SEQ_LEN" \

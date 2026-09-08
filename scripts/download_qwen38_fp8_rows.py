@@ -42,6 +42,7 @@ def _download(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         "curl",
+        "--http1.1",
         "-L",
         "--fail",
         "--retry",
@@ -60,7 +61,7 @@ def _download(url: str, dest: Path) -> None:
 def _load_json_url(url: str) -> dict[str, Any]:
     """Fetch a small JSON document with curl and parse it."""
     out = subprocess.check_output(
-        ["curl", "-sS", "--fail", "--retry", "3", url],
+        ["curl", "--http1.1", "-sS", "--fail", "--retry", "3", url],
         text=True,
     )
     return json.loads(out)

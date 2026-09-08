@@ -53,6 +53,30 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _write_decoded_corpus(output: Path, tokens_path: Path, tokenizer_path: str | None) -> None:
+    """Decode a token stream into corpus.txt when a tokenizer is available."""
+    if not tokenizer_path:
+        return
+    try:
+        from transformers import AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, local_files_only=True)
+    except Exception as exc:  # noqa: BLE001
+        _log(f"warning: cannot decode corpus.txt: {exc}")
+        return
+    import numpy as np
+
+    arr = np.load(tokens_path, mmap_mode="r")
+    chunks: list[str] = []
+    for start in range(0, len(arr), 100_000):
+        ids = arr[start : start + 100_000].tolist()
+        chunks.append(tokenizer.decode(ids, skip_special_tokens=True))
+    (output / "corpus.txt").write_text(
+        "\n".join(chunks) + "\n", encoding="utf-8"
+    )
+    _log(f"wrote corpus.txt for {output.name}: {len(arr)} tokens")
+
+
 def _run_build_mix(
     output: Path,
     ratios: str,
@@ -99,6 +123,7 @@ def _write_direct_tokens(
     tokens_path: Path,
     target_tokens: int,
     source_label: str,
+    tokenizer_path: str | None = None,
 ) -> None:
     import numpy as np
 
@@ -129,6 +154,7 @@ def _write_direct_tokens(
         encoding="utf-8",
     )
     _log(f"wrote direct tokens -> {dest} ({len(selected)} tokens)")
+    _write_decoded_corpus(output, dest, tokenizer_path)
 
 
 def _mix_token_streams(
@@ -136,6 +162,7 @@ def _mix_token_streams(
     parts: list[tuple[str, int]],
     *,
     target_tokens: int,
+    tokenizer_path: str | None = None,
 ) -> None:
     """Concatenate token slices from already-built pure corpora."""
     import numpy as np
@@ -185,6 +212,7 @@ def _mix_token_streams(
         encoding="utf-8",
     )
     _log(f"wrote mixed tokens -> {dest} ({len(selected)} tokens)")
+    _write_decoded_corpus(output, dest, tokenizer_path)
 
 
 def _ensure_code_corpus(code_corpus: Path, code_roots: list[str], max_files: int) -> None:
@@ -277,6 +305,7 @@ def main() -> int:
             fw_tokens,
             args.target_tokens,
             args.fineweb_token_source_label,
+            tokenizer_path=args.tokenizer,
         )
 
     # 3. Code pure corpus; needs generated JSONL first.
@@ -304,7 +333,12 @@ def main() -> int:
         if not args.force and (dest / "tokens.npy").exists():
             _log(f"skip existing {name}")
             continue
-        _mix_token_streams(dest, parts, target_tokens=args.target_tokens)
+        _mix_token_streams(
+            dest,
+            parts,
+            target_tokens=args.target_tokens,
+            tokenizer_path=args.tokenizer,
+        )
 
     _log(f"done: {out_root}")
     return 0

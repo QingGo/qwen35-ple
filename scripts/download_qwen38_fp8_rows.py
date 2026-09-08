@@ -46,16 +46,31 @@ def _download(url: str, dest: Path) -> None:
         "-L",
         "--fail",
         "--retry",
-        "5",
+        "10",
         "--retry-delay",
         "5",
+        "--retry-all-errors",
+        "--connect-timeout",
+        "30",
         "-C",
         "-",
         "-o",
         str(dest),
         url,
     ]
-    subprocess.run(cmd, check=True)
+    for attempt in range(1, 4):
+        try:
+            subprocess.run(cmd, check=True)
+            return
+        except subprocess.CalledProcessError as exc:
+            if attempt == 3:
+                raise
+            print(
+                f"[extract] download attempt {attempt}/3 failed for {dest.name}: "
+                f"{exc}; retrying",
+                flush=True,
+            )
+            time.sleep(10)
 
 
 def _load_json_url(url: str) -> dict[str, Any]:

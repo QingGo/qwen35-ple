@@ -13,6 +13,7 @@
 #     --model-dir /home/zeng/qwen38-ple \
 #     --model data/models/Qwen3.5-0.8B \
 #     --output-dir outputs \
+#     --device cuda \
 #     --corpora PURE_WIKI PURE_FINEWEB PURE_STEM PURE_CODE FW_CODE FW_STEM
 set -euo pipefail
 
@@ -32,6 +33,7 @@ LR="${LR:-1e-4}"
 SEEDS="${SEEDS:-0 1 2}"
 MAX_NEW="${MAX_NEW:-96}"
 READER="${READER:-official}"
+DEVICE="${DEVICE:-cuda}"
 OFFICIAL_READER_PATH="${OFFICIAL_READER_PATH:-data/official_ple_reader.pt}"
 FORCE="${FORCE:-0}"
 SKIP_QA="${SKIP_QA:-0}"
@@ -50,6 +52,7 @@ while [[ $# -gt 0 ]]; do
     --seeds) SEEDS="$2"; shift 2 ;;
     --max-new) MAX_NEW="$2"; shift 2 ;;
     --reader) READER="$2"; shift 2 ;;
+    --device) DEVICE="$2"; shift 2 ;;
     --official-reader-path) OFFICIAL_READER_PATH="$2"; shift 2 ;;
     --skip-qa) SKIP_QA=1; shift ;;
     --force) FORCE=1; shift ;;
@@ -90,6 +93,7 @@ for C in $CORPORA; do
       --model-dir "$MODEL_DIR" \
       --model "$MODEL" \
       --reader "$READER" \
+      --device "$DEVICE" \
       --official-reader-path "$OFFICIAL_READER_PATH" \
       --steps "$STEPS" \
       --seq-len "$SEQ_LEN" \
@@ -105,6 +109,7 @@ for C in $CORPORA; do
       --model-dir "$MODEL_DIR" \
       --model "$MODEL" \
       --reader "$READER" \
+      --device "$DEVICE" \
       --official-reader-path "$OFFICIAL_READER_PATH" \
       --steps "$STEPS" \
       --seq-len "$SEQ_LEN" \

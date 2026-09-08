@@ -86,11 +86,19 @@ extracted_contains
 - `.github/workflows/ci.yml`：lint 列表加入三个新脚本。
 - `tests/test_answers.py`：新增归一化 / 提取 / lenient match 单测。
 
-## 3. 未做 / 下一步
+## 3. 已完成/未做
 
-- 尚未在完整环境里实际生成 6 个 1M 语料（本地 `.venv` 缺 transformers/torch；
-  需在 WSL 完整环境或安装依赖后执行）。
-- 尚未跑 Phase 2 的 3-seed real/control/no-reader 矩阵。
+已完成：
+
+- 本机已实际生成 6 个 1M-token 语料，位于 `data/phase1/`（git-ignored）：
+  - PURE_WIKI / PURE_FINEWEB / PURE_STEM / PURE_CODE / FW_CODE / FW_STEM；
+  - 每个纯语料均有 `tokens.npy` + `manifest.json`；
+  - 混合语料为 token 级 70/30、60/40 拼接。
+- 已生成示例 KB/QA split：`data/phase1/kb-wiki/`。
+
+未做：
+
+- 尚未跑 Phase 2 的 3-seed real/control/no-reader 矩阵（需要完整 GPU/CPU 训练环境）。
 - 尚未做 unseen KB 的 PLE 读取实验。
 
 ## 4. 运行方式

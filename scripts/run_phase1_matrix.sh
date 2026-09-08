@@ -34,6 +34,7 @@ MAX_NEW="${MAX_NEW:-96}"
 READER="${READER:-official}"
 OFFICIAL_READER_PATH="${OFFICIAL_READER_PATH:-data/official_ple_reader.pt}"
 FORCE="${FORCE:-0}"
+SKIP_QA="${SKIP_QA:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -50,6 +51,7 @@ while [[ $# -gt 0 ]]; do
     --max-new) MAX_NEW="$2"; shift 2 ;;
     --reader) READER="$2"; shift 2 ;;
     --official-reader-path) OFFICIAL_READER_PATH="$2"; shift 2 ;;
+    --skip-qa) SKIP_QA=1; shift ;;
     --force) FORCE=1; shift ;;
     --corpora)
       shift
@@ -80,24 +82,41 @@ for C in $CORPORA; do
   fi
 
   echo "=== [phase1-matrix] $C -> $OUT ==="
-  "$PYTHON" -u scripts/run_phase0.py \
-    --live-store \
-    --tokens-npy "$TOKENS" \
-    --rows-dir "$ROWS_DIR" \
-    --model-dir "$MODEL_DIR" \
-    --model "$MODEL" \
-    --reader "$READER" \
-    --official-reader-path "$OFFICIAL_READER_PATH" \
-    --steps "$STEPS" \
-    --seq-len "$SEQ_LEN" \
-    --lr "$LR" \
-    --seeds $SEEDS \
-    --modes real control no-reader \
-    --qa \
-    --qa-exact-match \
-    --qa-max-new-tokens "$MAX_NEW" \
-    --qa-file "$QA_FILE" \
-    --output "$OUT"
+  if [[ "$SKIP_QA" == "1" ]]; then
+    "$PYTHON" -u scripts/run_phase0.py \
+      --live-store \
+      --tokens-npy "$TOKENS" \
+      --rows-dir "$ROWS_DIR" \
+      --model-dir "$MODEL_DIR" \
+      --model "$MODEL" \
+      --reader "$READER" \
+      --official-reader-path "$OFFICIAL_READER_PATH" \
+      --steps "$STEPS" \
+      --seq-len "$SEQ_LEN" \
+      --lr "$LR" \
+      --seeds $SEEDS \
+      --modes real control no-reader \
+      --output "$OUT"
+  else
+    "$PYTHON" -u scripts/run_phase0.py \
+      --live-store \
+      --tokens-npy "$TOKENS" \
+      --rows-dir "$ROWS_DIR" \
+      --model-dir "$MODEL_DIR" \
+      --model "$MODEL" \
+      --reader "$READER" \
+      --official-reader-path "$OFFICIAL_READER_PATH" \
+      --steps "$STEPS" \
+      --seq-len "$SEQ_LEN" \
+      --lr "$LR" \
+      --seeds $SEEDS \
+      --modes real control no-reader \
+      --qa \
+      --qa-exact-match \
+      --qa-max-new-tokens "$MAX_NEW" \
+      --qa-file "$QA_FILE" \
+      --output "$OUT"
+  fi
 done
 
 echo "[phase1-matrix] all corpora done"

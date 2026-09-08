@@ -30,6 +30,7 @@
 | `build_mix.py` | 可复现 1M token 混合语料构建：general/chat/wiki/cot/tool/code/stem 按比例采样、Qwen tokenizer 产出 `tokens.npy`、manifest + 污染过滤 |
 | `build_phase1_corpora.py` | Phase 1 语料矩阵：PURE_WIKI/FINEWEB/STEM/CODE + FW_CODE/FW_STEM，token 级混合与 manifest |
 | `build_phase1_kb_split.py` | Phase 1 KB/QA 四 split：kb.train/eval、qa.train/eval + 双向污染审计 |
+| `build_kb_token_streams.py` | 把 KB split 转成 train/eval token 流，供 unseen-KB reader 训练/评测 |
 | `evaluate_generated_answers.py` | Phase 1 评测协议重评分：strict exact / contains / extracted contains + Markdown 报告 |
 | `run_phase1_matrix.sh` | Phase 2 批处理入口：六个 Phase 1 语料 × 3 seeds × real/control/no-reader × 长生成 QA |
 | `summarize_phase1_matrix.py` | Phase 1/2 矩阵汇总：real/control/no-reader 的 PPL、contains、extracted EM |

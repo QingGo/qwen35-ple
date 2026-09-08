@@ -50,3 +50,25 @@ def test_overlap_ratio_zero(audit):
         2,
     )
     assert ratio == 0.0
+
+
+def test_any_norm_in_docs_respects_token_boundaries(audit):
+    # "james it" must not satisfy the answer phrase "james i".
+    assert not audit.any_norm_in_docs(
+        "james i",
+        ["james it was a surprise"],
+    )
+    assert audit.any_norm_in_docs(
+        "james i",
+        ["james i was the king of england"],
+    )
+
+
+def test_load_corpus_docs_jsonl(audit, tmp_path):
+    path = tmp_path / "corpus.jsonl"
+    path.write_text(
+        '{"text": "first document"}\n{"text": "second document"}\n',
+        encoding="utf-8",
+    )
+    docs = audit.load_corpus_docs(path)
+    assert docs == ["first document", "second document"]

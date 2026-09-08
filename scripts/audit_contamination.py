@@ -63,6 +63,57 @@ def overlap_ratio(haystack: str, needle: str, n: int) -> float:
     return hits / len(needle_grams)
 
 
+def load_corpus_docs(path: Path) -> list[str]:
+    """Load a corpus as a list of independent documents.
+
+    Splitting into documents avoids false-positive substring matches that cross
+    record boundaries when the whole corpus is normalized as a single blob.
+    """
+    docs: list[str] = []
+    if path.suffix.lower() == ".jsonl":
+        with path.open("r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                text = str(obj.get("text") or obj.get("content") or "")
+                if text.strip():
+                    docs.append(text.strip())
+    else:
+        docs = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            if line.strip()
+        ]
+    return docs
+
+
+def any_norm_in_docs(norm_needle: str, norm_docs: list[str]) -> bool:
+    """Check a normalized phrase as a whole token sequence.
+
+    A plain substring match would let ``james it`` satisfy a needle of
+    ``james i``; token-boundary matching prevents this common false positive.
+    """
+    if not norm_needle:
+        return False
+    pattern = r"(?<!\S)" + re.escape(norm_needle) + r"(?!\S)"
+    return any(re.search(pattern, doc) for doc in norm_docs)
+
+
+def ngram_overlap_in_docs(
+    norm_needle: str, corpus_grams: set[str], n: int
+) -> tuple[int, int, float]:
+    needle_grams = ngrams(norm_needle, n)
+    if not needle_grams:
+        return 0, 0, 0.0
+    hits = len(needle_grams & corpus_grams)
+    return hits, len(needle_grams), hits / len(needle_grams)
+
+
 def load_qa(path: Path) -> list[dict]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(data, list):
@@ -83,9 +134,11 @@ def main() -> int:
     args = parser.parse_args()
 
     qa = load_qa(Path(args.qa))
-    corpus_text = Path(args.corpus).read_text(encoding="utf-8", errors="ignore")
-    corpus_norm = normalize_text(corpus_text)
-    corpus_grams = ngrams(corpus_norm, args.n_gram)
+    corpus_docs = load_corpus_docs(Path(args.corpus))
+    corpus_norm_docs = [normalize_text(doc) for doc in corpus_docs]
+    corpus_grams: set[str] = set()
+    for doc_norm in corpus_norm_docs:
+        corpus_grams |= ngrams(doc_norm, args.n_gram)
 
     rows: list[dict] = []
     summary: dict[str, dict] = {}
@@ -97,19 +150,19 @@ def main() -> int:
         a_norm = normalize_text(answer)
         qa_norm = normalize_text(question + " " + answer)
 
-        answer_exact = bool(a_norm and a_norm in corpus_norm)
-        question_exact = bool(q_norm and q_norm in corpus_norm)
-        qa_exact = bool(qa_norm and qa_norm in corpus_norm)
+        answer_exact = any_norm_in_docs(a_norm, corpus_norm_docs)
+        question_exact = any_norm_in_docs(q_norm, corpus_norm_docs)
+        qa_exact = any_norm_in_docs(qa_norm, corpus_norm_docs)
 
-        answer_ngram_hits = len(ngrams(a_norm, args.n_gram) & corpus_grams)
-        question_ngram_hits = len(ngrams(q_norm, args.n_gram) & corpus_grams)
-        qa_ngram_hits = len(ngrams(qa_norm, args.n_gram) & corpus_grams)
-        answer_ngrams = len(ngrams(a_norm, args.n_gram))
-        question_ngrams = len(ngrams(q_norm, args.n_gram))
-        qa_ngrams = len(ngrams(qa_norm, args.n_gram))
-        answer_ratio = answer_ngram_hits / answer_ngrams if answer_ngrams else 0.0
-        question_ratio = question_ngram_hits / question_ngrams if question_ngrams else 0.0
-        qa_ratio = qa_ngram_hits / qa_ngrams if qa_ngrams else 0.0
+        answer_ngram_hits, answer_ngrams, answer_ratio = ngram_overlap_in_docs(
+            a_norm, corpus_grams, args.n_gram
+        )
+        question_ngram_hits, question_ngrams, question_ratio = ngram_overlap_in_docs(
+            q_norm, corpus_grams, args.n_gram
+        )
+        qa_ngram_hits, qa_ngrams, qa_ratio = ngram_overlap_in_docs(
+            qa_norm, corpus_grams, args.n_gram
+        )
 
         answer_len = len(a_norm.split())
         if qa_exact or (answer_exact and answer_len >= args.min_answer_tokens):
@@ -151,6 +204,7 @@ def main() -> int:
         "total": total,
         "n_gram": args.n_gram,
         "corpus": str(Path(args.corpus).resolve()),
+        "corpus_docs": len(corpus_docs),
         "severity_counts": dict(sev_counts),
         "critical_rows": [r["index"] for r in rows if r["severity"] == "critical"],
         "high_rows": [r["index"] for r in rows if r["severity"] == "high"],

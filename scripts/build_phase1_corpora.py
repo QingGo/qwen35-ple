@@ -227,7 +227,7 @@ def main() -> int:
         default=None,
         help="root to scan for Python files (repeatable; defaults to repo + sibling repos)",
     )
-    parser.add_argument("--max-code-files", type=int, default=6000)
+    parser.add_argument("--max-code-files", type=int, default=20000)
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 

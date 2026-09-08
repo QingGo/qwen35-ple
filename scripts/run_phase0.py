@@ -555,6 +555,7 @@ def _qa_exact_match(
     seed: int,
     max_new_tokens: int,
     batch_size: int = 1,
+    max_batch_tokens: int = 0,
 ) -> dict:
     """Greedy exact-match QA generation with live PLE injection.
 
@@ -562,9 +563,10 @@ def _qa_exact_match(
     token sequence and injects them through the installed reader hook.  For
     no-reader, ``qa_store`` is None and the same greedy loop runs without PLE.
 
-    Questions are processed in batches of ``batch_size``.  Padding is handled
-    with an attention mask; greedy decoding remains identical to the
-    one-question-at-a-time path.
+    Questions are grouped into batches.  ``batch_size`` is the maximum number
+    of questions per batch and ``max_batch_tokens`` is an optional token budget
+    (roughly ``batch_size * padded_length``).  Grouping by prompt length and
+    token budget keeps padding bounded and avoids OOM on long BoolQ passages.
     """
     device = next(model.parameters()).device
     eos_id = tokenizer.eos_token_id
@@ -572,15 +574,38 @@ def _qa_exact_match(
     if pad_id is None:
         pad_id = eos_id if eos_id is not None else 0
     batch_size = max(1, int(batch_size))
-    answers: list[dict] = []
-    per_task_correct: dict[str, list[bool]] = {}
+    max_batch_tokens = max(0, int(max_batch_tokens))
 
-    for chunk_start in range(0, len(items), batch_size):
-        chunk = list(
-            enumerate(items[chunk_start : chunk_start + batch_size], start=chunk_start)
+    prompt_ids = {
+        idx: list(tokenizer.encode(item["question"], add_special_tokens=False))
+        for idx, item in enumerate(items)
+    }
+    ordered = sorted(enumerate(items), key=lambda pair: len(prompt_ids[pair[0]]))
+
+    batches: list[list[tuple[int, dict]]] = []
+    current: list[tuple[int, dict]] = []
+    current_max = 0
+    for idx, item in ordered:
+        prompt_len = len(prompt_ids[idx])
+        next_max = max(current_max, prompt_len)
+        over_items = len(current) + 1 > batch_size
+        over_tokens = (
+            max_batch_tokens > 0
+            and (next_max + max_new_tokens) * (len(current) + 1) > max_batch_tokens
         )
+        if current and (over_items or over_tokens):
+            batches.append(current)
+            current = []
+            current_max = 0
+        current.append((idx, item))
+        current_max = max(current_max, prompt_len)
+    if current:
+        batches.append(current)
+
+    records: list[tuple[int, dict, bool]] = []
+    for batch in batches:
         states = []
-        for idx, item in chunk:
+        for idx, item in batch:
             print(
                 f"    QA {idx + 1}/{len(items)} [{item['task']}] {item['question'][:90]}",
                 flush=True,
@@ -589,9 +614,7 @@ def _qa_exact_match(
                 {
                     "idx": idx,
                     "item": item,
-                    "ids": list(
-                        tokenizer.encode(item["question"], add_special_tokens=False)
-                    ),
+                    "ids": list(prompt_ids[idx]),
                     "generated": [],
                     "finished": False,
                 }
@@ -653,21 +676,32 @@ def _qa_exact_match(
                 state["generated"], skip_special_tokens=True
             )
             hit = _normalize_answer(item["answer"]) in _normalize_answer(generated_text)
-            answers.append(
-                {
-                    "task": item["task"],
-                    "question": item["question"],
-                    "answer": item["answer"],
-                    "generated": generated_text,
-                    "correct": hit,
-                }
+            records.append(
+                (
+                    state["idx"],
+                    {
+                        "task": item["task"],
+                        "question": item["question"],
+                        "answer": item["answer"],
+                        "generated": generated_text,
+                        "correct": hit,
+                    },
+                    hit,
+                )
             )
-            per_task_correct.setdefault(item["task"], []).append(hit)
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
+    records.sort(key=lambda record: record[0])
+    answers = [record[1] for record in records]
+    per_task_correct: dict[str, list[bool]] = {}
+    for _, answer, hit in records:
+        per_task_correct.setdefault(answer["task"], []).append(hit)
 
     metrics: dict[str, float] = {}
     for task, hits in sorted(per_task_correct.items()):
         metrics[f"qa_{task}_em"] = float(np.mean(hits))
-    all_hits = [a["correct"] for a in answers]
+    all_hits = [answer["correct"] for answer in answers]
     metrics["qa_em_mean"] = float(np.mean(all_hits)) if all_hits else float("nan")
     metrics["qa_n"] = float(len(all_hits))
     return {"metrics": metrics, "answers": answers}
@@ -738,6 +772,7 @@ def _run_mode(
                 seed=seed,
                 max_new_tokens=args.qa_max_new_tokens,
                 batch_size=getattr(args, "qa_batch_size", 1),
+                max_batch_tokens=getattr(args, "qa_batch_max_tokens", 0),
             )
         return {
             "mode": mode,
@@ -882,6 +917,7 @@ def _run_mode(
             seed=seed,
             max_new_tokens=args.qa_max_new_tokens,
             batch_size=getattr(args, "qa_batch_size", 1),
+            max_batch_tokens=getattr(args, "qa_batch_max_tokens", 0),
         )
 
     if getattr(args, "save_reader", None) and not getattr(args, "load_reader", None):
@@ -1067,6 +1103,12 @@ def main() -> int:
         type=int,
         default=1,
         help="number of questions to decode together (1 = original sequential path)",
+    )
+    parser.add_argument(
+        "--qa-batch-max-tokens",
+        type=int,
+        default=0,
+        help="optional token budget per QA batch (0 = only --qa-batch-size)",
     )
     parser.add_argument(
         "--qa-file",
@@ -1298,6 +1340,7 @@ def main() -> int:
             "qa_exact_match": bool(args.qa_exact_match),
             "qa_max_new_tokens": args.qa_max_new_tokens,
             "qa_batch_size": args.qa_batch_size,
+            "qa_batch_max_tokens": args.qa_batch_max_tokens,
             "qa_file": args.qa_file,
         },
         "summary": summary,

@@ -36,6 +36,7 @@ READER="${READER:-official}"
 DEVICE="${DEVICE:-cuda}"
 SCALE="${SCALE:-}"
 QA_BATCH_SIZE="${QA_BATCH_SIZE:-16}"
+QA_BATCH_MAX_TOKENS="${QA_BATCH_MAX_TOKENS:-2048}"
 BRIDGE_MLP="${BRIDGE_MLP:-1}"
 OUT_MLP="${OUT_MLP:-1}"
 OFFICIAL_READER_PATH="${OFFICIAL_READER_PATH:-data/official_ple_reader.pt}"
@@ -59,6 +60,7 @@ while [[ $# -gt 0 ]]; do
     --device) DEVICE="$2"; shift 2 ;;
     --scale) SCALE="$2"; shift 2 ;;
     --qa-batch-size) QA_BATCH_SIZE="$2"; shift 2 ;;
+    --qa-batch-max-tokens) QA_BATCH_MAX_TOKENS="$2"; shift 2 ;;
     --official-reader-path) OFFICIAL_READER_PATH="$2"; shift 2 ;;
     --skip-qa) SKIP_QA=1; shift ;;
     --force) FORCE=1; shift ;;
@@ -143,6 +145,7 @@ for C in $CORPORA; do
       --qa-exact-match \
       --qa-max-new-tokens "$MAX_NEW" \
       --qa-batch-size "$QA_BATCH_SIZE" \
+      --qa-batch-max-tokens "$QA_BATCH_MAX_TOKENS" \
       --qa-file "$QA_FILE" \
       --output "$OUT"
   fi

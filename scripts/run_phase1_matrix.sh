@@ -34,6 +34,7 @@ SEEDS="${SEEDS:-0 1 2}"
 MAX_NEW="${MAX_NEW:-96}"
 READER="${READER:-official}"
 DEVICE="${DEVICE:-cuda}"
+SCALE="${SCALE:-}"
 OFFICIAL_READER_PATH="${OFFICIAL_READER_PATH:-data/official_ple_reader.pt}"
 FORCE="${FORCE:-0}"
 SKIP_QA="${SKIP_QA:-0}"
@@ -53,6 +54,7 @@ while [[ $# -gt 0 ]]; do
     --max-new) MAX_NEW="$2"; shift 2 ;;
     --reader) READER="$2"; shift 2 ;;
     --device) DEVICE="$2"; shift 2 ;;
+    --scale) SCALE="$2"; shift 2 ;;
     --official-reader-path) OFFICIAL_READER_PATH="$2"; shift 2 ;;
     --skip-qa) SKIP_QA=1; shift ;;
     --force) FORCE=1; shift ;;
@@ -70,6 +72,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "$OUTPUT_DIR"
+
+SCALE_ARG=""
+if [[ -n "$SCALE" ]]; then
+  SCALE_ARG="--scale $SCALE"
+fi
 
 for C in $CORPORA; do
   TOKENS="data/phase1/${C}/tokens.npy"
@@ -94,6 +101,7 @@ for C in $CORPORA; do
       --model "$MODEL" \
       --reader "$READER" \
       --device "$DEVICE" \
+      $SCALE_ARG \
       --official-reader-path "$OFFICIAL_READER_PATH" \
       --steps "$STEPS" \
       --seq-len "$SEQ_LEN" \
@@ -110,6 +118,7 @@ for C in $CORPORA; do
       --model "$MODEL" \
       --reader "$READER" \
       --device "$DEVICE" \
+      $SCALE_ARG \
       --official-reader-path "$OFFICIAL_READER_PATH" \
       --steps "$STEPS" \
       --seq-len "$SEQ_LEN" \

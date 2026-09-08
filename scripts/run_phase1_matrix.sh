@@ -14,7 +14,11 @@
 #     --model data/models/Qwen3.5-0.8B \
 #     --output-dir outputs \
 #     --device cuda \
+#     --save-reader \
 #     --corpora PURE_WIKI PURE_FINEWEB PURE_STEM PURE_CODE FW_CODE FW_STEM
+#
+# QA-only rerun against saved readers (training is skipped):
+#   bash scripts/run_phase1_matrix.sh ... --load-reader --corpora PURE_WIKI
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -42,6 +46,8 @@ OUT_MLP="${OUT_MLP:-1}"
 OFFICIAL_READER_PATH="${OFFICIAL_READER_PATH:-data/official_ple_reader.pt}"
 FORCE="${FORCE:-0}"
 SKIP_QA="${SKIP_QA:-0}"
+SAVE_READER="${SAVE_READER:-0}"
+LOAD_READER="${LOAD_READER:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -63,6 +69,8 @@ while [[ $# -gt 0 ]]; do
     --qa-batch-max-tokens) QA_BATCH_MAX_TOKENS="$2"; shift 2 ;;
     --official-reader-path) OFFICIAL_READER_PATH="$2"; shift 2 ;;
     --skip-qa) SKIP_QA=1; shift ;;
+    --save-reader) SAVE_READER=1; shift ;;
+    --load-reader) LOAD_READER=1; shift ;;
     --force) FORCE=1; shift ;;
     --corpora)
       shift
@@ -106,6 +114,14 @@ for C in $CORPORA; do
   fi
 
   echo "=== [phase1-matrix] $C -> $OUT ==="
+  SAVE_READER_ARG=""
+  if [[ "$SAVE_READER" == "1" ]]; then
+    SAVE_READER_ARG="--save-reader ${OUTPUT_DIR}/reader-${C}-{mode}-seed{seed}.pt"
+  fi
+  LOAD_READER_ARG=""
+  if [[ "$LOAD_READER" == "1" ]]; then
+    LOAD_READER_ARG="--load-reader ${OUTPUT_DIR}/reader-${C}-{mode}-seed{seed}.pt"
+  fi
   if [[ "$SKIP_QA" == "1" ]]; then
     "$PYTHON" -u scripts/run_phase0.py \
       --live-store \
@@ -117,6 +133,8 @@ for C in $CORPORA; do
       --device "$DEVICE" \
       $SCALE_ARG \
       $MLP_ARG \
+      $SAVE_READER_ARG \
+      $LOAD_READER_ARG \
       --official-reader-path "$OFFICIAL_READER_PATH" \
       --steps "$STEPS" \
       --seq-len "$SEQ_LEN" \
@@ -135,6 +153,8 @@ for C in $CORPORA; do
       --device "$DEVICE" \
       $SCALE_ARG \
       $MLP_ARG \
+      $SAVE_READER_ARG \
+      $LOAD_READER_ARG \
       --official-reader-path "$OFFICIAL_READER_PATH" \
       --steps "$STEPS" \
       --seq-len "$SEQ_LEN" \

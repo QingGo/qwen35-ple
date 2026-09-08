@@ -9,6 +9,10 @@ Each Phase 0 JSON produced by ``scripts/run_phase1_matrix.sh`` contains a
 * lenient contains EM (gold answer appears in the generated text);
 * extracted exact EM and extracted contains EM from the improved protocol.
 
+Use ``--protocol v2`` to score with the answer-marker / first-sentence
+extractor in :mod:`qwen35_ple.eval.answers`.  The default ``v1`` keeps the
+original last-sentence protocol for backward compatibility.
+
 Usage::
 
     python scripts/summarize_phase1_matrix.py \
@@ -22,7 +26,7 @@ import json
 import math
 from pathlib import Path
 
-from qwen35_ple.eval.answers import score_answer
+from qwen35_ple.eval.answers import score_answer, score_answer_v2
 
 MODES = ("real", "control", "no-reader")
 
@@ -42,7 +46,9 @@ def _row_prediction(row: dict) -> str:
     return ""
 
 
-def _score_answers(answers: list[dict]) -> dict[str, float]:
+def _score_answers(
+    answers: list[dict], protocol: str = "v1"
+) -> dict[str, float]:
     if not answers:
         return {
             "contains": float("nan"),
@@ -56,7 +62,10 @@ def _score_answers(answers: list[dict]) -> dict[str, float]:
     for row in answers:
         gold = str(row.get("answer", ""))
         pred = _row_prediction(row)
-        s = score_answer(pred, gold)
+        if protocol == "v2":
+            s = score_answer_v2(pred, gold, task=row.get("task"))
+        else:
+            s = score_answer(pred, gold)
         contains += int(s["contains"])
         extracted_exact += int(s["extracted_exact"])
         extracted_contains += int(s["extracted_contains"])
@@ -67,7 +76,9 @@ def _score_answers(answers: list[dict]) -> dict[str, float]:
     }
 
 
-def _mode_metrics(details: list[dict]) -> dict[str, float | None]:
+def _mode_metrics(
+    details: list[dict], protocol: str = "v1"
+) -> dict[str, float | None]:
     val_losses: list[float] = []
     answer_scores: list[dict[str, float]] = []
     for detail in details:
@@ -76,7 +87,7 @@ def _mode_metrics(details: list[dict]) -> dict[str, float | None]:
             val_losses.append(float(val_loss))
         qa = detail.get("qa_exact")
         if isinstance(qa, dict) and isinstance(qa.get("answers"), list):
-            answer_scores.append(_score_answers(qa["answers"]))
+            answer_scores.append(_score_answers(qa["answers"], protocol=protocol))
     out: dict[str, float | None] = {
         "val_ppl": None,
         "contains": None,
@@ -96,7 +107,7 @@ def _mode_metrics(details: list[dict]) -> dict[str, float | None]:
     return out
 
 
-def _load_matrix(path: Path) -> dict:
+def _load_matrix(path: Path, protocol: str = "v1") -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
     summary = data.get("summary", {})
     out: dict[str, dict] = {}
@@ -107,7 +118,7 @@ def _load_matrix(path: Path) -> dict:
         details = entry.get("details", [])
         if not isinstance(details, list):
             details = [entry]
-        out[mode] = _mode_metrics(details)
+        out[mode] = _mode_metrics(details, protocol=protocol)
     return out
 
 
@@ -124,12 +135,18 @@ def main() -> int:
     parser.add_argument("--files", nargs="+", required=True)
     parser.add_argument("--output", default=None)
     parser.add_argument("--markdown", default=None)
+    parser.add_argument(
+        "--protocol",
+        choices=("v1", "v2"),
+        default="v1",
+        help="answer extraction protocol; v2 prefers explicit markers and first sentences",
+    )
     args = parser.parse_args()
 
     rows: list[dict] = []
     for file in args.files:
         path = Path(file)
-        matrix = _load_matrix(path)
+        matrix = _load_matrix(path, protocol=args.protocol)
         row: dict = {"corpus": _corpus_name(path)}
         for mode in MODES:
             m = matrix.get(mode, {})
@@ -140,10 +157,10 @@ def main() -> int:
             row[f"{prefix}_extracted_contains"] = m.get("extracted_contains")
         rows.append(row)
 
-    print("=== Phase 1/2 matrix summary ===")
+    print(f"=== Phase 1/2 matrix summary (protocol={args.protocol}) ===")
     print(
         "corpus        real_ppl ctrl_ppl no_ppl real_cont ctrl_cont no_cont "
-        "real_extreal ctrl_extreal"
+        "real_extreal ctrl_extreal no_extreal"
     )
     for row in rows:
         print(
@@ -156,6 +173,7 @@ def main() -> int:
             f"{_fmt(row.get('no_reader_contains'))}"
             f"{_fmt(row.get('real_extracted_exact'))}"
             f"{_fmt(row.get('control_extracted_exact'))}"
+            f"{_fmt(row.get('no_reader_extracted_exact'))}"
         )
 
     if args.output:
@@ -171,10 +189,10 @@ def main() -> int:
         md = Path(args.markdown)
         md.parent.mkdir(parents=True, exist_ok=True)
         lines = [
-            "# Phase 1/2 Matrix Summary",
+            f"# Phase 1/2 Matrix Summary (protocol={args.protocol})",
             "",
-            "| Corpus | Real PPL | Ctrl PPL | No-reader PPL | Real contains | Ctrl contains | No contains | Real ext-exact | Ctrl ext-exact |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| Corpus | Real PPL | Ctrl PPL | No-reader PPL | Real contains | Ctrl contains | No contains | Real ext-exact | Ctrl ext-exact | No ext-exact |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
         for row in rows:
             lines.append(
@@ -186,7 +204,8 @@ def main() -> int:
                 f"{_fmt(row.get('control_contains'), 6).strip()} | "
                 f"{_fmt(row.get('no_reader_contains'), 6).strip()} | "
                 f"{_fmt(row.get('real_extracted_exact'), 6).strip()} | "
-                f"{_fmt(row.get('control_extracted_exact'), 6).strip()} |"
+                f"{_fmt(row.get('control_extracted_exact'), 6).strip()} | "
+                f"{_fmt(row.get('no_reader_extracted_exact'), 6).strip()} |"
             )
         md.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"[summary] wrote {md}")

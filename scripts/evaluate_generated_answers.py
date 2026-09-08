@@ -10,6 +10,10 @@ This script reads a results JSON produced by ``run_phase0.py --qa-exact-match``
 * extracted_exact / extracted_contains: after extracting a concise answer
   candidate with ``qwen35_ple.eval.answers.extract_answer``.
 
+Use ``--protocol v2`` to switch to ``extract_answer_v2``, which prefers
+explicit answer markers and first sentences and treats ambiguous BoolQ option
+lists as unanswered.
+
 It also writes a per-task summary and a human-readable markdown report so the
 same run can be compared under both strict and lenient protocols.
 
@@ -26,7 +30,7 @@ import argparse
 import json
 from pathlib import Path
 
-from qwen35_ple.eval.answers import score_answer
+from qwen35_ple.eval.answers import score_answer, score_answer_v2
 
 
 def _load_results(path: Path) -> dict:
@@ -170,6 +174,12 @@ def main() -> int:
     parser.add_argument("--results", required=True)
     parser.add_argument("--output", default="outputs/phase1-answer-report.json")
     parser.add_argument("--markdown", default=None)
+    parser.add_argument(
+        "--protocol",
+        choices=("v1", "v2"),
+        default="v1",
+        help="answer extraction protocol; v2 prefers explicit markers and first sentences",
+    )
     args = parser.parse_args()
 
     results = _load_results(Path(args.results))
@@ -177,7 +187,10 @@ def main() -> int:
     for row, mode in _iter_answer_rows(results):
         gold = str(row.get("answer", ""))
         pred = _prediction(row)
-        s = score_answer(pred, gold)
+        if args.protocol == "v2":
+            s = score_answer_v2(pred, gold, task=row.get("task"))
+        else:
+            s = score_answer(pred, gold)
         scored.append(
             {
                 **row,

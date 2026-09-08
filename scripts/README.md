@@ -31,10 +31,10 @@
 | `build_phase1_corpora.py` | Phase 1 语料矩阵：PURE_WIKI/FINEWEB/STEM/CODE + FW_CODE/FW_STEM，token 级混合与 manifest |
 | `build_phase1_kb_split.py` | Phase 1 KB/QA 四 split：kb.train/eval、qa.train/eval + 双向污染审计 |
 | `build_kb_token_streams.py` | 把 KB split 转成 train/eval token 流，供 unseen-KB reader 训练/评测 |
-| `evaluate_generated_answers.py` | Phase 1 评测协议重评分：strict exact / contains / extracted contains + Markdown 报告 |
+| `evaluate_generated_answers.py` | Phase 1 评测协议重评分：strict exact / contains / extracted contains + Markdown 报告；`--protocol v2` 使用 answer-marker / first-sentence 提取器 |
 | `run_unseen_kb_experiment.sh` | unseen-KB 实验：seen KB 训练 real/control reader，unseen KB 上三线评测 |
-| `run_phase1_matrix.sh` | Phase 2 批处理入口：六个 Phase 1 语料 × 3 seeds × real/control/no-reader × 长生成 QA |
-| `summarize_phase1_matrix.py` | Phase 1/2 矩阵汇总：real/control/no-reader 的 PPL、contains、extracted EM |
+| `run_phase1_matrix.sh` | Phase 2 批处理入口：六个 Phase 1 语料 × 3 seeds × real/control/no-reader × 长生成 QA；`--save-reader` 保存每 corpus/mode/seed 的 reader checkpoint，`--load-reader` 跳过训练做 QA-only 重跑 |
+| `summarize_phase1_matrix.py` | Phase 1/2 矩阵汇总：real/control/no-reader 的 PPL、contains、extracted EM；`--protocol v2` 使用 answer-marker / first-sentence 提取器 |
 | `audit_contamination.py` | 严格 QA 污染审计：答案/问题/QA n-gram 重叠，输出逐题和汇总报告 |
 | `summarize_unseen_kb.py` | unseen-KB 三线结果汇总：real / control / no-reader 的 PPL 与 EM |
 | `download_qwen38_fp8_rows.py` | 从 Qwen3.8-Flash-Next-FP8 checkpoint 按文件下载并抽取 EngramDB Store-I PLE 行（`shard_NNN.bin`） |

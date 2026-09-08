@@ -178,9 +178,167 @@ def _clean_extracted(text: str) -> str:
     return text.strip()
 
 
+def _clean_v2_extracted(text: str) -> str:
+    """Clean a v2 candidate without changing its lexical content."""
+    text = re.sub(r"[*_`]+", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(
+        r"^(therefore|so|thus|hence|the answer is|answer)[,:.\s]*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text.strip()
+
+
 def score_answer(prediction: str, gold: str) -> dict[str, bool | str | float]:
     """Return both strict and lenient match signals for a single instance."""
     extracted = extract_answer(prediction)
+    return {
+        "exact": exact_match(prediction, gold),
+        "contains": contains_match(prediction, gold),
+        "extracted_exact": exact_match(extracted, gold),
+        "extracted_contains": contains_match(extracted, gold),
+        "extracted": extracted,
+    }
+
+
+# ---------------------------------------------------------------------------
+# v2 protocol
+#
+# The v1 extractor above uses the last sentence when no answer marker is
+# present.  That is a poor fit for the Phase 2 generations, which often start
+# with a direct answer and then continue with reasoning.  v2 prefers explicit
+# answer markers, then the first meaningful sentence, and treats option lists
+# in BoolQ as ambiguous instead of counting a generation that contains both
+# ``yes`` and ``no`` as correct.
+# ---------------------------------------------------------------------------
+
+_V2_ANSWER_MARKERS = (
+    r"(?:final\s+answer|correct\s+answer|answer)\s*(?:is|:)\s*",
+    r"(?:答案|回答)\s*[:：]\s*",
+)
+
+_V2_YES_NO_ASSERTIONS = (
+    r"(?:^|\n)\s*(?:assistant\s*)?\**(yes|no)\b",
+    (
+        r"\b(?:the\s+answer\s+is|answer\s+is|correct\s+answer\s+is|"
+        r"i\s+(?:would\s+)?(?:say|choose|select))\s*\**\s*(yes|no)\b"
+    ),
+    r"\b(?:so|therefore|thus|hence)\s*(?:,|:)?\s*\**(yes|no)\b",
+)
+
+
+def _strip_generation_roles(text: str) -> str:
+    text = text.strip()
+    text = re.sub(r"</?think>\s*", " ", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"^(?:assistant|user|system)\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text.strip(" \t\r\n?:")
+
+
+def _first_meaningful_sentence(text: str) -> str:
+    """Return the first non-empty sentence, skipping leading questions."""
+    sentences = _split_sentences(text)
+    for index, sentence in enumerate(sentences):
+        sentence = sentence.strip()
+        if not re.search(r"[A-Za-z0-9]", sentence):
+            continue
+        if re.fullmatch(r"</?think>", sentence, flags=re.IGNORECASE):
+            continue
+        # A leading question is usually the prompt, not the answer.  Skip it
+        # when a following sentence exists.
+        if sentence.endswith("?") and index + 1 < len(sentences):
+            continue
+        return sentence
+    return ""
+
+
+def _answer_marker_tail(text: str) -> str:
+    """Return text after the last explicit answer marker, or ``""``."""
+    best_end = -1
+    for pattern in _V2_ANSWER_MARKERS:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            best_end = max(best_end, match.end())
+    if best_end < 0:
+        return ""
+    return text[best_end:].strip()
+
+
+def _yes_no_from_tail(tail: str, task: str | None) -> str:
+    """Extract yes/no from an explicit-answer tail."""
+    tail = tail.strip()
+    if not tail:
+        return ""
+    option = re.match(
+        r"(?:option\s*)?[\(\*]*([A-D])[\)\.\*]*\s*[,:;]?\s*(.*)",
+        tail,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if option:
+        rest = option.group(2).strip()
+        if rest:
+            match = re.search(r"\b(yes|no)\b", rest, flags=re.IGNORECASE)
+            if match:
+                return match.group(1).lower()
+            if task == "boolq":
+                return ""
+            return _first_meaningful_sentence(rest)
+        if task == "boolq":
+            return {"A": "yes", "B": "no"}.get(option.group(1).upper(), "")
+    match = re.search(r"\b(yes|no)\b", tail, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).lower()
+    return ""
+
+
+def extract_answer_v2(generation: str, task: str | None = None) -> str:
+    """Extract an answer candidate with the v2 protocol.
+
+    ``task`` enables BoolQ-specific handling.  Without it, the function still
+    prefers explicit answer markers and first sentences, but cannot reject an
+    ambiguous yes/no option list.
+    """
+    text = _strip_generation_roles(generation)
+    if not text:
+        return ""
+
+    tail = _answer_marker_tail(text)
+    if tail:
+        if task == "boolq":
+            answer = _yes_no_from_tail(tail, task)
+        else:
+            answer = _clean_v2_extracted(_first_meaningful_sentence(tail))
+        if answer:
+            return answer
+
+    if task == "boolq":
+        assertions: list[tuple[int, str]] = []
+        for pattern in _V2_YES_NO_ASSERTIONS:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                assertions.append((match.start(), match.group(1).lower()))
+        if assertions:
+            assertions.sort(key=lambda item: item[0])
+            return assertions[0][1]
+        # Option lists such as ``A: Yes / B: No`` are deliberately treated as
+        # ambiguous rather than as an answer.
+        return ""
+
+    first = _clean_v2_extracted(_first_meaningful_sentence(text))
+    if first:
+        return first
+    return _clean_v2_extracted(extract_answer(generation))
+
+
+def score_answer_v2(
+    prediction: str, gold: str, task: str | None = None
+) -> dict[str, bool | str | float]:
+    """Return strict/lenient signals using the v2 extractor."""
+    extracted = extract_answer_v2(prediction, task=task)
     return {
         "exact": exact_match(prediction, gold),
         "contains": contains_match(prediction, gold),

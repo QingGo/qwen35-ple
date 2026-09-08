@@ -6,8 +6,10 @@ from qwen35_ple.eval.answers import (
     contains_match,
     exact_match,
     extract_answer,
+    extract_answer_v2,
     normalize_answer,
     score_answer,
+    score_answer_v2,
 )
 
 
@@ -47,3 +49,32 @@ def test_score_answer_reports_lenient() -> None:
     assert score["exact"] is False
     assert score["contains"] is True
     assert score["extracted_contains"] is True
+
+
+def test_extract_answer_v2_prefers_answer_marker() -> None:
+    gen = "Let me think. The correct answer is **Paris**. It is the capital."
+    assert extract_answer_v2(gen) == "Paris."
+    assert score_answer_v2(gen, "Paris")["extracted_exact"] is True
+
+
+def test_extract_answer_v2_prefers_first_sentence() -> None:
+    gen = "The capital of France is **Paris**. It is the largest city."
+    assert extract_answer_v2(gen) == "The capital of France is Paris."
+    assert score_answer_v2(gen, "Paris")["extracted_contains"] is True
+
+
+def test_extract_answer_v2_skips_leading_question() -> None:
+    gen = "What is the capital of France? Paris."
+    assert extract_answer_v2(gen) == "Paris."
+
+
+def test_extract_answer_v2_boolq_ambiguous_option_list() -> None:
+    gen = "?\nA: Yes\nB: No\nAnswer:\n\n<think>\nWe need to check the passage."
+    assert extract_answer_v2(gen, task="boolq") == ""
+    assert score_answer_v2(gen, "yes", task="boolq")["extracted_exact"] is False
+
+
+def test_extract_answer_v2_boolq_explicit_yes_no() -> None:
+    assert extract_answer_v2("assistant\nYes, they are the same.", task="boolq") == "yes"
+    assert extract_answer_v2("The correct answer is **B. No**.", task="boolq") == "no"
+    assert extract_answer_v2("Answer: A. Yes.", task="boolq") == "yes"

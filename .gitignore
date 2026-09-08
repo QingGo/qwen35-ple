@@ -10,3 +10,7 @@ build/
 .ruff_cache/
 .mypy_cache/
 .DS_Store
+
+# Raw Phase 2 artifacts are kept compressed in git; keep local raw copies untracked.
+artifacts/phase2-full-4090/phase1-*.json
+artifacts/phase2-full-4090/phase2-full.log

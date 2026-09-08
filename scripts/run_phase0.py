@@ -797,8 +797,9 @@ def _run_mode(
 
     short_conv = None
     if getattr(args, "load_reader", None):
+        load_path = _format_reader_save_path(args.load_reader, mode, seed)
         reader, extra_state = load_reader_with_extra(
-            args.load_reader,
+            load_path,
             device=args.device,
         )
         if args.reader == "simple" and args.short_conv:
@@ -812,7 +813,7 @@ def _run_mode(
             if args.device != "cpu":
                 short_conv = short_conv.to(args.device)
         train_losses: list[float] = []
-        print(f"  [{mode}] seed={seed} loaded reader from {args.load_reader}")
+        print(f"  [{mode}] seed={seed} loaded reader from {load_path}")
     else:
         if args.reader == "official":
             reader = OfficialSourceQwenReader.from_official_checkpoint(

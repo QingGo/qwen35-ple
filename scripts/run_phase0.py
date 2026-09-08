@@ -58,11 +58,31 @@ from qwen35_ple.real_ple import resolve_ple_weight_scale
 from qwen35_ple.serving.bundle import make_bundle, save_bundle
 
 DEFAULT_QA = [
-    {"task": "triviaqa", "question": "What is the capital of France?", "answer": "Paris"},
-    {"task": "triviaqa", "question": "What is the largest planet in the Solar System?", "answer": "Jupiter"},
-    {"task": "triviaqa", "question": "What is the chemical symbol for gold?", "answer": "Au"},
-    {"task": "nq", "question": "Who wrote Romeo and Juliet?", "answer": "William Shakespeare"},
-    {"task": "nq", "question": "In which country is the city of Kyoto?", "answer": "Japan"},
+    {
+        "task": "triviaqa",
+        "question": "What is the capital of France?",
+        "answer": "Paris",
+    },
+    {
+        "task": "triviaqa",
+        "question": "What is the largest planet in the Solar System?",
+        "answer": "Jupiter",
+    },
+    {
+        "task": "triviaqa",
+        "question": "What is the chemical symbol for gold?",
+        "answer": "Au",
+    },
+    {
+        "task": "nq",
+        "question": "Who wrote Romeo and Juliet?",
+        "answer": "William Shakespeare",
+    },
+    {
+        "task": "nq",
+        "question": "In which country is the city of Kyoto?",
+        "answer": "Japan",
+    },
     {"task": "nq", "question": "What is the currency of Japan?", "answer": "yen"},
     {"task": "boolq", "question": "Is the sky blue?", "answer": "yes"},
     {"task": "boolq", "question": "Can fish fly?", "answer": "no"},
@@ -89,6 +109,7 @@ def _install_torch_compat() -> None:
 
     torch.is_autocast_enabled = _autocast
     if not hasattr(torch.nn, "RMSNorm"):
+
         class _RMSNorm(torch.nn.Module):
             def __init__(self, dim: int, eps: float = 1e-6) -> None:
                 super().__init__()
@@ -107,8 +128,10 @@ def _install_torch_compat() -> None:
     import typing
 
     import typing_extensions
+
     if not hasattr(typing, "override"):
         typing.override = typing_extensions.override
+
 
 def _load_model(model_path: str, device: str = "cpu"):
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -151,17 +174,20 @@ def _load_features(feature_dir: Path, model_dir: str, scale: float | None):
 def _split(tokens: np.ndarray, e_t: Any, val_frac: float):
     cut = int(len(tokens) * (1.0 - val_frac))
     if hasattr(e_t, "view") and not isinstance(e_t, np.ndarray):
-        return (tokens[:cut], e_t.view(0, cut)), (tokens[cut:], e_t.view(cut, len(tokens) - cut))
+        return (tokens[:cut], e_t.view(0, cut)), (
+            tokens[cut:],
+            e_t.view(cut, len(tokens) - cut),
+        )
     train = (tokens[:cut], e_t[:cut])
     val = (tokens[cut:], e_t[cut:])
     return train, val
+
 
 def _e_t_slice(e_t: Any, start: int, length: int) -> np.ndarray:
     """Return e_t[start:start+length], fetching lazily when in live-store mode."""
     if hasattr(e_t, "get"):
         return e_t.get(start, length)
-    return e_t[start:start + length]
-
+    return e_t[start : start + length]
 
 
 def _window_loss(
@@ -182,7 +208,11 @@ def _window_loss(
     losses = []
     with torch.no_grad():
         for start in starts:
-            ids = torch.from_numpy(tokens[start : start + seq_len][None, :]).long().to(device)
+            ids = (
+                torch.from_numpy(tokens[start : start + seq_len][None, :])
+                .long()
+                .to(device)
+            )
             ets_np = _e_t_slice(e_t, start, seq_len)
             ets = torch.from_numpy(ets_np[None, :]).float().to(device)
             model._current_ple_e_t = ets
@@ -223,7 +253,9 @@ def _train_reader(
     val_curve: list[dict] = []
     for step in range(steps):
         start = rng.randint(0, len(tokens) - seq_len - 1)
-        ids = torch.from_numpy(tokens[start : start + seq_len][None, :]).long().to(device)
+        ids = (
+            torch.from_numpy(tokens[start : start + seq_len][None, :]).long().to(device)
+        )
         ets_np = _e_t_slice(e_t, start, seq_len)
         ets = torch.from_numpy(ets_np[None, :]).float().to(device)
         model._current_ple_e_t = ets
@@ -239,7 +271,12 @@ def _train_reader(
         losses.append(float(loss.item()))
         if (step + 1) % 5 == 0 or step == 0:
             print(f"    step {step + 1}/{steps}: loss={loss.item():.4f}")
-        if val_every > 0 and (step + 1) % val_every == 0 and val_tokens is not None and val_e_t is not None:
+        if (
+            val_every > 0
+            and (step + 1) % val_every == 0
+            and val_tokens is not None
+            and val_e_t is not None
+        ):
             vloss = _window_loss(
                 model,
                 val_tokens,
@@ -279,9 +316,7 @@ def _qa_inputs(
         if control:
             rng = np.random.default_rng(seed * 1000 + idx)
             et = et[rng.permutation(len(et))]
-        ans_tokens = tokenizer.encode(
-            item["answer"], add_special_tokens=False
-        )
+        ans_tokens = tokenizer.encode(item["answer"], add_special_tokens=False)
         answer_start = len(tokenizer.encode(item["question"], add_special_tokens=False))
         out.append(
             {
@@ -391,20 +426,80 @@ class _QAEtStore:
         )
         return arr.reshape(len(ids), 2560).numpy()
 
+    def fetch_many(self, sequences: list[list[int]]) -> list[np.ndarray]:
+        """Fetch e_t for several token sequences with one Store call.
+
+        The returned list has one ``[len(sequence), 2560]`` array per input
+        sequence.  Batching the rowids avoids one Store round-trip per sequence
+        during batched generation.
+        """
+        import engramdb
+
+        from qwen35_ple.real_ple import rowids_from_tokens
+
+        lengths = [len(seq) for seq in sequences]
+        if not lengths:
+            return []
+        flat_parts = [
+            rowids_from_tokens(np.asarray(seq, dtype=np.int64)).reshape(-1)
+            for seq in sequences
+        ]
+        flat = np.concatenate(flat_parts) if len(flat_parts) > 1 else flat_parts[0]
+        arr = (
+            engramdb.fetch_e_t_tensor(
+                self.store,
+                flat.tolist(),
+                scale=self.scale,
+                num_heads=16,
+                head_dim=160,
+                dtype=None,
+                out_dtype=None,
+            )
+            .reshape(sum(lengths), 2560)
+            .numpy()
+        )
+        out: list[np.ndarray] = []
+        offset = 0
+        for length in lengths:
+            out.append(arr[offset : offset + length])
+            offset += length
+        return out
+
     def close(self) -> None:
         self.store.close()
 
 
 _NUMBER_UNITS = {
-    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
-    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
-    "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
     "nineteen": 19,
 }
 _NUMBER_TENS = {
-    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
-    "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+    "twenty": 20,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+    "seventy": 70,
+    "eighty": 80,
+    "ninety": 90,
 }
 
 
@@ -414,7 +509,11 @@ def _expand_number_words(text: str) -> str:
     out: list[str] = []
     i = 0
     while i < len(words):
-        if words[i] in _NUMBER_UNITS or words[i] in _NUMBER_TENS or words[i] in {"hundred", "thousand"}:
+        if (
+            words[i] in _NUMBER_UNITS
+            or words[i] in _NUMBER_TENS
+            or words[i] in {"hundred", "thousand"}
+        ):
             total = 0
             current = 0
             while i < len(words):
@@ -455,58 +554,115 @@ def _qa_exact_match(
     control: bool,
     seed: int,
     max_new_tokens: int,
+    batch_size: int = 1,
 ) -> dict:
     """Greedy exact-match QA generation with live PLE injection.
 
     For real/control, every decoding step fetches the e_t rows for the current
     token sequence and injects them through the installed reader hook.  For
     no-reader, ``qa_store`` is None and the same greedy loop runs without PLE.
+
+    Questions are processed in batches of ``batch_size``.  Padding is handled
+    with an attention mask; greedy decoding remains identical to the
+    one-question-at-a-time path.
     """
     device = next(model.parameters()).device
     eos_id = tokenizer.eos_token_id
+    pad_id = tokenizer.pad_token_id
+    if pad_id is None:
+        pad_id = eos_id if eos_id is not None else 0
+    batch_size = max(1, int(batch_size))
     answers: list[dict] = []
     per_task_correct: dict[str, list[bool]] = {}
 
-    for idx, item in enumerate(items):
-        print(
-            f"    QA {idx + 1}/{len(items)} [{item['task']}] {item['question'][:90]}",
-            flush=True,
+    for chunk_start in range(0, len(items), batch_size):
+        chunk = list(
+            enumerate(items[chunk_start : chunk_start + batch_size], start=chunk_start)
         )
-        qids = tokenizer.encode(item["question"], add_special_tokens=False)
-        ids = list(qids)
-        generated_ids: list[int] = []
+        states = []
+        for idx, item in chunk:
+            print(
+                f"    QA {idx + 1}/{len(items)} [{item['task']}] {item['question'][:90]}",
+                flush=True,
+            )
+            states.append(
+                {
+                    "idx": idx,
+                    "item": item,
+                    "ids": list(
+                        tokenizer.encode(item["question"], add_special_tokens=False)
+                    ),
+                    "generated": [],
+                    "finished": False,
+                }
+            )
+
         with torch.no_grad():
             for _ in range(max_new_tokens):
+                active = [state for state in states if not state["finished"]]
+                if not active:
+                    break
+                max_len = max(len(state["ids"]) for state in active)
+                input_ids = torch.full(
+                    (len(active), max_len),
+                    int(pad_id),
+                    dtype=torch.long,
+                    device=device,
+                )
+                attention_mask = torch.zeros(
+                    (len(active), max_len), dtype=torch.long, device=device
+                )
+                for row, state in enumerate(active):
+                    length = len(state["ids"])
+                    input_ids[row, :length] = torch.tensor(
+                        state["ids"], dtype=torch.long, device=device
+                    )
+                    attention_mask[row, :length] = 1
+
                 if qa_store is not None:
-                    et_np = qa_store.fetch(ids)
-                    if control:
-                        rng = np.random.default_rng(seed * 1000 + idx)
-                        et_np = et_np[rng.permutation(len(et_np))]
+                    et_list = qa_store.fetch_many([state["ids"] for state in active])
+                    e_t_padded = np.zeros(
+                        (len(active), max_len, 2560), dtype=np.float32
+                    )
+                    for row, (state, et_np) in enumerate(
+                        zip(active, et_list, strict=True)
+                    ):
+                        if control:
+                            rng = np.random.default_rng(seed * 1000 + state["idx"])
+                            et_np = et_np[rng.permutation(len(et_np))]
+                        e_t_padded[row, : len(state["ids"])] = et_np
                     model._current_ple_e_t = (
-                        torch.from_numpy(et_np[None, :]).float().to(device)
+                        torch.from_numpy(e_t_padded).float().to(device)
                     )
                 else:
                     model._current_ple_e_t = None
-                out = model(input_ids=torch.tensor([ids], dtype=torch.long, device=device))
-                logits = out.logits
-                next_id = int(torch.argmax(logits[0, -1]).item())
-                if eos_id is not None and next_id == eos_id:
-                    break
-                generated_ids.append(next_id)
-                ids.append(next_id)
 
-        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
-        hit = _normalize_answer(item["answer"]) in _normalize_answer(generated_text)
-        answers.append(
-            {
-                "task": item["task"],
-                "question": item["question"],
-                "answer": item["answer"],
-                "generated": generated_text,
-                "correct": hit,
-            }
-        )
-        per_task_correct.setdefault(item["task"], []).append(hit)
+                out = model(input_ids=input_ids, attention_mask=attention_mask)
+                for row, state in enumerate(active):
+                    logits = out.logits[row, len(state["ids"]) - 1]
+                    next_id = int(torch.argmax(logits).item())
+                    if eos_id is not None and next_id == eos_id:
+                        state["finished"] = True
+                    else:
+                        state["generated"].append(next_id)
+                        state["ids"].append(next_id)
+
+        for state in states:
+            item = state["item"]
+            generated_text = tokenizer.decode(
+                state["generated"], skip_special_tokens=True
+            )
+            hit = _normalize_answer(item["answer"]) in _normalize_answer(generated_text)
+            answers.append(
+                {
+                    "task": item["task"],
+                    "question": item["question"],
+                    "answer": item["answer"],
+                    "generated": generated_text,
+                    "correct": hit,
+                }
+            )
+            per_task_correct.setdefault(item["task"], []).append(hit)
 
     metrics: dict[str, float] = {}
     for task, hits in sorted(per_task_correct.items()):
@@ -566,7 +722,11 @@ def _run_mode(
 ):
     if mode == "no-reader":
         val_loss = _window_loss(model, val_tokens, val_e_t, args.seq_len)
-        qa = _qa_loglik(model, tokenizer, qa_items, control=False, seed=seed) if args.qa else None
+        qa = (
+            _qa_loglik(model, tokenizer, qa_items, control=False, seed=seed)
+            if args.qa
+            else None
+        )
         qa_exact = None
         if args.qa_exact_match:
             qa_exact = _qa_exact_match(
@@ -577,6 +737,7 @@ def _run_mode(
                 control=False,
                 seed=seed,
                 max_new_tokens=args.qa_max_new_tokens,
+                batch_size=getattr(args, "qa_batch_size", 1),
             )
         return {
             "mode": mode,
@@ -652,7 +813,9 @@ def _run_mode(
                 num_branches=args.branches,
                 zero_init_v=args.zero_init_v,
             )
-            short_conv = ShortConv(model.config.hidden_size) if args.short_conv else None
+            short_conv = (
+                ShortConv(model.config.hidden_size) if args.short_conv else None
+            )
 
         if args.device != "cpu":
             reader = reader.to(args.device)
@@ -671,7 +834,9 @@ def _run_mode(
     if mode == "control":
         rng = np.random.default_rng(seed)
         perm = rng.permutation(len(val_e_t))
-        val_eval_e_t = val_e_t.permuted(perm) if hasattr(val_e_t, "permuted") else val_e_t[perm]
+        val_eval_e_t = (
+            val_e_t.permuted(perm) if hasattr(val_e_t, "permuted") else val_e_t[perm]
+        )
 
     if getattr(args, "load_reader", None):
         # Loaded-checkpoint evaluation mode: no training, only eval/QA below.
@@ -716,6 +881,7 @@ def _run_mode(
             control=(mode == "control"),
             seed=seed,
             max_new_tokens=args.qa_max_new_tokens,
+            batch_size=getattr(args, "qa_batch_size", 1),
         )
 
     if getattr(args, "save_reader", None) and not getattr(args, "load_reader", None):
@@ -785,7 +951,11 @@ def _run_mode(
 def _summarize(results: list[dict], modes: list[str]) -> dict:
     summary = {}
     for mode in modes:
-        vals = [r["val_loss"] for r in results if r["mode"] == mode and np.isfinite(r["val_loss"])]
+        vals = [
+            r["val_loss"]
+            for r in results
+            if r["mode"] == mode and np.isfinite(r["val_loss"])
+        ]
         qa_vals = [
             r["qa_exact"]["metrics"]["qa_em_mean"]
             for r in results
@@ -817,14 +987,22 @@ def main() -> int:
     parser.add_argument("--store-p-view", default=None)
     parser.add_argument("--store-p-slot-indices", default=None)
     parser.add_argument("--store-p-slot-index", default=None)
-    parser.add_argument("--access-order", action="store_true", help="read Store-P slots in sorted physical order")
+    parser.add_argument(
+        "--access-order",
+        action="store_true",
+        help="read Store-P slots in sorted physical order",
+    )
     parser.add_argument("--tokens-npy", default=None)
     parser.add_argument("--scale", type=float, default=None)
     parser.add_argument("--layer", type=int, default=8)
     parser.add_argument("--branches", type=int, default=1)
-    parser.add_argument("--reader", choices=["simple", "engram", "official", "mlp"], default="simple")
+    parser.add_argument(
+        "--reader", choices=["simple", "engram", "official", "mlp"], default="simple"
+    )
     parser.add_argument("--official-reader-path", default="data/official_ple_reader.pt")
-    parser.add_argument("--mlp-hidden", type=int, default=256, help="MLP value reader hidden width")
+    parser.add_argument(
+        "--mlp-hidden", type=int, default=256, help="MLP value reader hidden width"
+    )
     parser.add_argument("--bridge-mlp", action="store_true")
     parser.add_argument("--bridge-hidden", type=int, default=None)
     parser.add_argument("--out-mlp", action="store_true")
@@ -859,7 +1037,12 @@ def main() -> int:
         ),
     )
     parser.add_argument("--steps", type=int, default=20)
-    parser.add_argument("--val-every", type=int, default=0, help="compute validation loss every N training steps (0=only final)")
+    parser.add_argument(
+        "--val-every",
+        type=int,
+        default=0,
+        help="compute validation loss every N training steps (0=only final)",
+    )
     parser.add_argument("--seq-len", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--val-frac", type=float, default=0.1)
@@ -870,13 +1053,21 @@ def main() -> int:
         choices=["no-reader", "real", "control"],
         default=["no-reader", "real", "control"],
     )
-    parser.add_argument("--qa", action="store_true", help="run minimal QA log-likelihood probes")
+    parser.add_argument(
+        "--qa", action="store_true", help="run minimal QA log-likelihood probes"
+    )
     parser.add_argument(
         "--qa-exact-match",
         action="store_true",
         help="run greedy exact-match QA generation with live PLE injection",
     )
     parser.add_argument("--qa-max-new-tokens", type=int, default=16)
+    parser.add_argument(
+        "--qa-batch-size",
+        type=int,
+        default=1,
+        help="number of questions to decode together (1 = original sequential path)",
+    )
     parser.add_argument(
         "--qa-file",
         default=None,
@@ -985,8 +1176,12 @@ def main() -> int:
             )
     else:
         print(f"[phase0] loading features from {feature_dir}")
-        tokens, e_t, applied_scale = _load_features(feature_dir, args.model_dir, args.scale)
-        print(f"[phase0] tokens={len(tokens)} e_t={e_t.shape} scale={applied_scale:.6g}")
+        tokens, e_t, applied_scale = _load_features(
+            feature_dir, args.model_dir, args.scale
+        )
+        print(
+            f"[phase0] tokens={len(tokens)} e_t={e_t.shape} scale={applied_scale:.6g}"
+        )
 
     (train_tokens, train_e_t), (val_tokens, val_e_t) = _split(
         tokens, e_t, args.val_frac
@@ -1102,6 +1297,7 @@ def main() -> int:
             "qa": bool(args.qa),
             "qa_exact_match": bool(args.qa_exact_match),
             "qa_max_new_tokens": args.qa_max_new_tokens,
+            "qa_batch_size": args.qa_batch_size,
             "qa_file": args.qa_file,
         },
         "summary": summary,

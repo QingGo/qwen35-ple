@@ -35,6 +35,7 @@ MAX_NEW="${MAX_NEW:-96}"
 READER="${READER:-official}"
 DEVICE="${DEVICE:-cuda}"
 SCALE="${SCALE:-}"
+QA_BATCH_SIZE="${QA_BATCH_SIZE:-16}"
 OFFICIAL_READER_PATH="${OFFICIAL_READER_PATH:-data/official_ple_reader.pt}"
 FORCE="${FORCE:-0}"
 SKIP_QA="${SKIP_QA:-0}"
@@ -55,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --reader) READER="$2"; shift 2 ;;
     --device) DEVICE="$2"; shift 2 ;;
     --scale) SCALE="$2"; shift 2 ;;
+    --qa-batch-size) QA_BATCH_SIZE="$2"; shift 2 ;;
     --official-reader-path) OFFICIAL_READER_PATH="$2"; shift 2 ;;
     --skip-qa) SKIP_QA=1; shift ;;
     --force) FORCE=1; shift ;;
@@ -128,6 +130,7 @@ for C in $CORPORA; do
       --qa \
       --qa-exact-match \
       --qa-max-new-tokens "$MAX_NEW" \
+      --qa-batch-size "$QA_BATCH_SIZE" \
       --qa-file "$QA_FILE" \
       --output "$OUT"
   fi

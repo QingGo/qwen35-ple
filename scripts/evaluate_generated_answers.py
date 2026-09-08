@@ -37,16 +37,32 @@ def _load_results(path: Path) -> dict:
 
 
 def _iter_answer_rows(results: dict):
+    """Yield (row, mode) pairs from either a flat or Phase-0 summary JSON."""
     qa_exact = results.get("qa_exact")
     if isinstance(qa_exact, dict) and isinstance(qa_exact.get("answers"), list):
         for row in qa_exact["answers"]:
-            yield row
+            yield row, results.get("mode")
         return
+
+    summary = results.get("summary")
+    if isinstance(summary, dict):
+        for mode, entry in summary.items():
+            details = entry.get("details") if isinstance(entry, dict) else None
+            if not isinstance(details, list):
+                continue
+            for detail in details:
+                detail_qa = detail.get("qa_exact") if isinstance(detail, dict) else None
+                if isinstance(detail_qa, dict) and isinstance(detail_qa.get("answers"), list):
+                    for row in detail_qa["answers"]:
+                        yield row, mode
+        return
+
     # Fallback: top-level list of answer rows.
     if isinstance(results.get("answers"), list):
         for row in results["answers"]:
-            yield row
+            yield row, results.get("mode")
         return
+
     raise SystemExit(
         "could not find qa_exact.answers in results; "
         "run with --qa-exact-match or provide a compatible file"
@@ -92,7 +108,24 @@ def _per_task(rows: list[dict]) -> dict:
     return out
 
 
-def _report_markdown(results: dict, per_task: dict) -> str:
+def _per_mode(rows: list[dict]) -> dict:
+    by_mode: dict[str, list[dict]] = {}
+    for row in rows:
+        mode = str(row.get("_mode") or row.get("mode") or "unknown")
+        by_mode.setdefault(mode, []).append(row)
+    out: dict[str, dict] = {}
+    for mode, mode_rows in sorted(by_mode.items()):
+        agg = _aggregate(mode_rows)
+        out[mode] = {
+            "n": len(mode_rows),
+            **{k: round(v, 4) for k, v in agg.items()},
+        }
+    return out
+
+
+def _report_markdown(
+    results: dict, per_task: dict, per_mode: dict, metrics: dict | None = None
+) -> str:
     lines = [
         "# Phase 1 Answer-Protocol Report",
         "",
@@ -103,7 +136,7 @@ def _report_markdown(results: dict, per_task: dict) -> str:
         "| Metric | Value |",
         "|---|---:|",
     ]
-    overall = results.get("metrics", {})
+    overall = metrics if metrics is not None else results.get("metrics", {})
     for key in ["exact", "contains", "extracted_exact", "extracted_contains"]:
         if key in overall:
             lines.append(f"| {key} | {overall[key]:.4f} |")
@@ -115,6 +148,17 @@ def _report_markdown(results: dict, per_task: dict) -> str:
     for task, entry in per_task.items():
         lines.append(
             f"| {task} | {entry['n']} | {entry['exact']:.4f} | "
+            f"{entry['contains']:.4f} | {entry['extracted_exact']:.4f} | "
+            f"{entry['extracted_contains']:.4f} |"
+        )
+    lines.append("")
+    lines.append("## Per-mode")
+    lines.append("")
+    lines.append("| Mode | n | exact | contains | extracted_exact | extracted_contains |")
+    lines.append("|---|---:|---:|---:|---:|---:|")
+    for mode, entry in per_mode.items():
+        lines.append(
+            f"| {mode} | {entry['n']} | {entry['exact']:.4f} | "
             f"{entry['contains']:.4f} | {entry['extracted_exact']:.4f} | "
             f"{entry['extracted_contains']:.4f} |"
         )
@@ -130,13 +174,14 @@ def main() -> int:
 
     results = _load_results(Path(args.results))
     scored: list[dict] = []
-    for row in _iter_answer_rows(results):
+    for row, mode in _iter_answer_rows(results):
         gold = str(row.get("answer", ""))
         pred = _prediction(row)
         s = score_answer(pred, gold)
         scored.append(
             {
                 **row,
+                "_mode": mode,
                 "generated_len": len(pred.split()),
                 "exact": s["exact"],
                 "contains": s["contains"],
@@ -148,11 +193,13 @@ def main() -> int:
 
     overall = _aggregate(scored)
     per_task = _per_task(scored)
+    per_mode = _per_mode(scored)
     out = {
         "source": str(Path(args.results).resolve()),
         "n": len(scored),
         "metrics": {k: round(v, 6) for k, v in overall.items()},
         "per_task": per_task,
+        "per_mode": per_mode,
         "rows": scored,
     }
     out_path = Path(args.output)
@@ -163,7 +210,10 @@ def main() -> int:
     print(json.dumps({"n": len(scored), "metrics": out["metrics"]}, indent=2))
 
     md_path = Path(args.markdown) if args.markdown else out_path.with_suffix(".md")
-    md_path.write_text(_report_markdown(results, per_task), encoding="utf-8")
+    md_path.write_text(
+        _report_markdown(results, per_task, per_mode, out["metrics"]),
+        encoding="utf-8",
+    )
     print(f"[answer-eval] wrote {out_path}")
     print(f"[answer-eval] wrote {md_path}")
     return 0

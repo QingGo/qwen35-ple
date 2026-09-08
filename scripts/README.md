@@ -32,6 +32,7 @@
 | `build_phase1_kb_split.py` | Phase 1 KB/QA 四 split：kb.train/eval、qa.train/eval + 双向污染审计 |
 | `build_kb_token_streams.py` | 把 KB split 转成 train/eval token 流，供 unseen-KB reader 训练/评测 |
 | `evaluate_generated_answers.py` | Phase 1 评测协议重评分：strict exact / contains / extracted contains + Markdown 报告 |
+| `run_unseen_kb_experiment.sh` | unseen-KB 实验：seen KB 训练 real/control reader，unseen KB 上三线评测 |
 | `run_phase1_matrix.sh` | Phase 2 批处理入口：六个 Phase 1 语料 × 3 seeds × real/control/no-reader × 长生成 QA |
 | `summarize_phase1_matrix.py` | Phase 1/2 矩阵汇总：real/control/no-reader 的 PPL、contains、extracted EM |
 | `audit_contamination.py` | 严格 QA 污染审计：答案/问题/QA n-gram 重叠，输出逐题和汇总报告 |

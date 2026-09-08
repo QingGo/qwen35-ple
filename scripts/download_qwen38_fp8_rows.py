@@ -61,7 +61,7 @@ def _download(url: str, dest: Path) -> None:
 def _load_json_url(url: str) -> dict[str, Any]:
     """Fetch a small JSON document with curl and parse it."""
     out = subprocess.check_output(
-        ["curl", "--http1.1", "-sS", "--fail", "--retry", "3", url],
+        ["curl", "--http1.1", "-L", "-sS", "--fail", "--retry", "3", url],
         text=True,
     )
     return json.loads(out)

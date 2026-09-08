@@ -21,24 +21,45 @@
 这是 Phase 2 全量跑之前的强正向信号：三条线在 3 步内就出现了与 Phase 0 一致的
 “真实 PLE 读取带来语言建模增益”模式，且不在只依赖 M1 混合语料。
 
-## 2. 已知局限
+## 2. Unseen-KB pilot（同一轮补充）
+
+在 Wiki KB split 上跑了 seen-KB 训练 / unseen-KB 评测：
+
+```text
+train: kb-wiki-tokens/train.tokens.npy      (约 200 万 token)
+eval : kb-wiki-tokens/eval.tokens.npy       (约 50 万 token)
+steps: 3, seed: 0
+```
+
+| 线 | Unseen KB PPL |
+|---|---:|
+| real | 43.296 |
+| control | 43.732 |
+| no-reader | 44.842 |
+
+**unseen-KB 上也满足：real < control < no-reader。**
+
+说明 reader 不是只记住了 seen KB，而是能从“训练时未见过”的 KB 的 PLE 行中
+获得语言建模增益。
+
+## 3. 已知局限
 
 - 只有 3 步训练，不是预注册的 500 步；
 - 只有 1 个 seed，未做 3-seed 稳定性；
 - 没有 QA / Code / Math 生成式评测，所以尚不能判断通用任务收益；
-- 未做 unseen-KB；
 - 仍在 CPU/本机环境下运行，未上 4090 做 5M/20M。
 
-## 3. 下一步
+## 4. 下一步
 
 1. 在 WSL/4090 跑正式 Phase 2：1M × 500 步 × 3 seeds × 150 QA（96 token 生成）；
 2. 用 `scripts/summarize_phase1_matrix.py` 聚合 PPL + contains + extracted EM；
 3. 用 `scripts/run_unseen_kb_experiment.sh` 跑 unseen-KB；
 4. 若正 → 5M/20M 规模曲线。
 
-## 4. 本轮新增工具
+## 5. 本轮新增工具
 
 - `scripts/summarize_phase1_matrix.py`：Phase 1/2 矩阵聚合；
 - `scripts/build_kb_token_streams.py`：KB split → train/eval token 流；
 - `scripts/run_unseen_kb_experiment.sh`：seen-KB 训练 + unseen-KB 评测；
+- `scripts/summarize_unseen_kb.py`：unseen-KB 三线结果汇总；
 - `scripts/run_phase1_matrix.sh --skip-qa`：快速 pilot 模式。

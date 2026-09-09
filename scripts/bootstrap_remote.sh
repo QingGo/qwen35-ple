@@ -90,7 +90,14 @@ echo "=== [bootstrap] versions ==="
 "$PYTHON" - <<'PY'
 import sys
 print("python", sys.version.split()[0])
-for name in ("torch", "transformers", "tokenizers", "numpy", "engramdb"):
+for name in (
+    "torch",
+    "transformers",
+    "tokenizers",
+    "numpy",
+    "engramdb-python",
+    "engram-peft",
+):
     try:
         import importlib.metadata
         print(name, importlib.metadata.version(name))

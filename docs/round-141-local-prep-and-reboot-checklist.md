@@ -71,7 +71,17 @@ rows：/dev/shm 已丢，重启后从持久盘或 ModelScope 恢复
 
 中断粒度从“一个 corpus”降到“一个 `(mode, seed)`”。
 
-### 1.4 小规模诊断矩阵
+### 1.4 PLE layer 对齐
+
+Qwen3.8-Flash-Next 的 `text_config` 中：
+
+```text
+ple_layer_ids = [2]
+```
+
+因此下一轮诊断默认使用 `--layer 2`，而不是之前 Phase 2 的 `layer 8`。
+
+### 1.5 小规模诊断矩阵
 
 `scripts/run_phase2_diagnostic.sh` 默认：
 
@@ -80,9 +90,18 @@ corpora : PURE_WIKI PURE_CODE FW_STEM
 modes   : real control no-reader
 seeds   : 0 1 2
 steps   : 500
+layer   : 2      # Qwen3.8-Flash-Next config: ple_layer_ids=[2]
 QA      : instruction-style prompt
 reader  : --save-reader
 resume  : on
+```
+
+旧 Phase 2 / 首轮 layer8 诊断结果放在独立目录，避免与 layer2 结果混淆：
+
+```text
+outputs/phase2-diagnostic            # layer8 首轮诊断
+outputs/phase2-layer2-smoke          # layer2 单 corpus 冒烟
+outputs/phase2-diagnostic-layer2     # 后续 layer2 全量诊断
 ```
 
 ---

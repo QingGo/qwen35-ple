@@ -146,6 +146,31 @@ def _oracle_task_table(root: Path) -> list[str]:
     return lines
 
 
+def _unique_table(root: Path) -> list[str]:
+    lines = [
+        "| Oracle analysis | Task | both real/no | real only | no-reader only | control only | all wrong |",
+        "|---|---|---:|---:|---:|---:|---:|",
+    ]
+    oracle_dir = root / "oracle-analysis"
+    if not oracle_dir.exists():
+        return lines
+    for path in sorted(oracle_dir.glob("*.json")):
+        data = _load(path)
+        if not isinstance(data, dict):
+            continue
+        per_task = (data.get("aggregate") or {}).get("per_task") or {}
+        for task in TASKS:
+            counts = (per_task.get(task) or {}).get("unique_counts") or {}
+            if not counts:
+                continue
+            lines.append(
+                f"| {path.stem} | {task} | {counts.get('both_real_no', 0)} | "
+                f"{counts.get('real_only', 0)} | {counts.get('no_reader_only', 0)} | "
+                f"{counts.get('control_only', 0)} | {counts.get('both_wrong', 0)} |"
+            )
+    return lines
+
+
 def _gate_table(root: Path) -> list[str]:
     lines = [
         "| Reader | Task | n | gate mean | gate max | open frac | tail-32 mean | body mean |",
@@ -324,6 +349,21 @@ def _decision_notes(root: Path) -> list[str]:
                     f"- oracle(all)={_fmt(oracle_all)}: shuffled-control rows also carry "
                     "task signal, so part of the gain may be reader regularization/format."
                 )
+        per_task = (layer2.get("aggregate") or {}).get("per_task") or {}
+        boolq = ((per_task.get("boolq") or {}).get("unique_counts")) or {}
+        trivia = ((per_task.get("triviaqa") or {}).get("unique_counts")) or {}
+        if boolq:
+            notes.append(
+                f"- BoolQ unique-correct: real-only={boolq.get('real_only', 0)}, "
+                f"no-reader-only={boolq.get('no_reader_only', 0)}. "
+                "If no-reader-only dominates, the gate should close on BoolQ."
+            )
+        if trivia:
+            notes.append(
+                f"- TriviaQA unique-correct: real-only={trivia.get('real_only', 0)}, "
+                f"no-reader-only={trivia.get('no_reader_only', 0)}. "
+                "If real-only dominates, the gate should open on TriviaQA."
+            )
     sft = _load(root / "oracle-analysis" / "sft-mixed50.json")
     if isinstance(sft, dict):
         agg = sft.get("aggregate") or {}
@@ -391,6 +431,12 @@ def main() -> int:
     lines += _oracle_table(root)
     lines += ["", "### Per-task oracle", ""]
     lines += _oracle_task_table(root)
+    lines += [
+        "",
+        "### Unique-correct counts",
+        "",
+    ]
+    lines += _unique_table(root)
     lines += [
         "",
         "## 3. Oracle context (gold answer in prompt)",

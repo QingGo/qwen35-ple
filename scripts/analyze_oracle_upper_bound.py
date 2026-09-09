@@ -202,6 +202,41 @@ def _oracle_rows(
     return out, chosen_counts
 
 
+def _unique_counts(
+    rows_by_mode: dict[str, list[dict]],
+    indices: list[int],
+    protocol: str,
+    metric: str,
+) -> dict[str, int]:
+    """Count where real/no-reader are uniquely correct or both wrong."""
+    counts = {
+        "both_real_no": 0,
+        "real_only": 0,
+        "no_reader_only": 0,
+        "control_only": 0,
+        "both_wrong": 0,
+    }
+    for idx in indices:
+        real = _score_row(rows_by_mode["real"][idx], protocol, metric)
+        no = _score_row(rows_by_mode["no-reader"][idx], protocol, metric)
+        control = (
+            _score_row(rows_by_mode["control"][idx], protocol, metric)
+            if "control" in rows_by_mode
+            else False
+        )
+        if real and no:
+            counts["both_real_no"] += 1
+        elif real and not no:
+            counts["real_only"] += 1
+        elif no and not real:
+            counts["no_reader_only"] += 1
+        elif control and not real and not no:
+            counts["control_only"] += 1
+        else:
+            counts["both_wrong"] += 1
+    return counts
+
+
 def _summarize(
     rows_by_mode: dict[str, list[dict]], protocol: str, metric: str
 ) -> dict[str, Any]:
@@ -239,6 +274,9 @@ def _summarize(
         "n_items": len(base_rows),
         "warnings": warnings,
         "overall": fixed_metrics(all_indices),
+        "unique_counts": _unique_counts(
+            rows_by_mode, all_indices, protocol, metric
+        ),
         "per_task": {},
     }
     for task in tasks:
@@ -248,6 +286,9 @@ def _summarize(
             if str(row.get("task", "unknown")) == task
         ]
         out["per_task"][task] = fixed_metrics(task_indices)
+        out["per_task"][task]["unique_counts"] = _unique_counts(
+            rows_by_mode, task_indices, protocol, metric
+        )
 
     for name, arms in armsets.items():
         if not all(arm in rows_by_mode for arm in arms):
@@ -334,6 +375,34 @@ def _aggregate_seeds(per_seed: list[dict]) -> dict[str, Any]:
                 "std": std,
                 "per_seed": vals,
             }
+        count_keys = (
+            "both_real_no",
+            "real_only",
+            "no_reader_only",
+            "control_only",
+            "both_wrong",
+        )
+        out["per_task"][task]["unique_counts"] = {
+            key: sum(
+                entry.get("per_task", {})
+                .get(task, {})
+                .get("unique_counts", {})
+                .get(key, 0)
+                for entry in per_seed
+            )
+            for key in count_keys
+        }
+    count_keys = (
+        "both_real_no",
+        "real_only",
+        "no_reader_only",
+        "control_only",
+        "both_wrong",
+    )
+    out["unique_counts"] = {
+        key: sum(entry.get("unique_counts", {}).get(key, 0) for entry in per_seed)
+        for key in count_keys
+    }
     return out
 
 
@@ -396,20 +465,36 @@ def _markdown(report: dict[str, Any], protocol: str, metric: str) -> str:
         )
     lines += [
         "",
+        "## Unique-correct counts (summed across seeds)",
+        "",
+        "| Task | both real/no | real only | no-reader only | control only | all wrong |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for task, entry in sorted(report.get("aggregate", {}).get("per_task", {}).items()):
+        counts = entry.get("unique_counts") or {}
+        lines.append(
+            f"| {task} | {counts.get('both_real_no', 0)} | "
+            f"{counts.get('real_only', 0)} | {counts.get('no_reader_only', 0)} | "
+            f"{counts.get('control_only', 0)} | {counts.get('both_wrong', 0)} |"
+        )
+    lines += [
+        "",
         "## Per-corpus",
         "",
-        "| Corpus | real | control | no-reader | oracle(real/no) | oracle(all) |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Corpus | real | control | no-reader | oracle(real/no) | oracle(all) | real only | no-reader only |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for corpus, entry in sorted(report.get("per_corpus", {}).items()):
         agg = entry.get("aggregate", {})
+        counts = agg.get("unique_counts") or {}
         def m2(key: str, agg=agg) -> str:
             sub = agg.get(key, {})
             return _fmt(sub.get("mean")) if isinstance(sub, dict) else "N/A"
 
         lines.append(
             f"| {corpus} | {m2('always_real')} | {m2('always_control')} | "
-            f"{m2('always_no_reader')} | {m2('oracle_real_no')} | {m2('oracle_all')} |"
+            f"{m2('always_no_reader')} | {m2('oracle_real_no')} | {m2('oracle_all')} | "
+            f"{counts.get('real_only', 0)} | {counts.get('no_reader_only', 0)} |"
         )
     lines += [
         "",

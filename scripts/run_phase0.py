@@ -250,34 +250,91 @@ def _train_reader(
     val_e_t: np.ndarray | None = None,
     val_every: int = 0,
     max_val_windows: int = 4,
+    qa_sft_items: list[dict] | None = None,
+    qa_sft_weight: float = 0.0,
+    qa_sft_answer_only: bool = True,
+    qa_sft_control: bool = False,
+    qa_sft_log_every: int = 0,
+    gate_reg_weight: float = 0.0,
 ) -> tuple[list[float], list[dict]]:
+    """Train the reader on corpus next-token loss and/or QA answer-only loss.
+
+    ``qa_sft_weight`` is the per-step probability of drawing a QA SFT item
+    instead of a corpus window.  ``1.0`` means QA-only; ``0.5`` means an even
+    mix; ``0.0`` reproduces the original corpus-only training.
+    """
     assert len(tokens) > seq_len + 1
     params = [reader] + ([short_conv] if short_conv is not None else [])
     device = next(model.parameters()).device
     optimizer = torch.optim.AdamW(torch.nn.ModuleList(params).parameters(), lr=lr)
     rng = random.Random(seed)
+    qa_rng = random.Random(seed * 10007 + 17)
     losses = []
     val_curve: list[dict] = []
     for step in range(steps):
-        start = rng.randint(0, len(tokens) - seq_len - 1)
-        ids = (
-            torch.from_numpy(tokens[start : start + seq_len][None, :]).long().to(device)
+        use_qa = bool(qa_sft_items) and qa_sft_weight > 0.0 and (
+            qa_sft_weight >= 1.0 or qa_rng.random() < qa_sft_weight
         )
-        ets_np = _e_t_slice(e_t, start, seq_len)
-        ets = torch.from_numpy(ets_np[None, :]).float().to(device)
-        model._current_ple_e_t = ets
-        optimizer.zero_grad()
-        out = model(input_ids=ids)
-        logits = out.logits
-        loss = F.cross_entropy(
-            logits[:, :-1].reshape(-1, logits.size(-1)),
-            ids[:, 1:].reshape(-1),
-        )
+        if use_qa:
+            item = qa_rng.choice(qa_sft_items or [])
+            ids = (
+                torch.from_numpy(np.asarray(item["ids"], dtype=np.int64)[None, :])
+                .long()
+                .to(device)
+            )
+            ets_np = np.asarray(item["e_t"], dtype=np.float32)
+            if qa_sft_control:
+                perm = np.random.default_rng(seed * 100000 + step).permutation(
+                    len(ets_np)
+                )
+                ets_np = ets_np[perm]
+            ets = torch.from_numpy(ets_np[None, :]).float().to(device)
+            model._current_ple_e_t = ets
+            optimizer.zero_grad()
+            out = model(input_ids=ids)
+            logits = out.logits
+            labels = ids.clone()
+            if qa_sft_answer_only:
+                labels[:, : int(item["prompt_len"])] = -100
+            loss = F.cross_entropy(
+                logits[:, :-1].reshape(-1, logits.size(-1)),
+                labels[:, 1:].reshape(-1),
+                ignore_index=-100,
+            )
+            loss_kind = "qa"
+        else:
+            start = rng.randint(0, len(tokens) - seq_len - 1)
+            ids = (
+                torch.from_numpy(tokens[start : start + seq_len][None, :])
+                .long()
+                .to(device)
+            )
+            ets_np = _e_t_slice(e_t, start, seq_len)
+            ets = torch.from_numpy(ets_np[None, :]).float().to(device)
+            model._current_ple_e_t = ets
+            optimizer.zero_grad()
+            out = model(input_ids=ids)
+            logits = out.logits
+            loss = F.cross_entropy(
+                logits[:, :-1].reshape(-1, logits.size(-1)),
+                ids[:, 1:].reshape(-1),
+            )
+            loss_kind = "corpus"
+        if gate_reg_weight > 0.0:
+            gate_raw = getattr(reader, "last_gate_raw", None)
+            if gate_raw is not None:
+                loss = loss + gate_reg_weight * gate_raw.mean()
         loss.backward()
         optimizer.step()
         losses.append(float(loss.item()))
-        if (step + 1) % 5 == 0 or step == 0:
-            print(f"    step {step + 1}/{steps}: loss={loss.item():.4f}")
+        log_now = (step + 1) % 5 == 0 or step == 0
+        if qa_sft_log_every > 0 and (step + 1) % qa_sft_log_every == 0:
+            log_now = True
+        if log_now:
+            print(
+                f"    step {step + 1}/{steps} [{loss_kind}]: "
+                f"loss={loss.item():.4f}"
+            )
         if (
             val_every > 0
             and (step + 1) % val_every == 0
@@ -373,14 +430,26 @@ def _qa_loglik(model, tokenizer, items: list[dict], control: bool, seed: int) ->
 
 
 def _load_qa_file(path: str | Path | None) -> list[dict]:
-    """Load a QA file that matches the Phase 0 default schema."""
+    """Load a QA file that matches the Phase 0 default schema.
+
+    Accepts either a JSON list or JSONL (one JSON object per line).  The
+    Phase 1 KB split uses JSONL for ``qa.train.jsonl`` / ``qa.eval.jsonl``.
+    """
     if path is None:
         return list(DEFAULT_QA)
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(data, list):
-        raise TypeError("--qa-file must be a JSON list of {question, answer} items")
+    text = Path(path).read_text(encoding="utf-8")
+    data: list[Any]
+    if text.lstrip().startswith("["):
+        parsed = json.loads(text)
+        if not isinstance(parsed, list):
+            raise TypeError("--qa-file must be a JSON list or JSONL records")
+        data = parsed
+    else:
+        data = [json.loads(line) for line in text.splitlines() if line.strip()]
     out = []
     for item in data:
+        if not isinstance(item, dict):
+            raise TypeError("--qa-file items must be JSON objects")
         if "question" not in item or "answer" not in item:
             raise ValueError("each --qa-file item must contain 'question' and 'answer'")
         out.append(
@@ -391,6 +460,47 @@ def _load_qa_file(path: str | Path | None) -> list[dict]:
             }
         )
     return out
+
+
+def _load_qa_sft_file(path: str | Path) -> list[dict]:
+    """Load QA SFT data from a JSON list or JSONL file.
+
+    Each record must contain ``question`` and ``answer``; ``task`` is optional
+    and is used for the BoolQ prompt override.
+    """
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
+    records: list[dict] = []
+    stripped = text.lstrip()
+    if stripped.startswith("["):
+        data = json.loads(text)
+        if not isinstance(data, list):
+            raise TypeError(f"{path}: expected a JSON list")
+        records = data
+    else:
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            line = line.strip()
+            if not line:
+                continue
+            item = json.loads(line)
+            if not isinstance(item, dict):
+                raise TypeError(f"{path}:{line_no}: expected a JSON object")
+            records.append(item)
+    out: list[dict] = []
+    for item in records:
+        if "question" not in item or "answer" not in item:
+            raise ValueError(
+                f"{path}: each QA SFT item must contain 'question' and 'answer'"
+            )
+        out.append(
+            {
+                "task": str(item.get("task", "qa")),
+                "question": str(item["question"]),
+                "answer": str(item["answer"]),
+            }
+        )
+    return out
+
 
 
 class _QAEtStore:
@@ -474,6 +584,72 @@ class _QAEtStore:
 
     def close(self) -> None:
         self.store.close()
+
+
+def _build_qa_sft_cache(
+    items: list[dict],
+    tokenizer,
+    qa_store: _QAEtStore,
+    prompt_template: str | None,
+    boolq_prompt_template: str | None,
+    max_len: int,
+    eos_id: int | None,
+) -> list[dict]:
+    """Tokenize QA SFT items and fetch their PLE rows once.
+
+    The returned items contain ``ids`` (prompt + answer + EOS), ``e_t`` aligned
+    with those ids, and ``prompt_len`` so the training loop can mask prompt
+    tokens and train only on the answer + EOS.
+    """
+    cache: list[dict] = []
+    skipped = 0
+    for item in items:
+        prompt_text = format_qa_prompt(
+            item["question"],
+            task=item.get("task"),
+            template=prompt_template,
+            boolq_template=boolq_prompt_template,
+        )
+        prompt_ids = list(
+            tokenizer.encode(prompt_text, add_special_tokens=False)
+        )
+        answer_ids = list(
+            tokenizer.encode(str(item["answer"]), add_special_tokens=False)
+        )
+        if not answer_ids:
+            skipped += 1
+            continue
+        if eos_id is not None:
+            answer_ids = answer_ids + [int(eos_id)]
+        # Keep the tail of the prompt (question + instructions) when the
+        # passage is too long.  Dropping the beginning of a long BoolQ passage
+        # is preferable to dropping the question/answer pair entirely.
+        budget = int(max_len) - len(answer_ids)
+        if budget < 1:
+            skipped += 1
+            continue
+        if len(prompt_ids) > budget:
+            prompt_ids = prompt_ids[-budget:]
+        ids = prompt_ids + answer_ids
+        e_t = qa_store.fetch(ids)
+        if e_t.shape[0] != len(ids):
+            skipped += 1
+            continue
+        cache.append(
+            {
+                "task": item.get("task", "qa"),
+                "question": item["question"],
+                "answer": item["answer"],
+                "ids": np.asarray(ids, dtype=np.int64),
+                "e_t": np.asarray(e_t, dtype=np.float32),
+                "prompt_len": len(prompt_ids),
+                "answer_len": len(answer_ids),
+            }
+        )
+    if skipped:
+        print(f"[phase0] QA SFT cache skipped {skipped}/{len(items)} items")
+    return cache
+
 
 
 _NUMBER_UNITS = {
@@ -916,6 +1092,14 @@ def _run_mode(
             val_tokens=val_tokens if getattr(args, "val_every", 0) else None,
             val_e_t=val_eval_e_t if getattr(args, "val_every", 0) else None,
             val_every=getattr(args, "val_every", 0),
+            qa_sft_items=getattr(args, "qa_sft_items", None),
+            qa_sft_weight=float(getattr(args, "qa_sft_weight", 0.0) or 0.0),
+            qa_sft_answer_only=not bool(
+                getattr(args, "qa_sft_full_loss", False)
+            ),
+            qa_sft_control=(mode == "control"),
+            qa_sft_log_every=int(getattr(args, "qa_sft_log_every", 0) or 0),
+            gate_reg_weight=float(getattr(args, "gate_reg_weight", 0.0) or 0.0),
         )
 
     val_loss = _window_loss(model, val_tokens, val_eval_e_t, args.seq_len)
@@ -1155,6 +1339,59 @@ def main() -> int:
         help="optional JSON list of {question, answer, task} for exact-match QA",
     )
     parser.add_argument(
+        "--qa-sft-file",
+        default=None,
+        help=(
+            "optional JSON/JSONL QA file for answer-only reader SFT; "
+            "records must contain question and answer"
+        ),
+    )
+    parser.add_argument(
+        "--qa-sft-weight",
+        type=float,
+        default=0.0,
+        help=(
+            "per-step probability of drawing a QA SFT item instead of a "
+            "corpus window (0=off, 1=QA-only, 0.5=even mix)"
+        ),
+    )
+    parser.add_argument(
+        "--qa-sft-max-len",
+        type=int,
+        default=512,
+        help="maximum token length for a QA SFT item (prompt is left-truncated)",
+    )
+    parser.add_argument(
+        "--qa-sft-prompt-template",
+        default=None,
+        help="prompt template for QA SFT; defaults to --qa-prompt-template",
+    )
+    parser.add_argument(
+        "--qa-sft-boolq-prompt-template",
+        default=None,
+        help="BoolQ prompt template for QA SFT; defaults to the QA BoolQ template",
+    )
+    parser.add_argument(
+        "--qa-sft-full-loss",
+        action="store_true",
+        help="train on all QA tokens instead of answer-only (default: answer-only)",
+    )
+    parser.add_argument(
+        "--qa-sft-log-every",
+        type=int,
+        default=0,
+        help="print an extra QA/corpus loss line every N steps",
+    )
+    parser.add_argument(
+        "--gate-reg-weight",
+        type=float,
+        default=0.0,
+        help=(
+            "auxiliary loss weight on the mean reader gate value; pushes the "
+            "gate closed when PLE is not useful (0=off)"
+        ),
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="reuse completed (mode, seed) partial results and skip them",
@@ -1333,16 +1570,54 @@ def main() -> int:
         )
 
     qa_exact_items = None
+    qa_sft_items: list[dict] | None = None
     qa_store = None
+    needs_reader_store = any(mode != "no-reader" for mode in args.modes)
+    needs_qa_store = needs_reader_store and (
+        bool(args.qa_exact_match) or bool(args.qa_sft_file)
+    )
     if args.qa_exact_match:
         qa_exact_items = _load_qa_file(args.qa_file)
         print(
             f"[phase0] preparing exact-match QA: {len(qa_exact_items)} items, "
             f"max_new_tokens={args.qa_max_new_tokens}"
         )
-        if any(mode != "no-reader" for mode in args.modes):
+    if args.qa_sft_file and needs_reader_store:
+        qa_sft_raw = _load_qa_sft_file(args.qa_sft_file)
+        if qa_store is None:
             qa_store = _QAEtStore(args.rows_dir, applied_scale)
+        qa_sft_items = _build_qa_sft_cache(
+            qa_sft_raw,
+            tokenizer,
+            qa_store,
+            prompt_template=(
+                args.qa_sft_prompt_template or args.qa_prompt_template
+            ),
+            boolq_prompt_template=(
+                args.qa_sft_boolq_prompt_template
+                or args.qa_boolq_prompt_template
+            ),
+            max_len=int(args.qa_sft_max_len),
+            eos_id=tokenizer.eos_token_id,
+        )
+        task_counts: dict[str, int] = {}
+        for item in qa_sft_items:
+            task = str(item.get("task", "qa"))
+            task_counts[task] = task_counts.get(task, 0) + 1
+        mean_len = (
+            sum(len(item["ids"]) for item in qa_sft_items) / len(qa_sft_items)
+            if qa_sft_items
+            else 0.0
+        )
+        print(
+            f"[phase0] QA SFT cache: {len(qa_sft_items)} items, "
+            f"mean_len={mean_len:.1f}, tasks={task_counts}, "
+            f"weight={args.qa_sft_weight}"
+        )
+    if needs_qa_store and qa_store is None:
+        qa_store = _QAEtStore(args.rows_dir, applied_scale)
 
+    args.qa_sft_items = qa_sft_items
     new_results: list[dict[str, Any]] = []
     args.applied_scale = applied_scale
     for seed in args.seeds:

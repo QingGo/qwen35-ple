@@ -104,6 +104,11 @@ class EngramReader(torch.nn.Module):
         self.gate_bias = torch.nn.Parameter(
             torch.full((num_branches,), gate_bias_init)
         )
+        # Diagnostic hooks: last per-token gate values [B, T, branches].
+        # ``last_gate`` is detached for analysis; ``last_gate_raw`` keeps the
+        # graph so an auxiliary gate-regularization loss can backpropagate.
+        self.last_gate: torch.Tensor | None = None
+        self.last_gate_raw: torch.Tensor | None = None
 
     def forward(self, h, e_t):
         v = self.w_v(e_t)
@@ -112,15 +117,22 @@ class EngramReader(torch.nn.Module):
             k = self.w_k(e_t)
             gate_logit = (norm_h * self.norm_k(k)).sum(-1) / math.sqrt(self.d_model)
             gate = torch.sigmoid(gate_logit + self.gate_bias[0])
+            self.last_gate_raw = gate
+            self.last_gate = gate.detach()
             return gate.unsqueeze(-1) * v
         contributions = []
+        gates = []
         for branch_idx, (proj_k, norm_k) in enumerate(
             zip(self.w_k, self.norm_k)
         ):
             k = proj_k(e_t)
             gate_logit = (norm_h * norm_k(k)).sum(-1) / math.sqrt(self.d_model)
             gate = torch.sigmoid(gate_logit + self.gate_bias[branch_idx])
+            gates.append(gate)
             contributions.append(gate.unsqueeze(-1) * v)
+        gate_stack = torch.stack(gates, dim=-1)
+        self.last_gate_raw = gate_stack
+        self.last_gate = gate_stack.detach()
         return torch.stack(contributions, dim=0).mean(dim=0)
 
 
@@ -441,6 +453,10 @@ class OfficialSourceQwenReader(torch.nn.Module):
             bias=False,
         )
 
+        # Diagnostic hooks: last per-token gate values [B, T, hc, 1].
+        self.last_gate: torch.Tensor | None = None
+        self.last_gate_raw: torch.Tensor | None = None
+
         if source_state is not None:
             self.load_source_state(source_state, strict=True)
 
@@ -548,6 +564,8 @@ class OfficialSourceQwenReader(torch.nn.Module):
         score = (key_normed * query_normed).sum(-1, keepdim=True) / math.sqrt(self.d_source)
         score = score.abs().clamp_min(1e-6).sqrt() * score.sign()
         gate = torch.sigmoid(score)                    # [B,T,4,1]
+        self.last_gate_raw = gate
+        self.last_gate = gate.detach()
 
         value = self.value_proj(e_t)                   # [B,T,2560]
         gated = gate * value.unsqueeze(2)              # [B,T,4,2560]

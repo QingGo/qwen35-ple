@@ -26,6 +26,7 @@ MODEL_DIR="${MODEL_DIR:-$ROOT/models/qwen38_ple}"
 MODEL="${MODEL:-$ROOT/models/Qwen3.5-0.8B}"
 LAYER="${LAYER:-2}"
 CORPORA="${CORPORA:-PURE_WIKI PURE_CODE FW_STEM}"
+MODES="${MODES:-real control no-reader}"
 STEPS="${STEPS:-500}"
 SEEDS="${SEEDS:-0 1 2}"
 MAX_NEW="${MAX_NEW:-96}"
@@ -49,6 +50,7 @@ exec bash "$SCRIPT_DIR/run_phase1_matrix.sh" \
   --output-dir "$OUTPUT_DIR" \
   --steps "$STEPS" \
   --seeds "$SEEDS" \
+  --modes $MODES \
   --max-new "$MAX_NEW" \
   --qa-batch-size "$QA_BATCH_SIZE" \
   --qa-batch-max-tokens "$QA_BATCH_MAX_TOKENS" \

@@ -44,6 +44,13 @@ QA_BATCH_SIZE="${QA_BATCH_SIZE:-16}"
 QA_BATCH_MAX_TOKENS="${QA_BATCH_MAX_TOKENS:-2048}"
 QA_PROMPT_TEMPLATE="${QA_PROMPT_TEMPLATE:-}"
 QA_BOOLQ_PROMPT_TEMPLATE="${QA_BOOLQ_PROMPT_TEMPLATE:-}"
+QA_SFT_FILE="${QA_SFT_FILE:-}"
+QA_SFT_WEIGHT="${QA_SFT_WEIGHT:-0}"
+QA_SFT_MAX_LEN="${QA_SFT_MAX_LEN:-512}"
+QA_SFT_FULL_LOSS="${QA_SFT_FULL_LOSS:-0}"
+QA_SFT_LOG_EVERY="${QA_SFT_LOG_EVERY:-0}"
+GATE_REG_WEIGHT="${GATE_REG_WEIGHT:-0}"
+MODES="${MODES:-real control no-reader}"
 BRIDGE_MLP="${BRIDGE_MLP:-1}"
 OUT_MLP="${OUT_MLP:-1}"
 OFFICIAL_READER_PATH="${OFFICIAL_READER_PATH:-data/official_ple_reader.pt}"
@@ -67,6 +74,15 @@ while [[ $# -gt 0 ]]; do
     --seq-len) SEQ_LEN="$2"; shift 2 ;;
     --lr) LR="$2"; shift 2 ;;
     --seeds) SEEDS="$2"; shift 2 ;;
+    --modes)
+      shift
+      MODES=""
+      while [[ $# -gt 0 && "$1" != --* ]]; do
+        MODES="${MODES} $1"
+        shift
+      done
+      MODES="${MODES# }"
+      ;;
     --max-new) MAX_NEW="$2"; shift 2 ;;
     --reader) READER="$2"; shift 2 ;;
     --layer) LAYER="$2"; shift 2 ;;
@@ -76,6 +92,12 @@ while [[ $# -gt 0 ]]; do
     --qa-batch-max-tokens) QA_BATCH_MAX_TOKENS="$2"; shift 2 ;;
     --qa-prompt-template) QA_PROMPT_TEMPLATE="$2"; shift 2 ;;
     --qa-boolq-prompt-template) QA_BOOLQ_PROMPT_TEMPLATE="$2"; shift 2 ;;
+    --qa-sft-file) QA_SFT_FILE="$2"; shift 2 ;;
+    --qa-sft-weight) QA_SFT_WEIGHT="$2"; shift 2 ;;
+    --qa-sft-max-len) QA_SFT_MAX_LEN="$2"; shift 2 ;;
+    --qa-sft-full-loss) QA_SFT_FULL_LOSS=1; shift ;;
+    --qa-sft-log-every) QA_SFT_LOG_EVERY="$2"; shift 2 ;;
+    --gate-reg-weight) GATE_REG_WEIGHT="$2"; shift 2 ;;
     --official-reader-path) OFFICIAL_READER_PATH="$2"; shift 2 ;;
     --skip-qa) SKIP_QA=1; shift ;;
     --save-reader) SAVE_READER=1; shift ;;
@@ -130,6 +152,20 @@ if [[ -n "$QA_BOOLQ_PROMPT_TEMPLATE" ]]; then
   QA_PROMPT_ARGS+=(--qa-boolq-prompt-template "$QA_BOOLQ_PROMPT_TEMPLATE")
 fi
 
+QA_SFT_ARGS=()
+if [[ -n "$QA_SFT_FILE" ]]; then
+  QA_SFT_ARGS+=(--qa-sft-file "$QA_SFT_FILE")
+  QA_SFT_ARGS+=(--qa-sft-weight "$QA_SFT_WEIGHT")
+  QA_SFT_ARGS+=(--qa-sft-max-len "$QA_SFT_MAX_LEN")
+  QA_SFT_ARGS+=(--qa-sft-log-every "$QA_SFT_LOG_EVERY")
+  if [[ "$QA_SFT_FULL_LOSS" == "1" ]]; then
+    QA_SFT_ARGS+=(--qa-sft-full-loss)
+  fi
+fi
+if [[ "$GATE_REG_WEIGHT" != "0" ]]; then
+  QA_SFT_ARGS+=(--gate-reg-weight "$GATE_REG_WEIGHT")
+fi
+
 for C in $CORPORA; do
   TOKENS="data/phase1/${C}/tokens.npy"
   if [[ ! -f "$TOKENS" ]]; then
@@ -174,7 +210,8 @@ for C in $CORPORA; do
       --seq-len "$SEQ_LEN" \
       --lr "$LR" \
       --seeds $SEEDS \
-      --modes real control no-reader \
+      --modes $MODES \
+      "${QA_SFT_ARGS[@]}" \
       --output "$OUT"
   else
     "$PYTHON" -u scripts/run_phase0.py \
@@ -198,13 +235,14 @@ for C in $CORPORA; do
       --seq-len "$SEQ_LEN" \
       --lr "$LR" \
       --seeds $SEEDS \
-      --modes real control no-reader \
+      --modes $MODES \
       --qa \
       --qa-exact-match \
       --qa-max-new-tokens "$MAX_NEW" \
       --qa-batch-size "$QA_BATCH_SIZE" \
       --qa-batch-max-tokens "$QA_BATCH_MAX_TOKENS" \
       "${QA_PROMPT_ARGS[@]}" \
+      "${QA_SFT_ARGS[@]}" \
       --qa-file "$QA_FILE" \
       --output "$OUT"
   fi

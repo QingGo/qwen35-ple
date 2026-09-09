@@ -192,6 +192,65 @@ def _context_table(root: Path) -> list[str]:
     return lines
 
 
+def _task_counts(root: Path, name: str) -> dict[str, int]:
+    """Return per-task answer counts for one config (first available mode)."""
+    data = _load(root / name / "phase1-PURE_WIKI.json")
+    if not isinstance(data, dict):
+        return {}
+    summary = data.get("summary") or {}
+    for mode in MODES:
+        entry = summary.get(mode) or {}
+        details = entry.get("details") or []
+        if not details:
+            continue
+        answers = ((details[0].get("qa_exact") or {}).get("answers")) or []
+        counts: dict[str, int] = {}
+        for row in answers:
+            task = str(row.get("task", "unknown"))
+            counts[task] = counts.get(task, 0) + 1
+        return counts
+    return {}
+
+
+def _wilson_ci(p: float, n: int, z: float = 1.96) -> tuple[float, float]:
+    if n <= 0:
+        return (float("nan"), float("nan"))
+    denom = 1.0 + z * z / n
+    center = (p + z * z / (2.0 * n)) / denom
+    half = (
+        z
+        * math.sqrt(max(0.0, p * (1.0 - p) / n + z * z / (4.0 * n * n)))
+        / denom
+    )
+    return (max(0.0, center - half), min(1.0, center + half))
+
+
+def _ci_table(root: Path, names: list[str]) -> list[str]:
+    lines = [
+        "| Config | Task | real metric | 95% Wilson CI | n |",
+        "|---|---|---:|---|---:|",
+    ]
+    for name in names:
+        corpus = _corpus_gates(root, name)
+        if not corpus:
+            continue
+        counts = _task_counts(root, name)
+        for task in TASKS:
+            entry = (corpus.get("modes") or {}).get("real")
+            if not entry:
+                continue
+            value = _task_metric(entry, task)
+            n = counts.get(task, 0)
+            if value is None or n <= 0:
+                continue
+            lo, hi = _wilson_ci(value, n)
+            lines.append(
+                f"| {name} | {task} | {_fmt(value)} | "
+                f"[{_fmt(lo)}, {_fmt(hi)}] | {n} |"
+            )
+    return lines
+
+
 def _gate_ablation_notes(root: Path) -> list[str]:
     notes: list[str] = []
     rows: list[tuple[str, float | None, float | None]] = []
@@ -346,7 +405,27 @@ def main() -> int:
     lines += _gate_table(root)
     lines += [
         "",
-        "## 5. Decision notes",
+        "## 5. Uncertainty on the held-out eval (Wilson 95% CI)",
+        "",
+    ]
+    lines += _ci_table(
+        root,
+        [
+            "phase2-diagnostic-layer2",
+            "baseline-layer2-eval62",
+            "sft-only",
+            "sft-mixed50",
+            "sft-mixed50-gate01",
+            "sft-mixed50-purecode",
+        ],
+    )
+    lines += [
+        "",
+        "> On the 62-item held-out eval, BoolQ has n=22 and TriviaQA/NQ n=20.",
+        "> Treat differences smaller than the CI width as directional, not",
+        "> statistically established.",
+        "",
+        "## 6. Decision notes",
         "",
     ]
     notes = _decision_notes(root)
@@ -354,7 +433,7 @@ def main() -> int:
     lines += notes or ["- (not enough outputs yet)"]
     lines += [
         "",
-        "## 6. How to read this",
+        "## 7. How to read this",
         "",
         "| Observation | Interpretation |",
         "|---|---|",

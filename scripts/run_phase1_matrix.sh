@@ -37,6 +37,7 @@ LR="${LR:-1e-4}"
 SEEDS="${SEEDS:-0 1 2}"
 MAX_NEW="${MAX_NEW:-96}"
 READER="${READER:-official}"
+LAYER="${LAYER:-8}"
 DEVICE="${DEVICE:-cuda}"
 SCALE="${SCALE:-}"
 QA_BATCH_SIZE="${QA_BATCH_SIZE:-16}"
@@ -68,6 +69,7 @@ while [[ $# -gt 0 ]]; do
     --seeds) SEEDS="$2"; shift 2 ;;
     --max-new) MAX_NEW="$2"; shift 2 ;;
     --reader) READER="$2"; shift 2 ;;
+    --layer) LAYER="$2"; shift 2 ;;
     --device) DEVICE="$2"; shift 2 ;;
     --scale) SCALE="$2"; shift 2 ;;
     --qa-batch-size) QA_BATCH_SIZE="$2"; shift 2 ;;
@@ -158,6 +160,7 @@ for C in $CORPORA; do
       --model-dir "$MODEL_DIR" \
       --model "$MODEL" \
       --reader "$READER" \
+      --layer "$LAYER" \
       --device "$DEVICE" \
       $SCALE_ARG \
       $MLP_ARG \
@@ -181,6 +184,7 @@ for C in $CORPORA; do
       --model-dir "$MODEL_DIR" \
       --model "$MODEL" \
       --reader "$READER" \
+      --layer "$LAYER" \
       --device "$DEVICE" \
       $SCALE_ARG \
       $MLP_ARG \

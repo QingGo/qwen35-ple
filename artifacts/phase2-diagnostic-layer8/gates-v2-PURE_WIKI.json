@@ -1,0 +1,133 @@
+{
+  "protocol": "v2",
+  "files": [
+    "artifacts/phase2-diagnostic-layer8/phase1-PURE_WIKI.json"
+  ],
+  "corpora": [
+    {
+      "corpus": "PURE_WIKI",
+      "modes": {
+        "real": {
+          "n_seeds": 3,
+          "ppl_mean": 23.442605614063343,
+          "ppl_by_seed": [
+            23.265613176891794,
+            23.5234175410728,
+            23.53878612422544
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.08,
+              "contains": 0.8133333333333334,
+              "extracted_exact": 0.08,
+              "extracted_contains": 0.8066666666666666
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.09333333333333334,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.08666666666666667
+            },
+            "boolq": {
+              "exact": 0.31333333333333335,
+              "contains": 0.31333333333333335,
+              "extracted_exact": 0.31333333333333335,
+              "extracted_contains": 0.31333333333333335
+            }
+          }
+        },
+        "control": {
+          "n_seeds": 3,
+          "ppl_mean": 24.658711294766707,
+          "ppl_by_seed": [
+            24.63484960429755,
+            24.61022518453449,
+            24.73105909546809
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.05333333333333334,
+              "contains": 0.9,
+              "extracted_exact": 0.05333333333333334,
+              "extracted_contains": 0.8866666666666667
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.09333333333333334,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.09333333333333334
+            },
+            "boolq": {
+              "exact": 0.09333333333333334,
+              "contains": 0.4866666666666667,
+              "extracted_exact": 0.13333333333333333,
+              "extracted_contains": 0.13333333333333333
+            }
+          }
+        },
+        "no-reader": {
+          "n_seeds": 3,
+          "ppl_mean": 37.59001284417102,
+          "ppl_by_seed": [
+            37.59001284417102,
+            37.59001284417102,
+            37.59001284417102
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.02,
+              "contains": 0.84,
+              "extracted_exact": 0.1,
+              "extracted_contains": 0.48
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.14,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.1
+            },
+            "boolq": {
+              "exact": 0.76,
+              "contains": 0.8,
+              "extracted_exact": 0.76,
+              "extracted_contains": 0.76
+            }
+          }
+        }
+      }
+    }
+  ],
+  "ppl_gate": {
+    "corpora_real_lt_control": 1,
+    "corpora_real_lt_no_reader": 1,
+    "corpora_total": 1,
+    "seeds_real_lt_control": 3,
+    "seeds_real_lt_no_reader": 3,
+    "seeds_total": 3,
+    "pass": true
+  },
+  "task_gate": {
+    "metric": "auto",
+    "candidates": [],
+    "severe_regressions": [
+      {
+        "corpus": "PURE_WIKI",
+        "task": "boolq",
+        "metric": "extracted_exact",
+        "real": 0.31333333333333335,
+        "control": 0.13333333333333333,
+        "no_reader": 0.76
+      },
+      {
+        "corpus": "PURE_WIKI",
+        "task": "triviaqa",
+        "metric": "extracted_contains",
+        "real": 0.8066666666666666,
+        "control": 0.8866666666666667,
+        "no_reader": 0.48
+      }
+    ],
+    "pass": false
+  },
+  "overall_pass": false
+}

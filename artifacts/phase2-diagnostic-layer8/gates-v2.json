@@ -1,0 +1,344 @@
+{
+  "protocol": "v2",
+  "files": [
+    "artifacts/phase2-diagnostic-layer8/phase1-FW_STEM.json",
+    "artifacts/phase2-diagnostic-layer8/phase1-PURE_CODE.json",
+    "artifacts/phase2-diagnostic-layer8/phase1-PURE_WIKI.json"
+  ],
+  "corpora": [
+    {
+      "corpus": "FW_STEM",
+      "modes": {
+        "real": {
+          "n_seeds": 3,
+          "ppl_mean": 5.359933821824881,
+          "ppl_by_seed": [
+            5.340900672952957,
+            5.317046145355804,
+            5.4218546471658815
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.02,
+              "contains": 0.86,
+              "extracted_exact": 0.07333333333333333,
+              "extracted_contains": 0.62
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.12666666666666668,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.07333333333333333
+            },
+            "boolq": {
+              "exact": 0.5,
+              "contains": 0.6333333333333333,
+              "extracted_exact": 0.62,
+              "extracted_contains": 0.62
+            }
+          }
+        },
+        "control": {
+          "n_seeds": 3,
+          "ppl_mean": 5.513763252246548,
+          "ppl_by_seed": [
+            5.45664296749451,
+            5.45486126154462,
+            5.629785527700514
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.03333333333333333,
+              "contains": 0.8666666666666667,
+              "extracted_exact": 0.04666666666666667,
+              "extracted_contains": 0.6133333333333333
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.10666666666666667,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.08
+            },
+            "boolq": {
+              "exact": 0.5266666666666666,
+              "contains": 0.62,
+              "extracted_exact": 0.5866666666666667,
+              "extracted_contains": 0.5866666666666667
+            }
+          }
+        },
+        "no-reader": {
+          "n_seeds": 3,
+          "ppl_mean": 5.986690593673843,
+          "ppl_by_seed": [
+            5.986690593673843,
+            5.986690593673843,
+            5.986690593673843
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.02,
+              "contains": 0.84,
+              "extracted_exact": 0.1,
+              "extracted_contains": 0.48
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.14,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.1
+            },
+            "boolq": {
+              "exact": 0.76,
+              "contains": 0.8,
+              "extracted_exact": 0.76,
+              "extracted_contains": 0.76
+            }
+          }
+        }
+      }
+    },
+    {
+      "corpus": "PURE_CODE",
+      "modes": {
+        "real": {
+          "n_seeds": 3,
+          "ppl_mean": 2.664620052832504,
+          "ppl_by_seed": [
+            2.6630502966496414,
+            2.80640195124075,
+            2.52440791060712
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.02,
+              "contains": 0.8466666666666667,
+              "extracted_exact": 0.15333333333333332,
+              "extracted_contains": 0.5266666666666666
+            },
+            "nq": {
+              "exact": 0.02,
+              "contains": 0.07333333333333333,
+              "extracted_exact": 0.02,
+              "extracted_contains": 0.06
+            },
+            "boolq": {
+              "exact": 0.72,
+              "contains": 0.74,
+              "extracted_exact": 0.7333333333333333,
+              "extracted_contains": 0.7333333333333333
+            }
+          }
+        },
+        "control": {
+          "n_seeds": 3,
+          "ppl_mean": 5.57798247908283,
+          "ppl_by_seed": [
+            5.760409095375484,
+            5.789962286233612,
+            5.183576055639392
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.02666666666666667,
+              "contains": 0.8866666666666667,
+              "extracted_exact": 0.26666666666666666,
+              "extracted_contains": 0.7
+            },
+            "nq": {
+              "exact": 0.006666666666666667,
+              "contains": 0.11333333333333333,
+              "extracted_exact": 0.006666666666666667,
+              "extracted_contains": 0.08
+            },
+            "boolq": {
+              "exact": 0.5466666666666666,
+              "contains": 0.6866666666666666,
+              "extracted_exact": 0.6533333333333333,
+              "extracted_contains": 0.6533333333333333
+            }
+          }
+        },
+        "no-reader": {
+          "n_seeds": 3,
+          "ppl_mean": 10.001505748410706,
+          "ppl_by_seed": [
+            10.001505748410706,
+            10.001505748410706,
+            10.001505748410706
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.02,
+              "contains": 0.84,
+              "extracted_exact": 0.1,
+              "extracted_contains": 0.48
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.14,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.1
+            },
+            "boolq": {
+              "exact": 0.76,
+              "contains": 0.8,
+              "extracted_exact": 0.76,
+              "extracted_contains": 0.76
+            }
+          }
+        }
+      }
+    },
+    {
+      "corpus": "PURE_WIKI",
+      "modes": {
+        "real": {
+          "n_seeds": 3,
+          "ppl_mean": 23.442605614063343,
+          "ppl_by_seed": [
+            23.265613176891794,
+            23.5234175410728,
+            23.53878612422544
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.08,
+              "contains": 0.8133333333333334,
+              "extracted_exact": 0.08,
+              "extracted_contains": 0.8066666666666666
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.09333333333333334,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.08666666666666667
+            },
+            "boolq": {
+              "exact": 0.31333333333333335,
+              "contains": 0.31333333333333335,
+              "extracted_exact": 0.31333333333333335,
+              "extracted_contains": 0.31333333333333335
+            }
+          }
+        },
+        "control": {
+          "n_seeds": 3,
+          "ppl_mean": 24.658711294766707,
+          "ppl_by_seed": [
+            24.63484960429755,
+            24.61022518453449,
+            24.73105909546809
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.05333333333333334,
+              "contains": 0.9,
+              "extracted_exact": 0.05333333333333334,
+              "extracted_contains": 0.8866666666666667
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.09333333333333334,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.09333333333333334
+            },
+            "boolq": {
+              "exact": 0.09333333333333334,
+              "contains": 0.4866666666666667,
+              "extracted_exact": 0.13333333333333333,
+              "extracted_contains": 0.13333333333333333
+            }
+          }
+        },
+        "no-reader": {
+          "n_seeds": 3,
+          "ppl_mean": 37.59001284417102,
+          "ppl_by_seed": [
+            37.59001284417102,
+            37.59001284417102,
+            37.59001284417102
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.02,
+              "contains": 0.84,
+              "extracted_exact": 0.1,
+              "extracted_contains": 0.48
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.14,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.1
+            },
+            "boolq": {
+              "exact": 0.76,
+              "contains": 0.8,
+              "extracted_exact": 0.76,
+              "extracted_contains": 0.76
+            }
+          }
+        }
+      }
+    }
+  ],
+  "ppl_gate": {
+    "corpora_real_lt_control": 3,
+    "corpora_real_lt_no_reader": 3,
+    "corpora_total": 3,
+    "seeds_real_lt_control": 9,
+    "seeds_real_lt_no_reader": 9,
+    "seeds_total": 9,
+    "pass": true
+  },
+  "task_gate": {
+    "metric": "auto",
+    "candidates": [
+      {
+        "corpus": "FW_STEM",
+        "task": "triviaqa",
+        "metric": "extracted_contains",
+        "real": 0.62,
+        "control": 0.6133333333333333,
+        "no_reader": 0.48
+      }
+    ],
+    "severe_regressions": [
+      {
+        "corpus": "FW_STEM",
+        "task": "boolq",
+        "metric": "extracted_exact",
+        "real": 0.62,
+        "control": 0.5866666666666667,
+        "no_reader": 0.76
+      },
+      {
+        "corpus": "PURE_CODE",
+        "task": "triviaqa",
+        "metric": "extracted_contains",
+        "real": 0.5266666666666666,
+        "control": 0.7,
+        "no_reader": 0.48
+      },
+      {
+        "corpus": "PURE_WIKI",
+        "task": "boolq",
+        "metric": "extracted_exact",
+        "real": 0.31333333333333335,
+        "control": 0.13333333333333333,
+        "no_reader": 0.76
+      },
+      {
+        "corpus": "PURE_WIKI",
+        "task": "triviaqa",
+        "metric": "extracted_contains",
+        "real": 0.8066666666666666,
+        "control": 0.8866666666666667,
+        "no_reader": 0.48
+      }
+    ],
+    "pass": false
+  },
+  "overall_pass": false
+}

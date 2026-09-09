@@ -1,0 +1,128 @@
+{
+  "protocol": "v2",
+  "files": [
+    "artifacts/phase2-layer2-smoke/phase1-PURE_WIKI.json"
+  ],
+  "corpora": [
+    {
+      "corpus": "PURE_WIKI",
+      "modes": {
+        "real": {
+          "n_seeds": 1,
+          "ppl_mean": 22.924265522602333,
+          "ppl_by_seed": [
+            22.924265522602333
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.32,
+              "contains": 0.86,
+              "extracted_exact": 0.32,
+              "extracted_contains": 0.86
+            },
+            "nq": {
+              "exact": 0.02,
+              "contains": 0.12,
+              "extracted_exact": 0.02,
+              "extracted_contains": 0.1
+            },
+            "boolq": {
+              "exact": 0.24,
+              "contains": 0.24,
+              "extracted_exact": 0.24,
+              "extracted_contains": 0.24
+            }
+          }
+        },
+        "control": {
+          "n_seeds": 1,
+          "ppl_mean": 24.810360599381447,
+          "ppl_by_seed": [
+            24.810360599381447
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.02,
+              "contains": 0.86,
+              "extracted_exact": 0.08,
+              "extracted_contains": 0.7
+            },
+            "nq": {
+              "exact": 0.02,
+              "contains": 0.08,
+              "extracted_exact": 0.02,
+              "extracted_contains": 0.08
+            },
+            "boolq": {
+              "exact": 0.24,
+              "contains": 0.32,
+              "extracted_exact": 0.28,
+              "extracted_contains": 0.28
+            }
+          }
+        },
+        "no-reader": {
+          "n_seeds": 1,
+          "ppl_mean": 37.59001284417102,
+          "ppl_by_seed": [
+            37.59001284417102
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.02,
+              "contains": 0.84,
+              "extracted_exact": 0.1,
+              "extracted_contains": 0.48
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.14,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.1
+            },
+            "boolq": {
+              "exact": 0.76,
+              "contains": 0.8,
+              "extracted_exact": 0.76,
+              "extracted_contains": 0.76
+            }
+          }
+        }
+      }
+    }
+  ],
+  "ppl_gate": {
+    "corpora_real_lt_control": 1,
+    "corpora_real_lt_no_reader": 1,
+    "corpora_total": 1,
+    "seeds_real_lt_control": 1,
+    "seeds_real_lt_no_reader": 1,
+    "seeds_total": 1,
+    "pass": true
+  },
+  "task_gate": {
+    "metric": "auto",
+    "candidates": [
+      {
+        "corpus": "PURE_WIKI",
+        "task": "triviaqa",
+        "metric": "extracted_contains",
+        "real": 0.86,
+        "control": 0.7,
+        "no_reader": 0.48
+      }
+    ],
+    "severe_regressions": [
+      {
+        "corpus": "PURE_WIKI",
+        "task": "boolq",
+        "metric": "extracted_exact",
+        "real": 0.24,
+        "control": 0.28,
+        "no_reader": 0.76
+      }
+    ],
+    "pass": false
+  },
+  "overall_pass": false
+}

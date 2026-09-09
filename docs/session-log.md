@@ -2928,3 +2928,18 @@ lazy-window gate        ✅
   - 10k 3 seed 等待 GPU；
   - pass@k / LLM-judge 待运行。
 - 未完成，下一轮继续。
+
+## Session 142：Phase 2 收尾、86GB 数据盘、layer8/layer2 诊断与方案收敛
+
+- Phase 2 全量矩阵完成并归档；发现旧 QA contains 协议不可用，新增 v2 answer extraction / scoring。
+- Qwen3.5 vs Qwen3.8-Flash-Next tokenizer 审计：vocab/merges/runtime vocab 兼容；生成 EOS 248046 vs PLE EOS 248044 需区分。
+- 4090 重启后数据盘扩到 86GB；qwen38-rows 持久化 + /dev/shm 副本 + manifest 校验。
+- 新增 `verify_qwen38_rows.py` / `ensure_qwen38_rows.sh` / `remote_manifest.py` / `bootstrap_remote.sh` / `pull_remote_results.sh` / `check_phase2_gates.py` / `run_phase2_diagnostic.sh` / `compare_qwen_tokenizers.py`。
+- 新增 `src/qwen35_ple/eval/prompting.py`、`src/qwen35_ple/eval/resume.py`，支持 instruction prompt、fine-grained resume、backup。
+- layer8 全量诊断：PPL gate PASS，task gate FAIL；BoolQ 严重回退，TriviaQA 仅部分 corpus 有候选增益。
+- layer2 冒烟：PURE_WIKI seed0；TriviaQA real 0.860 > control 0.700 > no-reader 0.480；BoolQ real 0.240 < control 0.280 << no-reader 0.760。
+- 结论：layer2 修复了知识型 QA 的 PLE 增益，但现有 gate 在 BoolQ 类格式任务上不会关闭；问题更像 functional interference / representation drift，而非参数级遗忘。
+- 调研并收敛：SFT/RL、pass@1/pass@k、两阶段 SFT vs CPT→SFT、数据混合/replay、prompt loss masking、现有 gate vs 额外 router、conflict/sufficiency-aware gating、loss 设计（2–3 个主 loss + curriculum）。
+- 下一步：Phase A 判决性诊断（oracle gate / zero-reader / frozen official reader / gate stats / PLE-native upper bound）；通过后再做 mixed SFT + 两阶段 curriculum。
+- 新增：`docs/round-142-session-retrospective.md`。
+

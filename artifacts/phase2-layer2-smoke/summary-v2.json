@@ -1,0 +1,17 @@
+[
+  {
+    "corpus": "PURE_WIKI",
+    "real_ppl": 22.924265522602333,
+    "real_contains": 0.4066666666666667,
+    "real_extracted_exact": 0.19333333333333333,
+    "real_extracted_contains": 0.4,
+    "control_ppl": 24.810360599381447,
+    "control_contains": 0.42,
+    "control_extracted_exact": 0.12666666666666668,
+    "control_extracted_contains": 0.35333333333333333,
+    "no_reader_ppl": 37.59001284417102,
+    "no_reader_contains": 0.5933333333333334,
+    "no_reader_extracted_exact": 0.2866666666666667,
+    "no_reader_extracted_contains": 0.44666666666666666
+  }
+]

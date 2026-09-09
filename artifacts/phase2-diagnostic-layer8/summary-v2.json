@@ -1,0 +1,47 @@
+[
+  {
+    "corpus": "PURE_WIKI",
+    "real_ppl": 23.44226986055113,
+    "real_contains": 0.4066666666666667,
+    "real_extracted_exact": 0.13111111111111112,
+    "real_extracted_contains": 0.4022222222222222,
+    "control_ppl": 24.658656224866274,
+    "control_contains": 0.49333333333333335,
+    "control_extracted_exact": 0.06222222222222223,
+    "control_extracted_contains": 0.3711111111111111,
+    "no_reader_ppl": 37.59001284417102,
+    "no_reader_contains": 0.5933333333333334,
+    "no_reader_extracted_exact": 0.2866666666666667,
+    "no_reader_extracted_contains": 0.4466666666666666
+  },
+  {
+    "corpus": "PURE_CODE",
+    "real_ppl": 2.662132035641622,
+    "real_contains": 0.5533333333333333,
+    "real_extracted_exact": 0.3022222222222222,
+    "real_extracted_contains": 0.44,
+    "control_ppl": 5.570824956075918,
+    "control_contains": 0.5622222222222222,
+    "control_extracted_exact": 0.3088888888888889,
+    "control_extracted_contains": 0.4777777777777778,
+    "no_reader_ppl": 10.001505748410706,
+    "no_reader_contains": 0.5933333333333334,
+    "no_reader_extracted_exact": 0.2866666666666667,
+    "no_reader_extracted_contains": 0.4466666666666666
+  },
+  {
+    "corpus": "FW_STEM",
+    "real_ppl": 5.359746719022841,
+    "real_contains": 0.54,
+    "real_extracted_exact": 0.23111111111111113,
+    "real_extracted_contains": 0.43777777777777777,
+    "control_ppl": 5.513157073672261,
+    "control_contains": 0.5311111111111111,
+    "control_extracted_exact": 0.2111111111111111,
+    "control_extracted_contains": 0.4266666666666667,
+    "no_reader_ppl": 5.986690593673843,
+    "no_reader_contains": 0.5933333333333334,
+    "no_reader_extracted_exact": 0.2866666666666667,
+    "no_reader_extracted_contains": 0.4466666666666666
+  }
+]

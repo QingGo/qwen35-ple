@@ -41,6 +41,8 @@ DEVICE="${DEVICE:-cuda}"
 SCALE="${SCALE:-}"
 QA_BATCH_SIZE="${QA_BATCH_SIZE:-16}"
 QA_BATCH_MAX_TOKENS="${QA_BATCH_MAX_TOKENS:-2048}"
+QA_PROMPT_TEMPLATE="${QA_PROMPT_TEMPLATE:-}"
+QA_BOOLQ_PROMPT_TEMPLATE="${QA_BOOLQ_PROMPT_TEMPLATE:-}"
 BRIDGE_MLP="${BRIDGE_MLP:-1}"
 OUT_MLP="${OUT_MLP:-1}"
 OFFICIAL_READER_PATH="${OFFICIAL_READER_PATH:-data/official_ple_reader.pt}"
@@ -48,6 +50,9 @@ FORCE="${FORCE:-0}"
 SKIP_QA="${SKIP_QA:-0}"
 SAVE_READER="${SAVE_READER:-0}"
 LOAD_READER="${LOAD_READER:-0}"
+RESUME="${RESUME:-0}"
+PARTIAL_DIR="${PARTIAL_DIR:-}"
+BACKUP_DIR="${BACKUP_DIR:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -67,10 +72,15 @@ while [[ $# -gt 0 ]]; do
     --scale) SCALE="$2"; shift 2 ;;
     --qa-batch-size) QA_BATCH_SIZE="$2"; shift 2 ;;
     --qa-batch-max-tokens) QA_BATCH_MAX_TOKENS="$2"; shift 2 ;;
+    --qa-prompt-template) QA_PROMPT_TEMPLATE="$2"; shift 2 ;;
+    --qa-boolq-prompt-template) QA_BOOLQ_PROMPT_TEMPLATE="$2"; shift 2 ;;
     --official-reader-path) OFFICIAL_READER_PATH="$2"; shift 2 ;;
     --skip-qa) SKIP_QA=1; shift ;;
     --save-reader) SAVE_READER=1; shift ;;
     --load-reader) LOAD_READER=1; shift ;;
+    --resume) RESUME=1; shift ;;
+    --partial-dir) PARTIAL_DIR="$2"; shift 2 ;;
+    --backup-dir) BACKUP_DIR="$2"; shift 2 ;;
     --force) FORCE=1; shift ;;
     --corpora)
       shift
@@ -86,6 +96,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "$OUTPUT_DIR"
+if [[ -z "$PARTIAL_DIR" ]]; then
+  PARTIAL_DIR="$OUTPUT_DIR/partial"
+fi
+if [[ -z "$BACKUP_DIR" ]]; then
+  BACKUP_DIR="$OUTPUT_DIR/backup"
+fi
+RESUME_ARG=""
+if [[ "$RESUME" == "1" ]]; then
+  RESUME_ARG="--resume"
+fi
 
 SCALE_ARG=""
 if [[ -n "$SCALE" ]]; then
@@ -98,6 +118,14 @@ if [[ "$BRIDGE_MLP" == "1" ]]; then
 fi
 if [[ "$OUT_MLP" == "1" ]]; then
   MLP_ARG="$MLP_ARG --out-mlp"
+fi
+
+QA_PROMPT_ARGS=()
+if [[ -n "$QA_PROMPT_TEMPLATE" ]]; then
+  QA_PROMPT_ARGS+=(--qa-prompt-template "$QA_PROMPT_TEMPLATE")
+fi
+if [[ -n "$QA_BOOLQ_PROMPT_TEMPLATE" ]]; then
+  QA_PROMPT_ARGS+=(--qa-boolq-prompt-template "$QA_BOOLQ_PROMPT_TEMPLATE")
 fi
 
 for C in $CORPORA; do
@@ -135,6 +163,9 @@ for C in $CORPORA; do
       $MLP_ARG \
       $SAVE_READER_ARG \
       $LOAD_READER_ARG \
+      $RESUME_ARG \
+      --partial-dir "$PARTIAL_DIR" \
+      --backup-dir "$BACKUP_DIR" \
       --official-reader-path "$OFFICIAL_READER_PATH" \
       --steps "$STEPS" \
       --seq-len "$SEQ_LEN" \
@@ -155,6 +186,9 @@ for C in $CORPORA; do
       $MLP_ARG \
       $SAVE_READER_ARG \
       $LOAD_READER_ARG \
+      $RESUME_ARG \
+      --partial-dir "$PARTIAL_DIR" \
+      --backup-dir "$BACKUP_DIR" \
       --official-reader-path "$OFFICIAL_READER_PATH" \
       --steps "$STEPS" \
       --seq-len "$SEQ_LEN" \
@@ -166,6 +200,7 @@ for C in $CORPORA; do
       --qa-max-new-tokens "$MAX_NEW" \
       --qa-batch-size "$QA_BATCH_SIZE" \
       --qa-batch-max-tokens "$QA_BATCH_MAX_TOKENS" \
+      "${QA_PROMPT_ARGS[@]}" \
       --qa-file "$QA_FILE" \
       --output "$OUT"
   fi

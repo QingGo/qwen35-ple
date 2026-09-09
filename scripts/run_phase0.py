@@ -28,6 +28,7 @@ import math
 import os
 import random
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,12 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from qwen35_ple.eval.prompting import format_qa_prompt
+from qwen35_ple.eval.resume import (
+    load_partial_results,
+    merge_results,
+    write_partial_result,
+)
 from qwen35_ple.live_store import LiveETStore, LiveETViewStore
 from qwen35_ple.reader import (
     EngramReader,
@@ -556,6 +563,8 @@ def _qa_exact_match(
     max_new_tokens: int,
     batch_size: int = 1,
     max_batch_tokens: int = 0,
+    prompt_template: str | None = None,
+    boolq_prompt_template: str | None = None,
 ) -> dict:
     """Greedy exact-match QA generation with live PLE injection.
 
@@ -577,7 +586,17 @@ def _qa_exact_match(
     max_batch_tokens = max(0, int(max_batch_tokens))
 
     prompt_ids = {
-        idx: list(tokenizer.encode(item["question"], add_special_tokens=False))
+        idx: list(
+            tokenizer.encode(
+                format_qa_prompt(
+                    item["question"],
+                    task=item.get("task"),
+                    template=prompt_template,
+                    boolq_template=boolq_prompt_template,
+                ),
+                add_special_tokens=False,
+            )
+        )
         for idx, item in enumerate(items)
     }
     ordered = sorted(enumerate(items), key=lambda pair: len(prompt_ids[pair[0]]))
@@ -773,6 +792,10 @@ def _run_mode(
                 max_new_tokens=args.qa_max_new_tokens,
                 batch_size=getattr(args, "qa_batch_size", 1),
                 max_batch_tokens=getattr(args, "qa_batch_max_tokens", 0),
+                prompt_template=getattr(args, "qa_prompt_template", None),
+                boolq_prompt_template=getattr(
+                    args, "qa_boolq_prompt_template", None
+                ),
             )
         return {
             "mode": mode,
@@ -919,6 +942,8 @@ def _run_mode(
             max_new_tokens=args.qa_max_new_tokens,
             batch_size=getattr(args, "qa_batch_size", 1),
             max_batch_tokens=getattr(args, "qa_batch_max_tokens", 0),
+            prompt_template=getattr(args, "qa_prompt_template", None),
+            boolq_prompt_template=getattr(args, "qa_boolq_prompt_template", None),
         )
 
     if getattr(args, "save_reader", None) and not getattr(args, "load_reader", None):
@@ -1112,15 +1137,70 @@ def main() -> int:
         help="optional token budget per QA batch (0 = only --qa-batch-size)",
     )
     parser.add_argument(
+        "--qa-prompt-template",
+        default=None,
+        help=(
+            "optional instruction-style QA prompt with a {question} placeholder; "
+            "default keeps the raw question"
+        ),
+    )
+    parser.add_argument(
+        "--qa-boolq-prompt-template",
+        default=None,
+        help="optional BoolQ-specific override for --qa-prompt-template",
+    )
+    parser.add_argument(
         "--qa-file",
         default=None,
         help="optional JSON list of {question, answer, task} for exact-match QA",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse completed (mode, seed) partial results and skip them",
+    )
+    parser.add_argument(
+        "--partial-dir",
+        default=None,
+        help="directory for per-(mode, seed) partial JSON files",
+    )
+    parser.add_argument(
+        "--backup-dir",
+        default=None,
+        help="optional directory for an extra copy of the final and partial JSONs",
     )
     parser.add_argument("--output", default="outputs/phase0.json")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
     args = parser.parse_args()
 
     _install_torch_compat()
+    out_path = Path(args.output)
+    partial_dir = (
+        Path(args.partial_dir)
+        if getattr(args, "partial_dir", None)
+        else out_path.parent / f"{out_path.stem}-partial"
+    )
+    backup_dir = (
+        Path(args.backup_dir) if getattr(args, "backup_dir", None) else None
+    )
+    existing_results: dict[tuple[str, int], dict[str, Any]] = {}
+    if getattr(args, "resume", False):
+        existing_results = load_partial_results(partial_dir, out_path)
+        if out_path.exists():
+            try:
+                previous = json.loads(out_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                previous = {}
+            for item in previous.get("results", []):
+                if isinstance(item, dict) and "mode" in item and "seed" in item:
+                    existing_results[
+                        (str(item["mode"]), int(item["seed"]))
+                    ] = item
+        if existing_results:
+            print(
+                f"[phase0] resume: loaded {len(existing_results)} completed "
+                f"(mode, seed) results"
+            )
     feature_dir = Path(args.features)
     live_store_handle = None
     if args.live_store:
@@ -1263,11 +1343,15 @@ def main() -> int:
         if any(mode != "no-reader" for mode in args.modes):
             qa_store = _QAEtStore(args.rows_dir, applied_scale)
 
-    all_results = []
+    new_results: list[dict[str, Any]] = []
     args.applied_scale = applied_scale
     for seed in args.seeds:
         print(f"=== seed {seed} ===")
         for mode in args.modes:
+            key = (mode, int(seed))
+            if key in existing_results:
+                print(f"  mode={mode} seed={seed} already complete; skipping")
+                continue
             print(f"  mode={mode}")
             if live_store_handle is not None and hasattr(
                 live_store_handle, "reset_stats"
@@ -1306,8 +1390,16 @@ def main() -> int:
                     res["fetch_ms_per_token"] = (
                         seconds * 1000.0 / tokens if tokens else None
                     )
-            all_results.append(res)
+            partial_path = write_partial_result(partial_dir, out_path, res)
+            print(f"  [{mode}] partial -> {partial_path}")
+            new_results.append(res)
 
+    all_results = merge_results(
+        existing_results,
+        new_results,
+        modes=args.modes,
+        seeds=args.seeds,
+    )
     summary = _summarize(all_results, args.modes)
     result = {
         "config": {
@@ -1342,18 +1434,28 @@ def main() -> int:
             "qa_max_new_tokens": args.qa_max_new_tokens,
             "qa_batch_size": args.qa_batch_size,
             "qa_batch_max_tokens": args.qa_batch_max_tokens,
+            "qa_prompt_template": args.qa_prompt_template,
+            "qa_boolq_prompt_template": args.qa_boolq_prompt_template,
             "qa_file": args.qa_file,
+            "resume": bool(args.resume),
+            "partial_dir": str(partial_dir),
+            "backup_dir": str(backup_dir) if backup_dir is not None else None,
         },
         "summary": summary,
         "results": all_results,
     }
-    out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
         json.dumps(result, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
+    if backup_dir is not None:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(out_path, backup_dir / out_path.name)
+        for partial in sorted(partial_dir.glob(f"{out_path.stem}-*.json")):
+            shutil.copy2(partial, backup_dir / partial.name)
+        print(f"[phase0] backup -> {backup_dir}")
     if qa_store is not None:
         qa_store.close()
         print("[phase0] QA store closed")

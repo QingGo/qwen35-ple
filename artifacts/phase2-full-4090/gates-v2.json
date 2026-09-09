@@ -1,0 +1,623 @@
+{
+  "protocol": "v2",
+  "files": [
+    "artifacts/phase2-full-4090/phase1-FW_CODE.json",
+    "artifacts/phase2-full-4090/phase1-FW_STEM.json",
+    "artifacts/phase2-full-4090/phase1-PURE_CODE.json",
+    "artifacts/phase2-full-4090/phase1-PURE_FINEWEB.json",
+    "artifacts/phase2-full-4090/phase1-PURE_STEM.json",
+    "artifacts/phase2-full-4090/phase1-PURE_WIKI.json"
+  ],
+  "corpora": [
+    {
+      "corpus": "FW_CODE",
+      "modes": {
+        "real": {
+          "n_seeds": 3,
+          "ppl_mean": 12.500873238953927,
+          "ppl_by_seed": [
+            12.508569410259037,
+            12.778347753830277,
+            12.215702552772465
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.8866666666666667,
+              "extracted_exact": 0.02,
+              "extracted_contains": 0.6533333333333333
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.06666666666666667,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.06
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.8133333333333334,
+              "extracted_exact": 0.6933333333333334,
+              "extracted_contains": 0.6933333333333334
+            }
+          }
+        },
+        "control": {
+          "n_seeds": 3,
+          "ppl_mean": 12.478561011285274,
+          "ppl_by_seed": [
+            12.496583986021719,
+            12.601779494102681,
+            12.337319553731424
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.9,
+              "extracted_exact": 0.02,
+              "extracted_contains": 0.5933333333333334
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.07333333333333333,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.05333333333333334
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.82,
+              "extracted_exact": 0.68,
+              "extracted_contains": 0.68
+            }
+          }
+        },
+        "no-reader": {
+          "n_seeds": 3,
+          "ppl_mean": 13.682809056332465,
+          "ppl_by_seed": [
+            13.682809056332463,
+            13.682809056332463,
+            13.682809056332463
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.9,
+              "extracted_exact": 0.02,
+              "extracted_contains": 0.54
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.08,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.0
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.96,
+              "extracted_exact": 0.22,
+              "extracted_contains": 0.22
+            }
+          }
+        }
+      }
+    },
+    {
+      "corpus": "FW_STEM",
+      "modes": {
+        "real": {
+          "n_seeds": 3,
+          "ppl_mean": 5.351735400789388,
+          "ppl_by_seed": [
+            5.321510023127447,
+            5.287903841159874,
+            5.445792338080845
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.8933333333333333,
+              "extracted_exact": 0.04,
+              "extracted_contains": 0.56
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.07333333333333333,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.02
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.7933333333333333,
+              "extracted_exact": 0.64,
+              "extracted_contains": 0.64
+            }
+          }
+        },
+        "control": {
+          "n_seeds": 3,
+          "ppl_mean": 5.521960937231014,
+          "ppl_by_seed": [
+            5.4504062521650285,
+            5.481134362670916,
+            5.634342196857096
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.9066666666666666,
+              "extracted_exact": 0.06666666666666667,
+              "extracted_contains": 0.5866666666666667
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.08666666666666667,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.03333333333333333
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.7133333333333334,
+              "extracted_exact": 0.6466666666666666,
+              "extracted_contains": 0.6466666666666666
+            }
+          }
+        },
+        "no-reader": {
+          "n_seeds": 3,
+          "ppl_mean": 5.986690593673843,
+          "ppl_by_seed": [
+            5.986690593673843,
+            5.986690593673843,
+            5.986690593673843
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.9,
+              "extracted_exact": 0.02,
+              "extracted_contains": 0.54
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.08,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.0
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.96,
+              "extracted_exact": 0.22,
+              "extracted_contains": 0.22
+            }
+          }
+        }
+      }
+    },
+    {
+      "corpus": "PURE_CODE",
+      "modes": {
+        "real": {
+          "n_seeds": 3,
+          "ppl_mean": 2.6730739720684564,
+          "ppl_by_seed": [
+            2.663758267760706,
+            2.796318866322126,
+            2.5591447821225373
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.8866666666666667,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.6333333333333333
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.1,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.006666666666666667
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.8,
+              "extracted_exact": 0.6133333333333333,
+              "extracted_contains": 0.6133333333333333
+            }
+          }
+        },
+        "control": {
+          "n_seeds": 3,
+          "ppl_mean": 5.489578813070147,
+          "ppl_by_seed": [
+            5.652243942211814,
+            5.718565989199583,
+            5.097926507799045
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.7933333333333333,
+              "extracted_exact": 0.006666666666666667,
+              "extracted_contains": 0.6
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.08,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.03333333333333333
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.7533333333333333,
+              "extracted_exact": 0.5333333333333333,
+              "extracted_contains": 0.5333333333333333
+            }
+          }
+        },
+        "no-reader": {
+          "n_seeds": 3,
+          "ppl_mean": 10.001505748410706,
+          "ppl_by_seed": [
+            10.001505748410706,
+            10.001505748410706,
+            10.001505748410706
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.9,
+              "extracted_exact": 0.02,
+              "extracted_contains": 0.54
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.08,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.0
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.96,
+              "extracted_exact": 0.22,
+              "extracted_contains": 0.22
+            }
+          }
+        }
+      }
+    },
+    {
+      "corpus": "PURE_FINEWEB",
+      "modes": {
+        "real": {
+          "n_seeds": 3,
+          "ppl_mean": 26.539799442950855,
+          "ppl_by_seed": [
+            26.635263668349705,
+            26.56865184417205,
+            26.41548281633082
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.8866666666666667,
+              "extracted_exact": 0.013333333333333334,
+              "extracted_contains": 0.6333333333333333
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.05333333333333334,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.04
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.9533333333333334,
+              "extracted_exact": 0.37333333333333335,
+              "extracted_contains": 0.37333333333333335
+            }
+          }
+        },
+        "control": {
+          "n_seeds": 3,
+          "ppl_mean": 26.5761121722835,
+          "ppl_by_seed": [
+            26.684380371361634,
+            26.50447272015552,
+            26.53948342533336
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.8933333333333333,
+              "extracted_exact": 0.006666666666666667,
+              "extracted_contains": 0.5466666666666666
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.08,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.05333333333333334
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.9266666666666666,
+              "extracted_exact": 0.4866666666666667,
+              "extracted_contains": 0.4866666666666667
+            }
+          }
+        },
+        "no-reader": {
+          "n_seeds": 3,
+          "ppl_mean": 27.36923907838754,
+          "ppl_by_seed": [
+            27.36923907838754,
+            27.36923907838754,
+            27.36923907838754
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.9,
+              "extracted_exact": 0.02,
+              "extracted_contains": 0.54
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.08,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.0
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.96,
+              "extracted_exact": 0.22,
+              "extracted_contains": 0.22
+            }
+          }
+        }
+      }
+    },
+    {
+      "corpus": "PURE_STEM",
+      "modes": {
+        "real": {
+          "n_seeds": 3,
+          "ppl_mean": 6.401563458450476,
+          "ppl_by_seed": [
+            6.419447548116878,
+            6.416365208240795,
+            6.368877618993757
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.7933333333333333,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.17333333333333334
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.07333333333333333,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.0
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.8,
+              "extracted_exact": 0.7266666666666667,
+              "extracted_contains": 0.7266666666666667
+            }
+          }
+        },
+        "control": {
+          "n_seeds": 3,
+          "ppl_mean": 6.734872190986899,
+          "ppl_by_seed": [
+            6.756396500249225,
+            6.715197664491927,
+            6.733022408219548
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.8933333333333333,
+              "extracted_exact": 0.02666666666666667,
+              "extracted_contains": 0.3466666666666667
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.06,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.013333333333333334
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.7333333333333333,
+              "extracted_exact": 0.6666666666666666,
+              "extracted_contains": 0.6666666666666666
+            }
+          }
+        },
+        "no-reader": {
+          "n_seeds": 3,
+          "ppl_mean": 8.417766442725627,
+          "ppl_by_seed": [
+            8.417766442725627,
+            8.417766442725627,
+            8.417766442725627
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.9,
+              "extracted_exact": 0.02,
+              "extracted_contains": 0.54
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.08,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.0
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.96,
+              "extracted_exact": 0.22,
+              "extracted_contains": 0.22
+            }
+          }
+        }
+      }
+    },
+    {
+      "corpus": "PURE_WIKI",
+      "modes": {
+        "real": {
+          "n_seeds": 3,
+          "ppl_mean": 23.33447189432,
+          "ppl_by_seed": [
+            23.181126666643113,
+            23.32235201694547,
+            23.499936999371407
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.7866666666666666,
+              "extracted_exact": 0.006666666666666667,
+              "extracted_contains": 0.7666666666666667
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.09333333333333334,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.03333333333333333
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.17333333333333334,
+              "extracted_exact": 0.14666666666666667,
+              "extracted_contains": 0.14666666666666667
+            }
+          }
+        },
+        "control": {
+          "n_seeds": 3,
+          "ppl_mean": 24.802788422456093,
+          "ppl_by_seed": [
+            24.685251600123596,
+            24.895517436761445,
+            24.827596230483245
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.8333333333333334,
+              "extracted_exact": 0.02,
+              "extracted_contains": 0.8133333333333334
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.04,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.04
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.16666666666666666,
+              "extracted_exact": 0.09333333333333334,
+              "extracted_contains": 0.09333333333333334
+            }
+          }
+        },
+        "no-reader": {
+          "n_seeds": 3,
+          "ppl_mean": 37.59001284417102,
+          "ppl_by_seed": [
+            37.59001284417102,
+            37.59001284417102,
+            37.59001284417102
+          ],
+          "tasks": {
+            "triviaqa": {
+              "exact": 0.0,
+              "contains": 0.9,
+              "extracted_exact": 0.02,
+              "extracted_contains": 0.54
+            },
+            "nq": {
+              "exact": 0.0,
+              "contains": 0.08,
+              "extracted_exact": 0.0,
+              "extracted_contains": 0.0
+            },
+            "boolq": {
+              "exact": 0.0,
+              "contains": 0.96,
+              "extracted_exact": 0.22,
+              "extracted_contains": 0.22
+            }
+          }
+        }
+      }
+    }
+  ],
+  "ppl_gate": {
+    "corpora_real_lt_control": 5,
+    "corpora_real_lt_no_reader": 6,
+    "corpora_total": 6,
+    "seeds_real_lt_control": 15,
+    "seeds_real_lt_no_reader": 18,
+    "seeds_total": 18,
+    "pass": true
+  },
+  "task_gate": {
+    "metric": "extracted_exact",
+    "candidates": [
+      {
+        "corpus": "FW_CODE",
+        "task": "boolq",
+        "real": 0.6933333333333334,
+        "control": 0.68,
+        "no_reader": 0.22,
+        "metric": "extracted_exact"
+      },
+      {
+        "corpus": "PURE_CODE",
+        "task": "boolq",
+        "real": 0.6133333333333333,
+        "control": 0.5333333333333333,
+        "no_reader": 0.22,
+        "metric": "extracted_exact"
+      },
+      {
+        "corpus": "PURE_STEM",
+        "task": "boolq",
+        "real": 0.7266666666666667,
+        "control": 0.6666666666666666,
+        "no_reader": 0.22,
+        "metric": "extracted_exact"
+      }
+    ],
+    "severe_regressions": [
+      {
+        "corpus": "PURE_FINEWEB",
+        "task": "boolq",
+        "real": 0.37333333333333335,
+        "control": 0.4866666666666667,
+        "no_reader": 0.22,
+        "metric": "extracted_exact"
+      },
+      {
+        "corpus": "PURE_WIKI",
+        "task": "boolq",
+        "real": 0.14666666666666667,
+        "control": 0.09333333333333334,
+        "no_reader": 0.22,
+        "metric": "extracted_exact"
+      }
+    ],
+    "pass": false
+  },
+  "overall_pass": false
+}

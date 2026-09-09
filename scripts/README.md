@@ -33,11 +33,18 @@
 | `build_kb_token_streams.py` | 把 KB split 转成 train/eval token 流，供 unseen-KB reader 训练/评测 |
 | `evaluate_generated_answers.py` | Phase 1 评测协议重评分：strict exact / contains / extracted contains + Markdown 报告；`--protocol v2` 使用 answer-marker / first-sentence 提取器 |
 | `run_unseen_kb_experiment.sh` | unseen-KB 实验：seen KB 训练 real/control reader，unseen KB 上三线评测 |
-| `run_phase1_matrix.sh` | Phase 2 批处理入口：六个 Phase 1 语料 × 3 seeds × real/control/no-reader × 长生成 QA；`--save-reader` 保存每 corpus/mode/seed 的 reader checkpoint，`--load-reader` 跳过训练做 QA-only 重跑 |
+| `run_phase1_matrix.sh` | Phase 2 批处理入口：六个 Phase 1 语料 × 3 seeds × real/control/no-reader × 长生成 QA；`--save-reader` 保存每 corpus/mode/seed 的 reader checkpoint，`--load-reader` 跳过训练做 QA-only 重跑，`--resume` 复用 partial |
+| `run_phase2_diagnostic.sh` | 小规模诊断矩阵 wrapper：PURE_WIKI/PURE_CODE/FW_STEM × 3 seeds × real/control/no-reader，instruction-style prompt，保存 reader |
+| `check_phase2_gates.py` | 按预注册门禁检查 PPL + 任务级 real/control/no-reader，输出 JSON/Markdown 与 severe regression |
 | `summarize_phase1_matrix.py` | Phase 1/2 矩阵汇总：real/control/no-reader 的 PPL、contains、extracted EM；`--protocol v2` 使用 answer-marker / first-sentence 提取器 |
 | `audit_contamination.py` | 严格 QA 污染审计：答案/问题/QA n-gram 重叠，输出逐题和汇总报告 |
 | `summarize_unseen_kb.py` | unseen-KB 三线结果汇总：real / control / no-reader 的 PPL 与 EM |
 | `download_qwen38_fp8_rows.py` | 从 Qwen3.8-Flash-Next-FP8 checkpoint 按文件下载并抽取 EngramDB Store-I PLE 行（`shard_NNN.bin`） |
+| `verify_qwen38_rows.py` | 校验 qwen38-rows 的 128 个 shard 数量、固定大小与可选 sha256 manifest |
+| `ensure_qwen38_rows.sh` | 确保 rows 可用：优先使用 `/dev/shm`，其次从持久盘复制，最后从 ModelScope 抽取 |
+| `remote_manifest.py` | 生成远程环境 manifest：版本、GPU、模型/tokenizer/rows 路径与校验结果 |
+| `bootstrap_remote.sh` | 重启后一键检查持久资产、恢复 tokenizer、确保 rows、生成 manifest 并打印下一轮诊断命令 |
+| `pull_remote_results.sh` | 把远程 diagnostic 输出 rsync 回本地 artifacts，配合每 corpus 自动备份 |
 | `compare_qwen_tokenizers.py` | 比较两个 HF tokenizer 的 vocab/merges/special token/added token 与同文本 token id，用于 Qwen3.5 vs Qwen3.8 PLE 对齐审计 |
 | `run_mix_batch.sh` | WSL 批量跑 M1–M5：`run_phase0.py --live-store` + 150 QA exact-match 三线 |
 | `run_mix_one_wrapper.sh` | 单 mix 后台 wrapper：配合 Windows Scheduled Task 长任务托管 |

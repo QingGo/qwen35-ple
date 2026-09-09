@@ -24,6 +24,9 @@ Files in this directory:
 - `summary-v2.json` / `summary-v2.md` — output of
   `scripts/summarize_phase1_matrix.py --protocol v2` (answer-marker /
   first-sentence extractor).
+- `gates-v2.json` / `gates-v2.md` — output of
+  `scripts/check_phase2_gates.py --protocol v2`; PPL gate passes but the task
+  gate fails on severe PURE_FINEWEB / PURE_WIKI BoolQ regressions.
 - `sha256.txt` — SHA-256 of every committed artifact.
 
 Decompress:

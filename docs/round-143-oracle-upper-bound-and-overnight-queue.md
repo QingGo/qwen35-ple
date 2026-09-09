@@ -117,6 +117,41 @@ NQ:
 3. 用 answer-only SFT / gate regularization 验证这两点。
 ```
 
+### 1.4 unique-correct 分解（layer2 PURE_WIKI，3 seeds × 50 题）
+
+| Task | both real/no | real only | no-reader only | control only | all wrong |
+|---|---:|---:|---:|---:|---:|
+| boolq | 29 | 1 | 85 | 1 | 34 |
+| triviaqa | 66 | 56 | 6 | 4 | 18 |
+| nq | 8 | 6 | 7 | 0 | 129 |
+
+解释：
+
+```text
+BoolQ:
+  real-only = 1 / 150
+  no-reader-only = 85 / 150
+  => PLE real 在 BoolQ 上几乎从不唯一正确，主要是有害。
+  => oracle 的收益几乎全部来自“BoolQ 关掉 PLE”。
+
+TriviaQA:
+  real-only = 56 / 150
+  no-reader-only = 6 / 150
+  => PLE real 有大量唯一正确项。
+  => oracle 的收益主要来自“TriviaQA 打开 PLE”。
+
+NQ:
+  real-only 6，no-reader-only 7
+  => 几乎没有可区分信号；NQ 的 oracle headroom 很小。
+```
+
+这进一步支持：
+
+```text
+当前瓶颈不是“PLE 表没有内容”，而是“gate 没有按输入类型正确开关”。
+一个能区分 BoolQ / TriviaQA 的 gate 就能接近 oracle(real/no)。
+```
+
 ---
 
 ## 2. Oracle context upper bound

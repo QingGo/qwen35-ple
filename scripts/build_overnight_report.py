@@ -192,6 +192,46 @@ def _context_table(root: Path) -> list[str]:
     return lines
 
 
+def _gate_ablation_notes(root: Path) -> list[str]:
+    notes: list[str] = []
+    rows: list[tuple[str, float | None, float | None]] = []
+    for path in sorted(root.glob("gate-ablation-*")):
+        corpus = _corpus_gates(root, path.name)
+        if not corpus:
+            continue
+        real = (corpus.get("modes") or {}).get("real") or {}
+        rows.append(
+            (
+                path.name,
+                _task_metric(real, "boolq"),
+                _task_metric(real, "triviaqa"),
+            )
+        )
+    if not rows:
+        return notes
+    notes.append("- Gate ablation (BoolQ / TriviaQA real accuracy):")
+    for name, boolq, trivia in rows:
+        notes.append(f"  - {name}: BoolQ={_fmt(boolq)}, TriviaQA={_fmt(trivia)}")
+    # If forcing the gate closed recovers BoolQ, the regression is gate-driven.
+    closed = [r for r in rows if r[0].endswith("-0.0")]
+    open_ = [r for r in rows if r[0].endswith("-1.0")]
+    if closed and open_:
+        for (cname, cb, ct), (oname, ob, ot) in zip(closed, open_):
+            if cb is not None and ob is not None and cb > ob + 0.05:
+                notes.append(
+                    f"  - forcing gate closed improves BoolQ "
+                    f"({cname} {_fmt(cb)} vs {oname} {_fmt(ob)}): "
+                    "the BoolQ regression is gate-driven."
+                )
+            if ct is not None and ot is not None and ot > ct + 0.05:
+                notes.append(
+                    f"  - forcing gate open improves TriviaQA "
+                    f"({oname} {_fmt(ot)} vs {cname} {_fmt(ct)}): "
+                    "the TriviaQA gain is PLE-content-driven."
+                )
+    return notes
+
+
 def _decision_notes(root: Path) -> list[str]:
     notes: list[str] = []
     layer2 = _load(root / "oracle-analysis" / "layer2-corpus-only.json")
@@ -268,6 +308,11 @@ def main() -> int:
         "sft-mixed50-gate01",
         "sft-mixed50-purecode",
     ]
+    configs += [
+        path.name
+        for path in sorted(root.glob("gate-ablation-*"))
+        if (path / "gates-v2.json").exists()
+    ]
     lines: list[str] = [
         "# Overnight pure-PLE grafting report",
         "",
@@ -305,6 +350,7 @@ def main() -> int:
         "",
     ]
     notes = _decision_notes(root)
+    notes += _gate_ablation_notes(root)
     lines += notes or ["- (not enough outputs yet)"]
     lines += [
         "",

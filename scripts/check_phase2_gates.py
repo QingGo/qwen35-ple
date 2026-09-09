@@ -159,6 +159,18 @@ def _ppl_gate(corpora: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _resolve_task_metric(task: str, metric: str) -> str:
+    """Resolve ``auto`` to the task-appropriate v2 metric.
+
+    BoolQ is a yes/no task, so exact extracted yes/no is the right signal.
+    TriviaQA / NQ answers are short spans but generations are often full
+    sentences, so extracted contains is the right signal.
+    """
+    if metric != "auto":
+        return metric
+    return "extracted_exact" if task == "boolq" else "extracted_contains"
+
+
 def _task_gate(
     corpora: list[dict[str, Any]],
     metric: str,
@@ -168,18 +180,19 @@ def _task_gate(
     severe_regressions: list[dict[str, Any]] = []
     for corpus in corpora:
         for task in TASKS:
-            real = _task_value(corpus, "real", task, metric)
-            control = _task_value(corpus, "control", task, metric)
-            no_reader = _task_value(corpus, "no-reader", task, metric)
+            task_metric = _resolve_task_metric(task, metric)
+            real = _task_value(corpus, "real", task, task_metric)
+            control = _task_value(corpus, "control", task, task_metric)
+            no_reader = _task_value(corpus, "no-reader", task, task_metric)
             if real is None or control is None or no_reader is None:
                 continue
             record = {
                 "corpus": corpus["corpus"],
                 "task": task,
+                "metric": task_metric,
                 "real": real,
                 "control": control,
                 "no_reader": no_reader,
-                "metric": metric,
             }
             if real > no_reader and real >= control:
                 candidates.append(record)
@@ -226,8 +239,8 @@ def _markdown(report: dict[str, Any]) -> str:
         "",
         "## Task gate",
         "",
-        "| Corpus | Task | real | control | no-reader | candidate | severe |",
-        "|---|---|---:|---:|---:|---|---|",
+        "| Corpus | Task | metric | real | control | no-reader | candidate | severe |",
+        "|---|---|---|---:|---:|---:|---|---|",
     ]
     candidate_keys = {
         (item["corpus"], item["task"]) for item in report["task_gate"]["candidates"]
@@ -238,17 +251,17 @@ def _markdown(report: dict[str, Any]) -> str:
     }
     for corpus in report["corpora"]:
         for task in TASKS:
-            real = _task_value(corpus, "real", task, report["task_gate"]["metric"])
-            control = _task_value(corpus, "control", task, report["task_gate"]["metric"])
-            no_reader = _task_value(
-                corpus, "no-reader", task, report["task_gate"]["metric"]
-            )
+            task_metric = _resolve_task_metric(task, report["task_gate"]["metric"])
+            real = _task_value(corpus, "real", task, task_metric)
+            control = _task_value(corpus, "control", task, task_metric)
+            no_reader = _task_value(corpus, "no-reader", task, task_metric)
             if real is None or control is None or no_reader is None:
                 continue
             key = (corpus["corpus"], task)
             lines.append(
-                f"| {corpus['corpus']} | {task} | {real:.3f} | {control:.3f} | "
-                f"{no_reader:.3f} | {key in candidate_keys} | {key in severe_keys} |"
+                f"| {corpus['corpus']} | {task} | {task_metric} | {real:.3f} | "
+                f"{control:.3f} | {no_reader:.3f} | {key in candidate_keys} | "
+                f"{key in severe_keys} |"
             )
     lines += [
         "",
@@ -264,8 +277,17 @@ def main() -> int:
     parser.add_argument("--protocol", choices=("v1", "v2"), default="v2")
     parser.add_argument(
         "--metric",
-        choices=("extracted_exact", "extracted_contains", "contains", "exact"),
-        default="extracted_exact",
+        choices=(
+            "auto",
+            "extracted_exact",
+            "extracted_contains",
+            "contains",
+            "exact",
+        ),
+        default="auto",
+        help=(
+            "auto = extracted_exact for BoolQ and extracted_contains for open QA"
+        ),
     )
     parser.add_argument("--regression-threshold", type=float, default=0.05)
     parser.add_argument("--output", default=None)

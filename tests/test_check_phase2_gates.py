@@ -78,6 +78,14 @@ def test_ppl_gate_fails_when_real_worse_than_control() -> None:
     assert module._ppl_gate(corpora)["pass"] is False
 
 
+def test_resolve_task_metric_auto() -> None:
+    module = _load_module()
+    assert module._resolve_task_metric("boolq", "auto") == "extracted_exact"
+    assert module._resolve_task_metric("triviaqa", "auto") == "extracted_contains"
+    assert module._resolve_task_metric("nq", "auto") == "extracted_contains"
+    assert module._resolve_task_metric("boolq", "exact") == "exact"
+
+
 def test_task_gate_candidate_and_regression() -> None:
     module = _load_module()
     corpora = [

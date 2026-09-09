@@ -1057,6 +1057,10 @@ def _run_mode(
             if short_conv is not None:
                 short_conv = short_conv.to(args.device)
 
+    gate_override = getattr(args, "gate_override", None)
+    if gate_override is not None and hasattr(reader, "gate_override"):
+        reader.gate_override = float(gate_override)
+
     handle = install_reader_hook(model, args.layer, reader, short_conv)
 
     e_t = train_e_t
@@ -1389,6 +1393,15 @@ def main() -> int:
         help=(
             "auxiliary loss weight on the mean reader gate value; pushes the "
             "gate closed when PLE is not useful (0=off)"
+        ),
+    )
+    parser.add_argument(
+        "--gate-override",
+        type=float,
+        default=None,
+        help=(
+            "force every reader gate to this constant value for causal "
+            "ablation (e.g. 0.0 = closed, 1.0 = fully open)"
         ),
     )
     parser.add_argument(

@@ -109,6 +109,8 @@ class EngramReader(torch.nn.Module):
         # graph so an auxiliary gate-regularization loss can backpropagate.
         self.last_gate: torch.Tensor | None = None
         self.last_gate_raw: torch.Tensor | None = None
+        # Optional causal ablation: force every token/branch gate to this value.
+        self.gate_override: float | None = None
 
     def forward(self, h, e_t):
         v = self.w_v(e_t)
@@ -117,6 +119,8 @@ class EngramReader(torch.nn.Module):
             k = self.w_k(e_t)
             gate_logit = (norm_h * self.norm_k(k)).sum(-1) / math.sqrt(self.d_model)
             gate = torch.sigmoid(gate_logit + self.gate_bias[0])
+            if self.gate_override is not None:
+                gate = torch.full_like(gate, float(self.gate_override))
             self.last_gate_raw = gate
             self.last_gate = gate.detach()
             return gate.unsqueeze(-1) * v
@@ -128,6 +132,8 @@ class EngramReader(torch.nn.Module):
             k = proj_k(e_t)
             gate_logit = (norm_h * norm_k(k)).sum(-1) / math.sqrt(self.d_model)
             gate = torch.sigmoid(gate_logit + self.gate_bias[branch_idx])
+            if self.gate_override is not None:
+                gate = torch.full_like(gate, float(self.gate_override))
             gates.append(gate)
             contributions.append(gate.unsqueeze(-1) * v)
         gate_stack = torch.stack(gates, dim=-1)
@@ -456,6 +462,8 @@ class OfficialSourceQwenReader(torch.nn.Module):
         # Diagnostic hooks: last per-token gate values [B, T, hc, 1].
         self.last_gate: torch.Tensor | None = None
         self.last_gate_raw: torch.Tensor | None = None
+        # Optional causal ablation: force every token/branch gate to this value.
+        self.gate_override: float | None = None
 
         if source_state is not None:
             self.load_source_state(source_state, strict=True)
@@ -564,6 +572,8 @@ class OfficialSourceQwenReader(torch.nn.Module):
         score = (key_normed * query_normed).sum(-1, keepdim=True) / math.sqrt(self.d_source)
         score = score.abs().clamp_min(1e-6).sqrt() * score.sign()
         gate = torch.sigmoid(score)                    # [B,T,4,1]
+        if self.gate_override is not None:
+            gate = torch.full_like(gate, float(self.gate_override))
         self.last_gate_raw = gate
         self.last_gate = gate.detach()
 

@@ -57,6 +57,7 @@ jobs:
           bash -n scripts/run_phase0.sh
           bash -n scripts/run_layer2_full_overnight.sh
           bash -n scripts/run_sft_matrix_overnight.sh
+          bash -n scripts/run_gate_ablation_overnight.sh
 
       - name: Test
         run: uv run pytest -q

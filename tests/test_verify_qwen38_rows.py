@@ -108,6 +108,33 @@ def test_verify_manifest_missing_expected_shard(tmp_path: Path) -> None:
     assert report["sha256_manifest_missing"] == ["shard_001.bin"]
 
 
+def test_metadata_only_manifest_is_not_required(tmp_path: Path) -> None:
+    module = _load_module()
+    _write_shard(tmp_path / "shard_000.bin", b"abcd")
+    _write_shard(tmp_path / "shard_001.bin", b"efgh")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "shards": [
+                    {"name": "shard_000.bin", "size": 4},
+                    {"name": "shard_001.bin", "size": 4},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = module.verify_rows(
+        tmp_path,
+        expected_shards=2,
+        shard_bytes=4,
+        sha256_manifest=manifest,
+    )
+    assert report["valid"] is True
+    assert report["sha256_manifest_required"] is False
+    assert report["sha256_manifest_missing"] == []
+
+
 def test_verify_compute_sha256(tmp_path: Path) -> None:
     module = _load_module()
     _write_shard(tmp_path / "shard_000.bin", b"abcd")

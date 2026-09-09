@@ -142,10 +142,14 @@ def verify_rows(
     manifest: dict[str, str] = {}
     if sha256_manifest:
         manifest = _load_manifest(Path(sha256_manifest))
-        report["sha256_manifest_required"] = True
-        report["sha256_manifest_missing"] = [
-            name for name in expected_names if name not in manifest
-        ]
+        # A metadata-only manifest (e.g. the report written by
+        # ``--write-manifest`` without ``--compute-sha256``) has no hash
+        # entries; it must not make the rows invalid.
+        if manifest:
+            report["sha256_manifest_required"] = True
+            report["sha256_manifest_missing"] = [
+                name for name in expected_names if name not in manifest
+            ]
 
     checked_names: list[str] = []
     if manifest:

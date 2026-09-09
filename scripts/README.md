@@ -38,6 +38,7 @@
 | `audit_contamination.py` | 严格 QA 污染审计：答案/问题/QA n-gram 重叠，输出逐题和汇总报告 |
 | `summarize_unseen_kb.py` | unseen-KB 三线结果汇总：real / control / no-reader 的 PPL 与 EM |
 | `download_qwen38_fp8_rows.py` | 从 Qwen3.8-Flash-Next-FP8 checkpoint 按文件下载并抽取 EngramDB Store-I PLE 行（`shard_NNN.bin`） |
+| `compare_qwen_tokenizers.py` | 比较两个 HF tokenizer 的 vocab/merges/special token/added token 与同文本 token id，用于 Qwen3.5 vs Qwen3.8 PLE 对齐审计 |
 | `run_mix_batch.sh` | WSL 批量跑 M1–M5：`run_phase0.py --live-store` + 150 QA exact-match 三线 |
 | `run_mix_one_wrapper.sh` | 单 mix 后台 wrapper：配合 Windows Scheduled Task 长任务托管 |
 | `summarize_mix_results.py` | 汇总多份 Phase 0 JSON：各 mix 的 real/control/no-reader EM、val loss、分任务 EM |

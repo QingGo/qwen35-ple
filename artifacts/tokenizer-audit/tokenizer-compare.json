@@ -1,0 +1,473 @@
+{
+  "tokenizer_a": "/root/autodl-tmp/qwen35-ple/models/Qwen3.5-0.8B",
+  "tokenizer_b": "/root/autodl-tmp/qwen35-ple/models/Qwen3.8-Flash-Next-FP8-tokenizer",
+  "runtime": {
+    "a": {
+      "class": "Qwen2Tokenizer",
+      "len": 248077,
+      "vocab_size": 248044,
+      "eos_token": "<|endoftext|>",
+      "eos_token_id": 248044,
+      "bos_token": null,
+      "bos_token_id": null,
+      "pad_token": "<|endoftext|>",
+      "pad_token_id": 248044,
+      "unk_token": null,
+      "unk_token_id": null,
+      "all_special_tokens": [
+        "<|endoftext|>",
+        "<|audio_start|>",
+        "<|audio_end|>",
+        "<|audio_pad|>",
+        "<|image_pad|>",
+        "<|video_pad|>",
+        "<|vision_start|>",
+        "<|vision_end|>"
+      ],
+      "all_special_ids": [
+        248044,
+        248070,
+        248071,
+        248076,
+        248056,
+        248057,
+        248053,
+        248054
+      ],
+      "additional_special_tokens": [],
+      "added_vocab_count": 33,
+      "added_vocab": {
+        "<|endoftext|>": 248044,
+        "<|im_start|>": 248045,
+        "<|im_end|>": 248046,
+        "<|object_ref_start|>": 248047,
+        "<|object_ref_end|>": 248048,
+        "<|box_start|>": 248049,
+        "<|box_end|>": 248050,
+        "<|quad_start|>": 248051,
+        "<|quad_end|>": 248052,
+        "<|vision_start|>": 248053,
+        "<|vision_end|>": 248054,
+        "<|vision_pad|>": 248055,
+        "<|image_pad|>": 248056,
+        "<|video_pad|>": 248057,
+        "<tool_call>": 248058,
+        "</tool_call>": 248059,
+        "<|fim_prefix|>": 248060,
+        "<|fim_middle|>": 248061,
+        "<|fim_suffix|>": 248062,
+        "<|fim_pad|>": 248063,
+        "<|repo_name|>": 248064,
+        "<|file_sep|>": 248065,
+        "<tool_response>": 248066,
+        "</tool_response>": 248067,
+        "<think>": 248068,
+        "</think>": 248069,
+        "<|audio_start|>": 248070,
+        "<|audio_end|>": 248071,
+        "<tts_pad>": 248072,
+        "<tts_text_bos>": 248073,
+        "<tts_text_eod>": 248074,
+        "<tts_text_bos_single>": 248075,
+        "<|audio_pad|>": 248076
+      }
+    },
+    "b": {
+      "class": "Qwen2Tokenizer",
+      "len": 248077,
+      "vocab_size": 248044,
+      "eos_token": "<|im_end|>",
+      "eos_token_id": 248046,
+      "bos_token": null,
+      "bos_token_id": null,
+      "pad_token": "<|endoftext|>",
+      "pad_token_id": 248044,
+      "unk_token": null,
+      "unk_token_id": null,
+      "all_special_tokens": [
+        "<|im_end|>",
+        "<|endoftext|>",
+        "<|audio_start|>",
+        "<|audio_end|>",
+        "<|audio_pad|>",
+        "<|image_pad|>",
+        "<|video_pad|>",
+        "<|vision_start|>",
+        "<|vision_end|>"
+      ],
+      "all_special_ids": [
+        248046,
+        248044,
+        248070,
+        248071,
+        248076,
+        248056,
+        248057,
+        248053,
+        248054
+      ],
+      "additional_special_tokens": [],
+      "added_vocab_count": 33,
+      "added_vocab": {
+        "<|endoftext|>": 248044,
+        "<|im_start|>": 248045,
+        "<|im_end|>": 248046,
+        "<|object_ref_start|>": 248047,
+        "<|object_ref_end|>": 248048,
+        "<|box_start|>": 248049,
+        "<|box_end|>": 248050,
+        "<|quad_start|>": 248051,
+        "<|quad_end|>": 248052,
+        "<|vision_start|>": 248053,
+        "<|vision_end|>": 248054,
+        "<|vision_pad|>": 248055,
+        "<|image_pad|>": 248056,
+        "<|video_pad|>": 248057,
+        "<tool_call>": 248058,
+        "</tool_call>": 248059,
+        "<|fim_prefix|>": 248060,
+        "<|fim_middle|>": 248061,
+        "<|fim_suffix|>": 248062,
+        "<|fim_pad|>": 248063,
+        "<|repo_name|>": 248064,
+        "<|file_sep|>": 248065,
+        "<tool_response>": 248066,
+        "</tool_response>": 248067,
+        "<think>": 248068,
+        "</think>": 248069,
+        "<|audio_start|>": 248070,
+        "<|audio_end|>": 248071,
+        "<tts_pad>": 248072,
+        "<tts_text_bos>": 248073,
+        "<tts_text_eod>": 248074,
+        "<tts_text_bos_single>": 248075,
+        "<|audio_pad|>": 248076
+      }
+    }
+  },
+  "vocab": {
+    "equal": true,
+    "a_size": 248077,
+    "b_size": 248077,
+    "a_only_count": 0,
+    "b_only_count": 0,
+    "changed_count": 0,
+    "a_only_sample": [],
+    "b_only_sample": [],
+    "changed_sample": []
+  },
+  "raw_files": {
+    "tokenizer.json": {
+      "a_sha256": "fe000e3ed39ed12b8d2481d527d44f93c65d37e87645d2dcc80d1bf9d50d2927",
+      "b_sha256": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
+      "equal": false
+    },
+    "tokenizer_config.json": {
+      "a_sha256": "e611fbccc7c29ef3b1cafb1cb7ea548d189968632901d678fd62be68c47885de",
+      "b_sha256": "b11349aafa7cdc6a320767cf7ceb29ed82f7eda5d65e8e0819e76f0ce947bf27",
+      "equal": false
+    },
+    "vocab.json": {
+      "a_sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
+      "b_sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
+      "equal": true
+    },
+    "merges.txt": {
+      "a_sha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d",
+      "b_sha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d",
+      "equal": true
+    }
+  },
+  "raw_tokenizer": {
+    "top_level_keys": {
+      "a": [
+        "added_tokens",
+        "decoder",
+        "model",
+        "normalizer",
+        "padding",
+        "post_processor",
+        "pre_tokenizer",
+        "truncation",
+        "version"
+      ],
+      "b": [
+        "added_tokens",
+        "decoder",
+        "model",
+        "normalizer",
+        "padding",
+        "post_processor",
+        "pre_tokenizer",
+        "truncation",
+        "version"
+      ]
+    },
+    "model_keys": {
+      "a": [
+        "byte_fallback",
+        "continuing_subword_prefix",
+        "dropout",
+        "end_of_word_suffix",
+        "fuse_unk",
+        "merges",
+        "type",
+        "unk_token",
+        "vocab"
+      ],
+      "b": [
+        "byte_fallback",
+        "continuing_subword_prefix",
+        "dropout",
+        "end_of_word_suffix",
+        "fuse_unk",
+        "ignore_merges",
+        "merges",
+        "type",
+        "unk_token",
+        "vocab"
+      ]
+    },
+    "model_non_vocab_diff": {
+      "ignore_merges": {
+        "a": null,
+        "b": false
+      }
+    },
+    "vocab_equal": true,
+    "merges_equal": true,
+    "normalizer_equal": true,
+    "pre_tokenizer_equal": true,
+    "post_processor_equal": true,
+    "decoder_equal": true,
+    "added_tokens": {
+      "a_count": 22,
+      "b_count": 33,
+      "a_only": [],
+      "b_only": [
+        {
+          "id": 248066,
+          "content": "<tool_response>",
+          "lstrip": false,
+          "normalized": false,
+          "rstrip": false,
+          "single_word": false,
+          "special": false
+        },
+        {
+          "id": 248067,
+          "content": "</tool_response>",
+          "lstrip": false,
+          "normalized": false,
+          "rstrip": false,
+          "single_word": false,
+          "special": false
+        },
+        {
+          "id": 248068,
+          "content": "<think>",
+          "lstrip": false,
+          "normalized": false,
+          "rstrip": false,
+          "single_word": false,
+          "special": false
+        },
+        {
+          "id": 248069,
+          "content": "</think>",
+          "lstrip": false,
+          "normalized": false,
+          "rstrip": false,
+          "single_word": false,
+          "special": false
+        },
+        {
+          "id": 248070,
+          "content": "<|audio_start|>",
+          "single_word": false,
+          "lstrip": false,
+          "rstrip": false,
+          "normalized": false,
+          "special": true
+        },
+        {
+          "id": 248071,
+          "content": "<|audio_end|>",
+          "single_word": false,
+          "lstrip": false,
+          "rstrip": false,
+          "normalized": false,
+          "special": true
+        },
+        {
+          "id": 248072,
+          "content": "<tts_pad>",
+          "single_word": false,
+          "lstrip": false,
+          "rstrip": false,
+          "normalized": false,
+          "special": true
+        },
+        {
+          "id": 248073,
+          "content": "<tts_text_bos>",
+          "single_word": false,
+          "lstrip": false,
+          "rstrip": false,
+          "normalized": false,
+          "special": true
+        },
+        {
+          "id": 248074,
+          "content": "<tts_text_eod>",
+          "single_word": false,
+          "lstrip": false,
+          "rstrip": false,
+          "normalized": false,
+          "special": true
+        },
+        {
+          "id": 248075,
+          "content": "<tts_text_bos_single>",
+          "single_word": false,
+          "lstrip": false,
+          "rstrip": false,
+          "normalized": false,
+          "special": true
+        },
+        {
+          "id": 248076,
+          "content": "<|audio_pad|>",
+          "single_word": false,
+          "lstrip": false,
+          "rstrip": false,
+          "normalized": false,
+          "special": true
+        }
+      ],
+      "changed": []
+    }
+  },
+  "tokenizer_config_diff": {
+    "chat_template": {
+      "a_len": 7755,
+      "b_len": 8952
+    },
+    "eos_token": {
+      "a": "<|endoftext|>",
+      "b": "<|im_end|>"
+    }
+  },
+  "encoding": [
+    {
+      "text": "The capital of France is Paris.",
+      "a_len": 7,
+      "b_len": 7,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "Hello, world! How are you?",
+      "a_len": 8,
+      "b_len": 8,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "你好，世界！今天天气怎么样？",
+      "a_len": 8,
+      "b_len": 8,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "def foo(x):\n    return x + 1  # code",
+      "a_len": 14,
+      "b_len": 14,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "1234567890 3.14159 -42",
+      "a_len": 21,
+      "b_len": 21,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "café ﬁ ＡＢＣ ｈｅｌｌｏ",
+      "a_len": 17,
+      "b_len": 17,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "emoji 😀🚀🔥 and symbols ©®™",
+      "a_len": 13,
+      "b_len": 13,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "multiple   spaces\tand\nnewlines",
+      "a_len": 7,
+      "b_len": 7,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "naïve résumé coöperate",
+      "a_len": 7,
+      "b_len": 7,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "<think>\nreasoning\n</think> answer",
+      "a_len": 7,
+      "b_len": 7,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "<tool_response>{\"x\": 1}</tool_response>",
+      "a_len": 8,
+      "b_len": 8,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "<|im_start|>user\nhi<|im_end|>",
+      "a_len": 5,
+      "b_len": 5,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "<|endoftext|>",
+      "a_len": 1,
+      "b_len": 1,
+      "equal": true,
+      "equal_with_special_tokens": true
+    },
+    {
+      "text": "<|audio_start|>abc<|audio_end|>",
+      "a_len": 3,
+      "b_len": 3,
+      "equal": true,
+      "equal_with_special_tokens": true
+    }
+  ],
+  "verdict": {
+    "base_vocab_identical": true,
+    "merges_identical": true,
+    "normalizer_identical": true,
+    "pre_tokenizer_identical": true,
+    "post_processor_identical": true,
+    "decoder_identical": true,
+    "runtime_vocab_identical": true,
+    "runtime_eos_ids_equal": false,
+    "ordinary_text_encoding_identical": true,
+    "all_text_encoding_identical_with_special_tokens": true
+  }
+}

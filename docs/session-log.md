@@ -3056,3 +3056,32 @@ lazy-window gate        ✅
 - Infra：tmux 队列；probe 改 closed-form ridge（40s）；queue probe 输入修正为 generation eval JSON。
 - 新增文档：`docs/round-148-format-vs-content-nll-and-oracle-routing-probe.md`。
 
+## Session 149：148-B reader capacity 结果、端侧 IO 修正与系统性 Roadmap
+
+- Round 148-B（解冻官方 source projections，表仍冻结）结果：
+  - generation：real BoolQ 0.782 / TriviaQA 0.156 / NQ 0.044 / mean 0.3273；
+    control 0.748/0.146/0.042/0.3120；no-reader 0.672/0.128/0.062/0.2873；
+  - gold NLL：real 2.3133，control 2.3113，real−control = −0.0019（SEM 0.0094）；
+  - 结论：reader 容量/source projection 对齐不是内容瓶颈；co-adaptation 仍待验证。
+- 端侧纠正：51.2GB 表不该 RAM-resident，但可走 EngramDB disk-first：
+  Store-P 一条 2560B 记录/token，热 cache + 异步 prefetch，容量不是问题，
+  需要真机验证 IOPS/尾延迟/功耗；我们当前用 `/dev/shm`，掩盖了 disk IO 成本。
+- 用户倾向在现猜想证伪后优先做 0.8B × {frozen, LoRA, full FT} ×
+  {no PLE, real, control} 的 2×2 interaction，以保留端侧 0.8B 叙事；
+  已确认这是好品味，但 claim 应从“纯 graft 注入知识”改为
+  “0.8B compute + external flash memory + lightweight adaptation”。
+- 磁盘与下载：
+  - 清理旧 phase2/warmup/旧 SFT 变体，`/root/autodl-tmp` 12G -> 26G free；
+  - 新增 `scripts/download_modelscope_model.py`（ModelScope 优先，HF fallback），
+    `scripts/download_qwen35_models.sh`；
+  - Qwen3.5-4B（9.34GB, hidden 2560）与 2B（4.57GB, hidden 2048）正在
+    tmux `qwen35dl` 下载；4B 与 PLE 源空间 hidden 完全对齐。
+- 新增 `docs/round-149-systematic-roadmap-and-tech-debt.md`：
+  - 终极目标（科学边界 + 端侧 hybrid + 平台）；
+  - 本 session 技术债（metric/queue/remote repo/batched eval/disk/IO/version drift）；
+  - Gates G0–G4：scale/space、backbone co-adaptation 2×2、hot-row table
+    adaptation、EngramDB edge serving、small PLE Pareto；
+  - 从 EngramDB / engram-peft / Qwen official / ortegaalfredo / llama.cpp-NLTM /
+    vLLM-SGLang / Engram paper / TN-gram / HF PEFT / RAG 的借鉴与边界；
+  - 工程稳定性规则与立即行动项。
+

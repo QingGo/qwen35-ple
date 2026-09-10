@@ -12,6 +12,13 @@
 #   g0-control   : shuffled PLE rows
 #
 # Eval: standard 1500 raw prompt, generation + gold-answer NLL.
+#
+# The checkpoint is stored in bf16 (9.3GB for 4.2B params), so bf16 loading is
+# lossless w.r.t. the released weights and 2x cheaper than the fp32 conversion
+# the 0.8B path uses.  fp32 + concurrent work already OOM'd on the 24GB card.
+#
+# The frozen no-reader arm is NOT rerun: it does not depend on the backbone
+# width and is already measured (round148a nll-raw-no-reader, mean 8.7429).
 set -uo pipefail
 
 ROOT="${ROOT:-/root/autodl-tmp/qwen35-ple}"
@@ -52,12 +59,12 @@ run_arm() {
     --rows-dir /dev/shm/qwen38-rows
     --model-dir "$ROOT/models/qwen38_ple"
     --model "$ROOT/models/Qwen3.5-4B"
-    --backbone-dtype float32
+    --backbone-dtype bfloat16
     --reader official --layer 2 --device cuda --bridge-mlp --out-mlp
     --official-reader-path data/official_ple_reader.pt
     --steps 0 --seq-len 128 --lr 1e-4 --seeds 0 --modes "$mode"
     --qa --qa-exact-match --qa-gold-nll --qa-max-new-tokens 32
-    --qa-batch-size 4 --qa-batch-max-tokens 1024
+    --qa-batch-size 1 --qa-batch-max-tokens 256
     --qa-prompt-template "$PROMPT"
     --qa-boolq-prompt-template "$BOOLQ_PROMPT"
     --qa-file data/qa-standard/eval.jsonl
@@ -96,7 +103,7 @@ train_reader() {
     --rows-dir /dev/shm/qwen38-rows \
     --model-dir "$ROOT/models/qwen38_ple" \
     --model "$ROOT/models/Qwen3.5-4B" \
-    --backbone-dtype float32 \
+    --backbone-dtype bfloat16 \
     --reader official --layer 2 --device cuda --bridge-mlp --out-mlp \
     --official-reader-path data/official_ple_reader.pt \
     --steps 500 --seq-len 128 --lr 1e-4 --seeds 0 --modes "$mode" \
@@ -115,21 +122,35 @@ train_reader() {
 train_reader real "$TRAIN_REAL"
 train_reader control "$TRAIN_CTRL"
 
-run_arm "g0-no-reader" "no-reader" ""
 run_arm "g0-real" "real" "$TRAIN_REAL"
 run_arm "g0-control" "control" "$TRAIN_CTRL"
 
+# Reference: the frozen 0.8B row (round148a) for the same prompt protocol.
+FROZEN_REF="$ROOT/outputs/round148a/nll-raw-no-reader.json"
 ARGS=()
-for name in g0-no-reader g0-real g0-control; do
+for name in g0-real g0-control; do
   [[ -f "$OUT/$name.json" ]] && ARGS+=("--run" "$name=$OUT/$name.json")
 done
-"$PY" scripts/summarize_gold_nll.py "${ARGS[@]}" \
-  --baseline g0-no-reader \
+if [[ -f "$FROZEN_REF" ]]; then
+  ARGS+=("--run" "frozen-0.8b-no-reader=$FROZEN_REF")
+fi
+GOLD_ARGS=()
+for name in g0-real g0-control; do
+  [[ -f "$OUT/$name.json" ]] && GOLD_ARGS+=("--run" "$name=$OUT/$name.json")
+done
+GEN_ARGS=("--run" "g0-real=$OUT/g0-real.json" "--run" "g0-control=$OUT/g0-control.json")
+"$PY" scripts/summarize_arms.py "${GEN_ARGS[@]}" \
+  --pair g0-real=g0-control \
+  --title "G0 scale/space: frozen Qwen3.5-4B (hidden 2560) + frozen PLE" \
+  --output "$OUT/arms-summary.md" --json-output "$OUT/arms-summary.json" >>"$LOG" 2>&1
+
+"$PY" scripts/summarize_gold_nll.py "${GOLD_ARGS[@]}" \
+  --baseline frozen-0.8b-no-reader \
   --pair g0-real=g0-control \
   --output "$OUT/gold-nll-raw.md" \
   --title "G0 scale/space: frozen Qwen3.5-4B (hidden 2560) + frozen PLE" >>"$LOG" 2>&1
 
-for artifact in g0-no-reader.json g0-real.json g0-control.json gold-nll-raw.md; do
+for artifact in g0-real.json g0-control.json gold-nll-raw.md; do
   if [[ ! -s "$OUT/$artifact" ]]; then
     log "ERROR: missing artifact $artifact"
     exit 1

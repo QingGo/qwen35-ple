@@ -1583,6 +1583,8 @@ def _run_mode(
     return {
         "mode": mode,
         "seed": seed,
+        "ple_off": bool(getattr(args, "ple_off", False)),
+        "gate_override": getattr(args, "gate_override", None),
         "val_loss": val_loss,
         "val_ppl": math.exp(val_loss) if math.isfinite(val_loss) else None,
         "train_losses": train_losses,
@@ -1897,6 +1899,16 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--ple-off",
+        action="store_true",
+        help=(
+            "keep the PLE reader in the model but suppress its contribution "
+            "entirely; unlike --modes no-reader this still trains the backbone "
+            "and the reader, so it is the correct no-PLE cell of an adaptation "
+            "2x2 (no reader store is loaded)"
+        ),
+    )
+    parser.add_argument(
         "--gate-override",
         type=float,
         default=None,
@@ -2136,7 +2148,10 @@ def main() -> int:
     qa_exact_items = None
     qa_sft_items: list[dict] | None = None
     qa_store = None
-    needs_reader_store = any(mode != "no-reader" for mode in args.modes)
+    needs_reader_store = (
+        any(mode != "no-reader" for mode in args.modes)
+        and not getattr(args, "ple_off", False)
+    )
     needs_qa_store = needs_reader_store and (
         bool(args.qa_exact_match) or bool(args.qa_sft_file) or bool(args.qa_gold_nll)
     )
@@ -2219,6 +2234,7 @@ def main() -> int:
                 live_store_handle, "reset_stats"
             ):
                 live_store_handle.reset_stats()
+            model._ple_disabled = bool(getattr(args, "ple_off", False))
             res = _run_mode(
                 args,
                 model,

@@ -173,6 +173,8 @@ def install_reader_hook(
         else:
             hidden = output
         current = getattr(model, "_current_ple_e_t", None)
+        if getattr(model, "_ple_disabled", False):
+            current = None
         if current is not None and current.shape[1] == hidden.shape[1]:
             contribution = reader(hidden, current)
             if short_conv is not None:

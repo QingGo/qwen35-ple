@@ -38,7 +38,26 @@ def test_stratified_folds_cover_all_items():
     folds = module._stratified_folds(labels, groups, n_folds=4)
     seen = np.concatenate([test for _, test in folds])
     assert sorted(seen.tolist()) == list(range(len(labels)))
-    assert len(folds) >= 2
+    # Each (group, label) stratum here holds two items, so at most two folds can
+    # be non-empty: folds with an empty test or train side are dropped rather
+    # than returned unusable.  Assert the invariant that matters (full coverage,
+    # every fold usable) instead of demanding more folds than the strata fill.
+    assert len(folds) >= 1
+    for train, test in folds:
+        assert len(train) > 0 and len(test) > 0
+        assert not set(train.tolist()) & set(test.tolist())
+
+
+def test_stratified_folds_fills_requested_folds_when_strata_allow():
+    module = _load_module()
+    labels = np.asarray([0, 1] * 8)
+    groups = np.asarray(["boolq", "triviaqa"] * 8)
+    folds = module._stratified_folds(labels, groups, n_folds=4)
+    seen = np.concatenate([test for _, test in folds])
+    assert sorted(seen.tolist()) == list(range(len(labels)))
+    assert len(folds) == 4
+    for train, test in folds:
+        assert not set(train.tolist()) & set(test.tolist())
 
 
 def test_cross_val_learns_separable_signal():

@@ -370,14 +370,19 @@ def _train_reader(
                 .long()
                 .to(device)
             )
-            ets_np = np.asarray(item["e_t"], dtype=np.float32)
-            if qa_sft_control:
-                perm = np.random.default_rng(seed * 100000 + step).permutation(
-                    len(ets_np)
-                )
-                ets_np = ets_np[perm]
-            ets = torch.from_numpy(ets_np[None, :]).float().to(device)
-            model._current_ple_e_t = ets
+            if "e_t" in item:
+                ets_np = np.asarray(item["e_t"], dtype=np.float32)
+                if qa_sft_control:
+                    perm = np.random.default_rng(seed * 100000 + step).permutation(
+                        len(ets_np)
+                    )
+                    ets_np = ets_np[perm]
+                ets = torch.from_numpy(ets_np[None, :]).float().to(device)
+                model._current_ple_e_t = ets
+            else:
+                # --ple-off arm: the same QA SFT mix drives the backbone, but no
+                # PLE rows are read and the suppressed hook stays inert.
+                model._current_ple_e_t = None
             optimizer.zero_grad()
             out = model(input_ids=ids)
             logits = out.logits
@@ -899,9 +904,19 @@ class _LazyQASFTCache:
     ``random.Random.choice`` only needs ``__len__`` / ``__getitem__``.  The
     small LRU cache bounds memory while still avoiding repeated Store calls for
     the most recently sampled items.
+
+    ``qa_store`` may be ``None`` for a ``--ple-off`` arm, where the same QA SFT
+    mix must still drive the backbone and reader but no PLE rows are read.  In
+    that case entries are returned without ``e_t`` and the suppressed reader
+    hook never consumes them.
     """
 
-    def __init__(self, items: list[dict], qa_store: _QAEtStore, max_cached: int = 128):
+    def __init__(
+        self,
+        items: list[dict],
+        qa_store: _QAEtStore | None,
+        max_cached: int = 128,
+    ):
         self.items = items
         self.qa_store = qa_store
         self.max_cached = max(1, int(max_cached))
@@ -915,7 +930,8 @@ class _LazyQASFTCache:
         if cached is not None:
             return cached
         item = dict(self.items[idx])
-        item["e_t"] = self.qa_store.fetch(item["ids"])
+        if self.qa_store is not None:
+            item["e_t"] = self.qa_store.fetch(item["ids"])
         if len(self._cache) >= self.max_cached:
             self._cache.pop(next(iter(self._cache)))
         self._cache[idx] = item
@@ -2152,6 +2168,13 @@ def main() -> int:
         any(mode != "no-reader" for mode in args.modes)
         and not getattr(args, "ple_off", False)
     )
+    # A --ple-off arm suppresses the reader contribution but must still train on
+    # the same QA SFT mix as the PLE arms, otherwise the 2x2 cells differ in two
+    # ways at once.  The cache needs the tokenizer, not PLE rows: entries built
+    # without e_t are valid because the suppressed reader never reads them.
+    needs_qa_sft_cache = bool(args.qa_sft_file) and any(
+        mode != "no-reader" for mode in args.modes
+    )
     needs_qa_store = needs_reader_store and (
         bool(args.qa_exact_match) or bool(args.qa_sft_file) or bool(args.qa_gold_nll)
     )
@@ -2166,7 +2189,7 @@ def main() -> int:
             f"max_new_tokens={args.qa_max_new_tokens}, "
             f"gold_nll={bool(args.qa_gold_nll)}"
         )
-    if args.qa_sft_file and needs_reader_store:
+    if args.qa_sft_file and needs_qa_sft_cache:
         qa_sft_raw = _load_qa_sft_file(args.qa_sft_file)
         if qa_store is None:
             qa_store = _QAEtStore(args.rows_dir, applied_scale)

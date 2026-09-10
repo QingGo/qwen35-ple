@@ -3032,3 +3032,27 @@ lazy-window gate        ✅
   - P2：stateful n-gram cache、Store-P e_t、FP8/sparse optimizer。
 - 新增文档：`docs/round-147-engram-lineage-comparison.md`。
 
+## Session 148：format vs content 判决、gold NLL、oracle-routing probe
+
+- 新增 `--qa-gold-nll` / `--qa-head-mask`（`run_phase0.py`），
+  以及 `summarize_gold_nll.py` / `extract_layer_hidden.py` / `train_oracle_routing_probe.py` / `run_round148a.sh`。
+- 标准 1500 gold-answer NLL（v2 提取协议的解耦补充）：
+  - raw：no-reader 8.7429；real 2.314/2.357/2.315；control 2.318/2.363/2.368；
+    real−control overall +0.004/+0.006/+0.053，mean +0.021 nats；
+  - chat：no-reader 6.7205；real 2.345/2.356/2.344；control 2.355/2.383/2.351；
+    real−control +0.010/+0.028/+0.007，mean +0.015 nats；
+  - 格式效应 ~4.4–6.4 nats，内容效应 ~0.02 nats，control 基本追平 real。
+- Head/order 消融：
+  - raw keep2gram ≈ full（+0.008），keep3gram 明显更差（−1.255）；
+  - chat keep2gram −0.010、keep3gram −0.035；
+  - 2-gram heads 承担绝大部分可用信号，3-gram heads 单独存在贡献很小。
+- Oracle-routing probe（layer-2 hidden -> real-only vs no-reader-only）：
+  - raw AUC 0.504–0.509，leave-one-task-out 0.36–0.43（低于 chance）；
+  - chat AUC 0.563–0.635，但 leave-one-task-out 0.44–0.50（不跨任务）；
+  - direct correctness AUC 0.66–0.82（能预测单臂难度，不能预测相对优势）；
+  - 结论：oracle headroom 不能由简单线性 gate 捕获。
+- 最终结论：reader-only 纯 PLE 嫁接不能注入世界知识；标准 held-out 收益是格式/elicitation；
+  control ≈ real；下一步只剩 reader capacity（解冻官方 source projections）与 hot-row table adaptation 两个判决实验。
+- Infra：tmux 队列；probe 改 closed-form ridge（40s）；queue probe 输入修正为 generation eval JSON。
+- 新增文档：`docs/round-148-format-vs-content-nll-and-oracle-routing-probe.md`。
+

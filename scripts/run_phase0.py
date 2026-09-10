@@ -435,6 +435,142 @@ def _qa_loglik(model, tokenizer, items: list[dict], control: bool, seed: int) ->
     return {"metrics": metrics, "answers": answers}
 
 
+def _parse_head_mask(spec: str | None) -> list[int] | None:
+    """Parse a PLE head-mask spec into a list of head indices to zero.
+
+    ``2gram`` keeps the 2-gram heads (zeroes heads 8..15), ``3gram`` keeps the
+    3-gram heads (zeroes heads 0..7), and a comma list selects individual heads.
+    """
+    if spec is None:
+        return None
+    text = str(spec).strip().lower()
+    if text in ("", "none", "full"):
+        return None
+    if text == "2gram":
+        return list(range(8, 16))
+    if text == "3gram":
+        return list(range(8))
+    if text == "all":
+        return list(range(16))
+    heads: list[int] = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        head = int(part)
+        if head < 0 or head >= 16:
+            raise ValueError(f"PLE head index out of range: {head}")
+        heads.append(head)
+    return sorted(set(heads))
+
+
+def _apply_head_mask(et: np.ndarray, head_mask: list[int] | None) -> np.ndarray:
+    """Zero selected PLE heads in an ``[T, 2560]`` e_t array."""
+    if not head_mask:
+        return et
+    if et.shape[-1] != 2560:
+        raise ValueError(f"expected e_t width 2560, got {et.shape[-1]}")
+    out = et.reshape(et.shape[0], 16, 160).copy()
+    out[:, head_mask, :] = 0.0
+    return out.reshape(et.shape[0], 2560)
+
+
+def _qa_gold_nll(
+    model,
+    tokenizer,
+    items: list[dict],
+    qa_store,
+    control: bool,
+    seed: int,
+    prompt_template: str | None = None,
+    boolq_prompt_template: str | None = None,
+    chat_template: bool = False,
+    chat_enable_thinking: bool = False,
+    head_mask: list[int] | None = None,
+) -> dict:
+    """Teacher-forced gold-answer NLL for the format-matched QA prompt.
+
+    This is the format-insensitive complement to exact-match generation: it
+    scores only the gold continuation tokens after the same prompt that
+    generation uses.  Lower is better.  The continuation is always the raw
+    answer tokenization, matching the QA-SFT convention and avoiding a
+    leading-space tokenization mismatch between arms.
+    """
+    device = next(model.parameters()).device
+    answers: list[dict[str, Any]] = []
+    per_task_nll: dict[str, list[float]] = {}
+    total_tokens = 0
+    total_loss = 0.0
+    for idx, item in enumerate(items):
+        prompt_ids = _qa_prompt_ids(
+            tokenizer,
+            item,
+            prompt_template,
+            boolq_prompt_template,
+            chat_template=chat_template,
+            chat_enable_thinking=chat_enable_thinking,
+        )
+        answer = str(item.get("answer", ""))
+        continuation = answer
+        cont_ids = tokenizer.encode(continuation, add_special_tokens=False)
+        if not prompt_ids or not cont_ids:
+            continue
+        full_ids = list(prompt_ids) + list(cont_ids)
+        start = len(prompt_ids)
+        end = len(full_ids)
+
+        if qa_store is not None:
+            et = qa_store.fetch(full_ids)
+            if control:
+                rng = np.random.default_rng(seed * 1000 + idx)
+                et = et[rng.permutation(len(et))]
+            et = _apply_head_mask(et, head_mask)
+            model._current_ple_e_t = (
+                torch.from_numpy(et).float().unsqueeze(0).to(device)
+            )
+        else:
+            model._current_ple_e_t = None
+
+        ids = torch.tensor([full_ids], dtype=torch.long, device=device)
+        attention_mask = torch.ones_like(ids)
+        with torch.no_grad():
+            out = model(input_ids=ids, attention_mask=attention_mask)
+        logits = out.logits[0]
+        shift_logits = logits[start - 1 : end - 1, :]
+        labels = ids[0, start:end]
+        loss = F.cross_entropy(shift_logits, labels)
+        value = float(loss.item())
+        n_tokens = int(end - start)
+        answers.append(
+            {
+                "task": str(item.get("task", "unknown")),
+                "question": str(item.get("question", "")),
+                "answer": answer,
+                "gold_nll": value,
+                "n_tokens": n_tokens,
+                "continuation": continuation,
+            }
+        )
+        per_task_nll.setdefault(str(item.get("task", "unknown")), []).append(value)
+        total_loss += value * n_tokens
+        total_tokens += n_tokens
+        if (idx + 1) % 200 == 0:
+            print(f"    gold-NLL {idx + 1}/{len(items)}", flush=True)
+
+    metrics = {
+        f"qa_{task}_nll": float(np.mean(vals))
+        for task, vals in sorted(per_task_nll.items())
+    }
+    metrics["qa_mean_nll"] = (
+        float(np.mean([a["gold_nll"] for a in answers])) if answers else float("nan")
+    )
+    metrics["qa_token_mean_nll"] = (
+        float(total_loss / total_tokens) if total_tokens else float("nan")
+    )
+    metrics["qa_n"] = float(len(answers))
+    return {"metrics": metrics, "answers": answers}
+
+
 def _load_qa_file(path: str | Path | None) -> list[dict]:
     """Load a QA file that matches the Phase 0 default schema.
 
@@ -838,6 +974,7 @@ def _qa_exact_match(
     boolq_prompt_template: str | None = None,
     chat_template: bool = False,
     chat_enable_thinking: bool = False,
+    head_mask: list[int] | None = None,
 ) -> dict:
     """Greedy exact-match QA generation with live PLE injection.
 
@@ -949,6 +1086,7 @@ def _qa_exact_match(
                         if control:
                             rng = np.random.default_rng(seed * 1000 + state["idx"])
                             et_np = et_np[rng.permutation(len(et_np))]
+                        et_np = _apply_head_mask(et_np, head_mask)
                         e_t_padded[row, : len(state["ids"])] = et_np
                     model._current_ple_e_t = (
                         torch.from_numpy(e_t_padded).float().to(device)
@@ -1050,6 +1188,7 @@ def _run_mode(
     qa_exact_items,
     qa_store,
 ):
+    head_mask = _parse_head_mask(getattr(args, "qa_head_mask", None))
     if mode == "no-reader":
         val_loss = _window_loss(model, val_tokens, val_e_t, args.seq_len)
         qa = (
@@ -1077,6 +1216,26 @@ def _run_mode(
                 chat_enable_thinking=bool(
                     getattr(args, "qa_chat_enable_thinking", False)
                 ),
+                head_mask=head_mask,
+            )
+        qa_gold = None
+        if getattr(args, "qa_gold_nll", False) and qa_exact_items:
+            qa_gold = _qa_gold_nll(
+                model,
+                tokenizer,
+                qa_exact_items,
+                None,
+                control=False,
+                seed=seed,
+                prompt_template=getattr(args, "qa_prompt_template", None),
+                boolq_prompt_template=getattr(
+                    args, "qa_boolq_prompt_template", None
+                ),
+                chat_template=bool(getattr(args, "qa_chat_template", False)),
+                chat_enable_thinking=bool(
+                    getattr(args, "qa_chat_enable_thinking", False)
+                ),
+                head_mask=head_mask,
             )
         return {
             "mode": mode,
@@ -1085,6 +1244,7 @@ def _run_mode(
             "val_ppl": math.exp(val_loss) if math.isfinite(val_loss) else None,
             "qa": qa,
             "qa_exact": qa_exact,
+            "qa_gold": qa_gold,
         }
 
     torch.manual_seed(seed)
@@ -1244,6 +1404,25 @@ def _run_mode(
             chat_enable_thinking=bool(
                 getattr(args, "qa_chat_enable_thinking", False)
             ),
+            head_mask=head_mask,
+        )
+
+    qa_gold = None
+    if getattr(args, "qa_gold_nll", False) and qa_exact_items:
+        qa_gold = _qa_gold_nll(
+            model,
+            tokenizer,
+            qa_exact_items,
+            qa_store,
+            control=(mode == "control"),
+            seed=seed,
+            prompt_template=getattr(args, "qa_prompt_template", None),
+            boolq_prompt_template=getattr(args, "qa_boolq_prompt_template", None),
+            chat_template=bool(getattr(args, "qa_chat_template", False)),
+            chat_enable_thinking=bool(
+                getattr(args, "qa_chat_enable_thinking", False)
+            ),
+            head_mask=head_mask,
         )
 
     if getattr(args, "save_reader", None) and not getattr(args, "load_reader", None):
@@ -1307,6 +1486,7 @@ def _run_mode(
         "val_curve": val_curve,
         "qa": qa,
         "qa_exact": qa_exact,
+        "qa_gold": qa_gold,
     }
 
 
@@ -1422,6 +1602,22 @@ def main() -> int:
         "--qa-exact-match",
         action="store_true",
         help="run greedy exact-match QA generation with live PLE injection",
+    )
+    parser.add_argument(
+        "--qa-gold-nll",
+        action="store_true",
+        help=(
+            "teacher-forced gold-answer NLL for the same prompt protocol; "
+            "a format-insensitive complement to --qa-exact-match"
+        ),
+    )
+    parser.add_argument(
+        "--qa-head-mask",
+        default=None,
+        help=(
+            "zero selected PLE heads during QA: '2gram' keeps 2-gram heads, "
+            "'3gram' keeps 3-gram heads, 'all', or a comma list of head indices"
+        ),
     )
     parser.add_argument("--qa-max-new-tokens", type=int, default=16)
     parser.add_argument(
@@ -1751,13 +1947,14 @@ def main() -> int:
     qa_store = None
     needs_reader_store = any(mode != "no-reader" for mode in args.modes)
     needs_qa_store = needs_reader_store and (
-        bool(args.qa_exact_match) or bool(args.qa_sft_file)
+        bool(args.qa_exact_match) or bool(args.qa_sft_file) or bool(args.qa_gold_nll)
     )
-    if args.qa_exact_match:
+    if args.qa_exact_match or args.qa_gold_nll:
         qa_exact_items = _load_qa_file(args.qa_file)
         print(
-            f"[phase0] preparing exact-match QA: {len(qa_exact_items)} items, "
-            f"max_new_tokens={args.qa_max_new_tokens}"
+            f"[phase0] preparing QA eval: {len(qa_exact_items)} items, "
+            f"max_new_tokens={args.qa_max_new_tokens}, "
+            f"gold_nll={bool(args.qa_gold_nll)}"
         )
     if args.qa_sft_file and needs_reader_store:
         qa_sft_raw = _load_qa_sft_file(args.qa_sft_file)

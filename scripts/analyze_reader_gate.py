@@ -153,11 +153,21 @@ def _gate_stats(gate: torch.Tensor) -> dict[str, float]:
     """gate: [B, T, hc, 1] or [B, T, branches]."""
     values = gate.detach().float().reshape(-1)
     if values.numel() == 0:
-        return {"mean": float("nan"), "max": float("nan"), "open_frac": float("nan")}
+        return {
+            "mean": float("nan"),
+            "max": float("nan"),
+            "open_frac": float("nan"),
+            "frac_gt_0p1": float("nan"),
+            "frac_gt_0p5": float("nan"),
+            "frac_gt_0p9": float("nan"),
+        }
     return {
         "mean": float(values.mean().item()),
         "max": float(values.max().item()),
         "open_frac": float((values > 0.5).float().mean().item()),
+        "frac_gt_0p1": float((values > 0.1).float().mean().item()),
+        "frac_gt_0p5": float((values > 0.5).float().mean().item()),
+        "frac_gt_0p9": float((values > 0.9).float().mean().item()),
     }
 
 
@@ -221,6 +231,19 @@ def main() -> int:
                     "use a checkpoint from the current reader implementation"
                 )
             stats = _gate_stats(gate)
+            contrib = getattr(model, "_last_reader_contribution", None)
+            hidden_t = getattr(model, "_last_reader_hidden", None)
+            contrib_norm = float("nan")
+            hidden_norm = float("nan")
+            contrib_ratio = float("nan")
+            contrib_abs = float("nan")
+            if contrib is not None and hidden_t is not None:
+                c = contrib.detach().float()
+                h = hidden_t.detach().float()
+                contrib_norm = float(c.norm(dim=-1).mean().item())
+                hidden_norm = float(h.norm(dim=-1).mean().item())
+                contrib_ratio = contrib_norm / max(hidden_norm, 1e-8)
+                contrib_abs = float(c.abs().mean().item())
             # Split the prompt into "body" and "tail" to see whether the gate
             # opens on the passage or only near the question/answer marker.
             g = gate.detach().float()
@@ -240,10 +263,17 @@ def main() -> int:
                     "gate_mean": stats["mean"],
                     "gate_max": stats["max"],
                     "gate_open_frac": stats["open_frac"],
+                    "gate_frac_gt_0p1": stats["frac_gt_0p1"],
+                    "gate_frac_gt_0p5": stats["frac_gt_0p5"],
+                    "gate_frac_gt_0p9": stats["frac_gt_0p9"],
                     "gate_mean_tail32": float(g[-tail:].mean().item()),
                     "gate_mean_body": float(g[:-tail].mean().item())
                     if g.shape[0] > tail
                     else float(g.mean().item()),
+                    "contrib_norm": contrib_norm,
+                    "hidden_norm": hidden_norm,
+                    "contrib_ratio": contrib_ratio,
+                    "contrib_abs_mean": contrib_abs,
                 }
             )
             if (idx + 1) % 10 == 0:
@@ -269,6 +299,21 @@ def main() -> int:
             "gate_mean_body": float(
                 np.mean([r["gate_mean_body"] for r in task_rows])
             ),
+            "gate_frac_gt_0p1": float(
+                np.mean([r["gate_frac_gt_0p1"] for r in task_rows])
+            ),
+            "gate_frac_gt_0p5": float(
+                np.mean([r["gate_frac_gt_0p5"] for r in task_rows])
+            ),
+            "gate_frac_gt_0p9": float(
+                np.mean([r["gate_frac_gt_0p9"] for r in task_rows])
+            ),
+            "contrib_norm": float(np.mean([r["contrib_norm"] for r in task_rows])),
+            "hidden_norm": float(np.mean([r["hidden_norm"] for r in task_rows])),
+            "contrib_ratio": float(np.mean([r["contrib_ratio"] for r in task_rows])),
+            "contrib_abs_mean": float(
+                np.mean([r["contrib_abs_mean"] for r in task_rows])
+            ),
         }
     report = {
         "model": args.model,
@@ -292,19 +337,23 @@ def main() -> int:
             f"- layer: {args.layer}",
             f"- QA: `{args.qa_file}` ({len(rows)} items)",
             "",
-            "| Task | n | gate mean | gate max | open frac | tail-32 mean | body mean |",
-            "|---|---:|---:|---:|---:|---:|---:|",
+            "| Task | n | gate mean | gate max | frac>0.1 | frac>0.5 | frac>0.9 | tail-32 | body | contrib ratio | contrib abs |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
         for task, entry in aggregate.items():
             lines.append(
                 f"| {task} | {entry['n']} | {entry['gate_mean']:.4f} | "
-                f"{entry['gate_max']:.4f} | {entry['gate_open_frac']:.4f} | "
-                f"{entry['gate_mean_tail32']:.4f} | {entry['gate_mean_body']:.4f} |"
+                f"{entry['gate_max']:.4f} | {entry['gate_frac_gt_0p1']:.4f} | "
+                f"{entry['gate_frac_gt_0p5']:.4f} | {entry['gate_frac_gt_0p9']:.4f} | "
+                f"{entry['gate_mean_tail32']:.4f} | {entry['gate_mean_body']:.4f} | "
+                f"{entry['contrib_ratio']:.4f} | {entry['contrib_abs_mean']:.4f} |"
             )
         lines += [
             "",
-            "> A gate that opens on BoolQ passages but not on TriviaQA questions",
-            "> would directly explain the task-dependent regression.",
+            "> `contrib ratio` is the mean per-token reader contribution norm divided",
+            "> by the mean hidden-state norm.  A low gate mean can still break a task",
+            "> if a few high-gate tokens or a large value/output scale produce a large",
+            "> relative contribution.",
             "",
         ]
         md_path = Path(args.markdown)

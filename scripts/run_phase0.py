@@ -256,6 +256,7 @@ def _train_reader(
     qa_sft_control: bool = False,
     qa_sft_log_every: int = 0,
     gate_reg_weight: float = 0.0,
+    qa_sft_warmup_steps: int = 0,
 ) -> tuple[list[float], list[dict]]:
     """Train the reader on corpus next-token loss and/or QA answer-only loss.
 
@@ -272,8 +273,13 @@ def _train_reader(
     losses = []
     val_curve: list[dict] = []
     for step in range(steps):
-        use_qa = bool(qa_sft_items) and qa_sft_weight > 0.0 and (
-            qa_sft_weight >= 1.0 or qa_rng.random() < qa_sft_weight
+        use_qa = (
+            step >= int(qa_sft_warmup_steps)
+            and bool(qa_sft_items)
+            and qa_sft_weight > 0.0
+            and (
+                qa_sft_weight >= 1.0 or qa_rng.random() < qa_sft_weight
+            )
         )
         if use_qa:
             item = qa_rng.choice(qa_sft_items or [])
@@ -594,33 +600,51 @@ def _build_qa_sft_cache(
     boolq_prompt_template: str | None,
     max_len: int,
     eos_id: int | None,
+    lazy: bool = False,
+    chat_template: bool = False,
+    chat_enable_thinking: bool = False,
+    chat_eos_id: int | None = None,
 ) -> list[dict]:
-    """Tokenize QA SFT items and fetch their PLE rows once.
+    """Tokenize QA SFT items and (optionally) fetch their PLE rows.
 
-    The returned items contain ``ids`` (prompt + answer + EOS), ``e_t`` aligned
-    with those ids, and ``prompt_len`` so the training loop can mask prompt
-    tokens and train only on the answer + EOS.
+    The returned items contain ``ids`` (prompt + answer + EOS), ``prompt_len``
+    so the training loop can mask prompt tokens, and ``e_t`` unless
+    ``lazy=True``.  In lazy mode the caller wraps the result in
+    :class:`_LazyQASFTCache`, which fetches PLE rows on demand and keeps only a
+    small LRU cache in memory.  This is required for the 6000-item standard
+    SFT split, whose full e_t materialization would be tens of GB.
     """
     cache: list[dict] = []
     skipped = 0
     for item in items:
-        prompt_text = format_qa_prompt(
-            item["question"],
-            task=item.get("task"),
-            template=prompt_template,
-            boolq_template=boolq_prompt_template,
-        )
-        prompt_ids = list(
-            tokenizer.encode(prompt_text, add_special_tokens=False)
-        )
+        if chat_template:
+            prompt_ids = _qa_prompt_ids(
+                tokenizer,
+                item,
+                None,
+                None,
+                chat_template=True,
+                chat_enable_thinking=chat_enable_thinking,
+            )
+        else:
+            prompt_text = format_qa_prompt(
+                item["question"],
+                task=item.get("task"),
+                template=prompt_template,
+                boolq_template=boolq_prompt_template,
+            )
+            prompt_ids = list(
+                tokenizer.encode(prompt_text, add_special_tokens=False)
+            )
         answer_ids = list(
             tokenizer.encode(str(item["answer"]), add_special_tokens=False)
         )
         if not answer_ids:
             skipped += 1
             continue
-        if eos_id is not None:
-            answer_ids = answer_ids + [int(eos_id)]
+        answer_eos = chat_eos_id if chat_template else eos_id
+        if answer_eos is not None:
+            answer_ids = answer_ids + [int(answer_eos)]
         # Keep the tail of the prompt (question + instructions) when the
         # passage is too long.  Dropping the beginning of a long BoolQ passage
         # is preferable to dropping the question/answer pair entirely.
@@ -631,24 +655,53 @@ def _build_qa_sft_cache(
         if len(prompt_ids) > budget:
             prompt_ids = prompt_ids[-budget:]
         ids = prompt_ids + answer_ids
-        e_t = qa_store.fetch(ids)
-        if e_t.shape[0] != len(ids):
-            skipped += 1
-            continue
-        cache.append(
-            {
-                "task": item.get("task", "qa"),
-                "question": item["question"],
-                "answer": item["answer"],
-                "ids": np.asarray(ids, dtype=np.int64),
-                "e_t": np.asarray(e_t, dtype=np.float32),
-                "prompt_len": len(prompt_ids),
-                "answer_len": len(answer_ids),
-            }
-        )
+        entry: dict = {
+            "task": item.get("task", "qa"),
+            "question": item["question"],
+            "answer": item["answer"],
+            "ids": np.asarray(ids, dtype=np.int64),
+            "prompt_len": len(prompt_ids),
+            "answer_len": len(answer_ids),
+        }
+        if not lazy:
+            e_t = qa_store.fetch(ids)
+            if e_t.shape[0] != len(ids):
+                skipped += 1
+                continue
+            entry["e_t"] = np.asarray(e_t, dtype=np.float32)
+        cache.append(entry)
     if skipped:
         print(f"[phase0] QA SFT cache skipped {skipped}/{len(items)} items")
     return cache
+
+
+class _LazyQASFTCache:
+    """Sequence of QA SFT items whose PLE rows are fetched on demand.
+
+    ``random.Random.choice`` only needs ``__len__`` / ``__getitem__``.  The
+    small LRU cache bounds memory while still avoiding repeated Store calls for
+    the most recently sampled items.
+    """
+
+    def __init__(self, items: list[dict], qa_store: _QAEtStore, max_cached: int = 128):
+        self.items = items
+        self.qa_store = qa_store
+        self.max_cached = max(1, int(max_cached))
+        self._cache: dict[int, dict] = {}
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __getitem__(self, idx: int) -> dict:
+        cached = self._cache.get(idx)
+        if cached is not None:
+            return cached
+        item = dict(self.items[idx])
+        item["e_t"] = self.qa_store.fetch(item["ids"])
+        if len(self._cache) >= self.max_cached:
+            self._cache.pop(next(iter(self._cache)))
+        self._cache[idx] = item
+        return item
 
 
 
@@ -729,6 +782,48 @@ def _normalize_answer(text: str) -> str:
     return _expand_number_words(" ".join(words))
 
 
+def _qa_prompt_ids(
+    tokenizer,
+    item: dict,
+    prompt_template: str | None,
+    boolq_prompt_template: str | None,
+    chat_template: bool = False,
+    chat_enable_thinking: bool = False,
+) -> list[int]:
+    """Return prompt token IDs for one QA item.
+
+    ``chat_template=False`` keeps the Phase 0/2 completion-style prompt.  When
+    true, use the tokenizer's native chat template (optionally with thinking),
+    which is the model's in-distribution instruction format.
+    """
+    if chat_template:
+        messages = [{"role": "user", "content": str(item["question"])}]
+        encoded = tokenizer.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            enable_thinking=bool(chat_enable_thinking),
+        )
+        # Transformers versions differ: some return a list, others a
+        # BatchEncoding/dict with an ``input_ids`` field.
+        if isinstance(encoded, dict):
+            encoded = encoded["input_ids"]
+        elif hasattr(encoded, "input_ids"):
+            encoded = encoded.input_ids
+        return [int(x) for x in encoded]
+    return list(
+        tokenizer.encode(
+            format_qa_prompt(
+                item["question"],
+                task=item.get("task"),
+                template=prompt_template,
+                boolq_template=boolq_prompt_template,
+            ),
+            add_special_tokens=False,
+        )
+    )
+
+
 def _qa_exact_match(
     model,
     tokenizer,
@@ -741,6 +836,8 @@ def _qa_exact_match(
     max_batch_tokens: int = 0,
     prompt_template: str | None = None,
     boolq_prompt_template: str | None = None,
+    chat_template: bool = False,
+    chat_enable_thinking: bool = False,
 ) -> dict:
     """Greedy exact-match QA generation with live PLE injection.
 
@@ -758,20 +855,24 @@ def _qa_exact_match(
     pad_id = tokenizer.pad_token_id
     if pad_id is None:
         pad_id = eos_id if eos_id is not None else 0
+    stop_ids: set[int] = set()
+    if eos_id is not None:
+        stop_ids.add(int(eos_id))
+    if chat_template:
+        im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+        if isinstance(im_end_id, int) and im_end_id >= 0:
+            stop_ids.add(int(im_end_id))
     batch_size = max(1, int(batch_size))
     max_batch_tokens = max(0, int(max_batch_tokens))
 
     prompt_ids = {
-        idx: list(
-            tokenizer.encode(
-                format_qa_prompt(
-                    item["question"],
-                    task=item.get("task"),
-                    template=prompt_template,
-                    boolq_template=boolq_prompt_template,
-                ),
-                add_special_tokens=False,
-            )
+        idx: _qa_prompt_ids(
+            tokenizer,
+            item,
+            prompt_template,
+            boolq_prompt_template,
+            chat_template=chat_template,
+            chat_enable_thinking=chat_enable_thinking,
         )
         for idx, item in enumerate(items)
     }
@@ -859,7 +960,7 @@ def _qa_exact_match(
                 for row, state in enumerate(active):
                     logits = out.logits[row, len(state["ids"]) - 1]
                     next_id = int(torch.argmax(logits).item())
-                    if eos_id is not None and next_id == eos_id:
+                    if next_id in stop_ids:
                         state["finished"] = True
                     else:
                         state["generated"].append(next_id)
@@ -971,6 +1072,10 @@ def _run_mode(
                 prompt_template=getattr(args, "qa_prompt_template", None),
                 boolq_prompt_template=getattr(
                     args, "qa_boolq_prompt_template", None
+                ),
+                chat_template=bool(getattr(args, "qa_chat_template", False)),
+                chat_enable_thinking=bool(
+                    getattr(args, "qa_chat_enable_thinking", False)
                 ),
             )
         return {
@@ -1104,6 +1209,9 @@ def _run_mode(
             qa_sft_control=(mode == "control"),
             qa_sft_log_every=int(getattr(args, "qa_sft_log_every", 0) or 0),
             gate_reg_weight=float(getattr(args, "gate_reg_weight", 0.0) or 0.0),
+            qa_sft_warmup_steps=int(
+                getattr(args, "qa_sft_warmup_steps", 0) or 0
+            ),
         )
 
     val_loss = _window_loss(model, val_tokens, val_eval_e_t, args.seq_len)
@@ -1132,6 +1240,10 @@ def _run_mode(
             max_batch_tokens=getattr(args, "qa_batch_max_tokens", 0),
             prompt_template=getattr(args, "qa_prompt_template", None),
             boolq_prompt_template=getattr(args, "qa_boolq_prompt_template", None),
+            chat_template=bool(getattr(args, "qa_chat_template", False)),
+            chat_enable_thinking=bool(
+                getattr(args, "qa_chat_enable_thinking", False)
+            ),
         )
 
     if getattr(args, "save_reader", None) and not getattr(args, "load_reader", None):
@@ -1338,6 +1450,22 @@ def main() -> int:
         help="optional BoolQ-specific override for --qa-prompt-template",
     )
     parser.add_argument(
+        "--qa-chat-template",
+        action="store_true",
+        help=(
+            "use the tokenizer's native chat template instead of the "
+            "completion-style Question/Answer prompt"
+        ),
+    )
+    parser.add_argument(
+        "--qa-chat-enable-thinking",
+        action="store_true",
+        help=(
+            "when --qa-chat-template is set, enable the model's thinking mode "
+            "(requires a much larger --qa-max-new-tokens)"
+        ),
+    )
+    parser.add_argument(
         "--qa-file",
         default=None,
         help="optional JSON list of {question, answer, task} for exact-match QA",
@@ -1403,6 +1531,42 @@ def main() -> int:
             "force every reader gate to this constant value for causal "
             "ablation (e.g. 0.0 = closed, 1.0 = fully open)"
         ),
+    )
+    parser.add_argument(
+        "--qa-sft-warmup-steps",
+        type=int,
+        default=0,
+        help=(
+            "run corpus-only training for the first N steps before enabling "
+            "the QA SFT mix (two-stage curriculum)"
+        ),
+    )
+    parser.add_argument(
+        "--qa-sft-lazy",
+        action="store_true",
+        help=(
+            "fetch PLE rows for QA SFT items on demand instead of "
+            "materializing the full e_t cache"
+        ),
+    )
+    parser.add_argument(
+        "--qa-sft-lazy-cache",
+        type=int,
+        default=128,
+        help="number of QA SFT items to keep in the lazy e_t cache",
+    )
+    parser.add_argument(
+        "--qa-sft-chat-template",
+        action="store_true",
+        help=(
+            "format QA SFT prompts with the tokenizer's native chat template "
+            "and use <|im_end|> as the answer EOS"
+        ),
+    )
+    parser.add_argument(
+        "--qa-sft-chat-enable-thinking",
+        action="store_true",
+        help="enable thinking when formatting QA SFT chat prompts",
     )
     parser.add_argument(
         "--resume",
@@ -1599,7 +1763,10 @@ def main() -> int:
         qa_sft_raw = _load_qa_sft_file(args.qa_sft_file)
         if qa_store is None:
             qa_store = _QAEtStore(args.rows_dir, applied_scale)
-        qa_sft_items = _build_qa_sft_cache(
+        chat_eos_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+        if not isinstance(chat_eos_id, int) or chat_eos_id < 0:
+            chat_eos_id = tokenizer.eos_token_id
+        qa_sft_entries = _build_qa_sft_cache(
             qa_sft_raw,
             tokenizer,
             qa_store,
@@ -1612,20 +1779,35 @@ def main() -> int:
             ),
             max_len=int(args.qa_sft_max_len),
             eos_id=tokenizer.eos_token_id,
+            lazy=bool(getattr(args, "qa_sft_lazy", False)),
+            chat_template=bool(getattr(args, "qa_sft_chat_template", False)),
+            chat_enable_thinking=bool(
+                getattr(args, "qa_sft_chat_enable_thinking", False)
+            ),
+            chat_eos_id=chat_eos_id,
         )
         task_counts: dict[str, int] = {}
-        for item in qa_sft_items:
+        for item in qa_sft_entries:
             task = str(item.get("task", "qa"))
             task_counts[task] = task_counts.get(task, 0) + 1
         mean_len = (
-            sum(len(item["ids"]) for item in qa_sft_items) / len(qa_sft_items)
-            if qa_sft_items
+            sum(len(item["ids"]) for item in qa_sft_entries)
+            / len(qa_sft_entries)
+            if qa_sft_entries
             else 0.0
         )
+        if getattr(args, "qa_sft_lazy", False):
+            qa_sft_items = _LazyQASFTCache(
+                qa_sft_entries,
+                qa_store,
+                max_cached=int(getattr(args, "qa_sft_lazy_cache", 128) or 128),
+            )
+        else:
+            qa_sft_items = qa_sft_entries
         print(
-            f"[phase0] QA SFT cache: {len(qa_sft_items)} items, "
+            f"[phase0] QA SFT cache: {len(qa_sft_entries)} items, "
             f"mean_len={mean_len:.1f}, tasks={task_counts}, "
-            f"weight={args.qa_sft_weight}"
+            f"weight={args.qa_sft_weight}, lazy={bool(getattr(args, 'qa_sft_lazy', False))}"
         )
     if needs_qa_store and qa_store is None:
         qa_store = _QAEtStore(args.rows_dir, applied_scale)

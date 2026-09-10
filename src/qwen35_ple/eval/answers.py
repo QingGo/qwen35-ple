@@ -232,8 +232,11 @@ _V2_YES_NO_ASSERTIONS = (
 def _strip_generation_roles(text: str) -> str:
     text = text.strip()
     text = re.sub(r"</?think>\s*", " ", text, flags=re.IGNORECASE)
+    # Chat-template control tokens may leak into generated text when the
+    # stop-token set is incomplete; strip them before answer extraction.
+    text = re.sub(r"<\|(?:im_start|im_end|endoftext)\|>", " ", text)
     text = re.sub(
-        r"^(?:assistant|user|system)\s*",
+        r"^\s*(?:assistant|user|system)\s*",
         "",
         text,
         flags=re.IGNORECASE,

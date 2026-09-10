@@ -62,6 +62,60 @@ def test_load_qa_sft_file_supports_json_and_jsonl(tmp_path: Path):
     assert harness["_load_qa_sft_file"](as_json)[0]["answer"] == "a2"
 
 
+class _ChatFakeTokenizer(_FakeTokenizer):
+    def __init__(self):
+        self.calls = []
+
+    def apply_chat_template(
+        self,
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        enable_thinking=False,
+    ):
+        self.calls.append(
+            {
+                "messages": messages,
+                "tokenize": tokenize,
+                "add_generation_prompt": add_generation_prompt,
+                "enable_thinking": enable_thinking,
+            }
+        )
+        return [7, 8, 9]
+
+
+def test_qa_prompt_ids_uses_chat_template_when_requested():
+    harness = _load_harness()
+    tokenizer = _ChatFakeTokenizer()
+    ids = harness["_qa_prompt_ids"](
+        tokenizer,
+        {"task": "triviaqa", "question": "capital?", "answer": "Paris"},
+        prompt_template="Question: {question}\nAnswer:",
+        boolq_prompt_template=None,
+        chat_template=True,
+        chat_enable_thinking=True,
+    )
+    assert ids == [7, 8, 9]
+    assert tokenizer.calls[0]["enable_thinking"] is True
+    assert tokenizer.calls[0]["add_generation_prompt"] is True
+    assert tokenizer.calls[0]["messages"][0]["role"] == "user"
+
+
+def test_qa_prompt_ids_keeps_completion_prompt_by_default():
+    harness = _load_harness()
+    tokenizer = _ChatFakeTokenizer()
+    ids = harness["_qa_prompt_ids"](
+        tokenizer,
+        {"task": "triviaqa", "question": "capital?", "answer": "Paris"},
+        prompt_template="Question: {question}\nAnswer:",
+        boolq_prompt_template=None,
+        chat_template=False,
+    )
+    expected = tokenizer.encode("Question: capital?\nAnswer:")
+    assert ids == expected
+    assert tokenizer.calls == []
+
+
 def test_build_qa_sft_cache_masks_prompt():
     harness = _load_harness()
     tokenizer = _FakeTokenizer()
@@ -86,6 +140,39 @@ def test_build_qa_sft_cache_masks_prompt():
     assert len(entry["ids"]) == len(prompt_ids) + len(answer_ids)
     assert entry["e_t"].shape == (len(entry["ids"]), 2560)
     assert entry["ids"][-1] == tokenizer.eos_token_id
+
+
+def test_build_qa_sft_cache_lazy_fetches_on_demand():
+    harness = _load_harness()
+    tokenizer = _FakeTokenizer()
+
+    class _CountingStore:
+        def __init__(self):
+            self.calls = 0
+
+        def fetch(self, ids):
+            self.calls += 1
+            return np.zeros((len(ids), 2560), dtype=np.float32)
+
+    store = _CountingStore()
+    entries = harness["_build_qa_sft_cache"](
+        [{"task": "triviaqa", "question": "capital?", "answer": "Paris"}],
+        tokenizer,
+        store,
+        prompt_template="Question: {question}\nAnswer:",
+        boolq_prompt_template="Question: {question}\nAnswer:",
+        max_len=256,
+        eos_id=tokenizer.eos_token_id,
+        lazy=True,
+    )
+    assert store.calls == 0
+    assert "e_t" not in entries[0]
+    cache = harness["_LazyQASFTCache"](entries, store, max_cached=1)
+    item = cache[0]
+    assert store.calls == 1
+    assert item["e_t"].shape == (len(item["ids"]), 2560)
+    _ = cache[0]
+    assert store.calls == 1
 
 
 def test_build_qa_sft_cache_left_truncates_long_prompt():

@@ -44,6 +44,8 @@ QA_BATCH_SIZE="${QA_BATCH_SIZE:-16}"
 QA_BATCH_MAX_TOKENS="${QA_BATCH_MAX_TOKENS:-2048}"
 QA_PROMPT_TEMPLATE="${QA_PROMPT_TEMPLATE:-}"
 QA_BOOLQ_PROMPT_TEMPLATE="${QA_BOOLQ_PROMPT_TEMPLATE:-}"
+QA_CHAT_TEMPLATE="${QA_CHAT_TEMPLATE:-0}"
+QA_CHAT_ENABLE_THINKING="${QA_CHAT_ENABLE_THINKING:-0}"
 QA_SFT_FILE="${QA_SFT_FILE:-}"
 QA_SFT_WEIGHT="${QA_SFT_WEIGHT:-0}"
 QA_SFT_MAX_LEN="${QA_SFT_MAX_LEN:-512}"
@@ -51,6 +53,11 @@ QA_SFT_FULL_LOSS="${QA_SFT_FULL_LOSS:-0}"
 QA_SFT_LOG_EVERY="${QA_SFT_LOG_EVERY:-0}"
 GATE_REG_WEIGHT="${GATE_REG_WEIGHT:-0}"
 GATE_OVERRIDE="${GATE_OVERRIDE:-}"
+QA_SFT_WARMUP_STEPS="${QA_SFT_WARMUP_STEPS:-0}"
+QA_SFT_LAZY="${QA_SFT_LAZY:-0}"
+QA_SFT_LAZY_CACHE="${QA_SFT_LAZY_CACHE:-128}"
+QA_SFT_CHAT_TEMPLATE="${QA_SFT_CHAT_TEMPLATE:-0}"
+QA_SFT_CHAT_ENABLE_THINKING="${QA_SFT_CHAT_ENABLE_THINKING:-0}"
 MODES="${MODES:-real control no-reader}"
 BRIDGE_MLP="${BRIDGE_MLP:-1}"
 OUT_MLP="${OUT_MLP:-1}"
@@ -93,6 +100,8 @@ while [[ $# -gt 0 ]]; do
     --qa-batch-max-tokens) QA_BATCH_MAX_TOKENS="$2"; shift 2 ;;
     --qa-prompt-template) QA_PROMPT_TEMPLATE="$2"; shift 2 ;;
     --qa-boolq-prompt-template) QA_BOOLQ_PROMPT_TEMPLATE="$2"; shift 2 ;;
+    --qa-chat-template) QA_CHAT_TEMPLATE=1; shift ;;
+    --qa-chat-enable-thinking) QA_CHAT_ENABLE_THINKING=1; shift ;;
     --qa-sft-file) QA_SFT_FILE="$2"; shift 2 ;;
     --qa-sft-weight) QA_SFT_WEIGHT="$2"; shift 2 ;;
     --qa-sft-max-len) QA_SFT_MAX_LEN="$2"; shift 2 ;;
@@ -100,6 +109,11 @@ while [[ $# -gt 0 ]]; do
     --qa-sft-log-every) QA_SFT_LOG_EVERY="$2"; shift 2 ;;
     --gate-reg-weight) GATE_REG_WEIGHT="$2"; shift 2 ;;
     --gate-override) GATE_OVERRIDE="$2"; shift 2 ;;
+    --qa-sft-warmup-steps) QA_SFT_WARMUP_STEPS="$2"; shift 2 ;;
+    --qa-sft-lazy) QA_SFT_LAZY=1; shift ;;
+    --qa-sft-lazy-cache) QA_SFT_LAZY_CACHE="$2"; shift 2 ;;
+    --qa-sft-chat-template) QA_SFT_CHAT_TEMPLATE=1; shift ;;
+    --qa-sft-chat-enable-thinking) QA_SFT_CHAT_ENABLE_THINKING=1; shift ;;
     --official-reader-path) OFFICIAL_READER_PATH="$2"; shift 2 ;;
     --skip-qa) SKIP_QA=1; shift ;;
     --save-reader) SAVE_READER=1; shift ;;
@@ -153,6 +167,12 @@ fi
 if [[ -n "$QA_BOOLQ_PROMPT_TEMPLATE" ]]; then
   QA_PROMPT_ARGS+=(--qa-boolq-prompt-template "$QA_BOOLQ_PROMPT_TEMPLATE")
 fi
+if [[ "$QA_CHAT_TEMPLATE" == "1" ]]; then
+  QA_PROMPT_ARGS+=(--qa-chat-template)
+fi
+if [[ "$QA_CHAT_ENABLE_THINKING" == "1" ]]; then
+  QA_PROMPT_ARGS+=(--qa-chat-enable-thinking)
+fi
 
 QA_SFT_ARGS=()
 if [[ -n "$QA_SFT_FILE" ]]; then
@@ -169,6 +189,18 @@ if [[ "$GATE_REG_WEIGHT" != "0" ]]; then
 fi
 if [[ -n "$GATE_OVERRIDE" ]]; then
   QA_SFT_ARGS+=(--gate-override "$GATE_OVERRIDE")
+fi
+if [[ "$QA_SFT_WARMUP_STEPS" != "0" ]]; then
+  QA_SFT_ARGS+=(--qa-sft-warmup-steps "$QA_SFT_WARMUP_STEPS")
+fi
+if [[ "$QA_SFT_LAZY" == "1" ]]; then
+  QA_SFT_ARGS+=(--qa-sft-lazy --qa-sft-lazy-cache "$QA_SFT_LAZY_CACHE")
+fi
+if [[ "$QA_SFT_CHAT_TEMPLATE" == "1" ]]; then
+  QA_SFT_ARGS+=(--qa-sft-chat-template)
+fi
+if [[ "$QA_SFT_CHAT_ENABLE_THINKING" == "1" ]]; then
+  QA_SFT_ARGS+=(--qa-sft-chat-enable-thinking)
 fi
 
 for C in $CORPORA; do

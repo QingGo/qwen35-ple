@@ -2943,3 +2943,53 @@ lazy-window gate        ✅
 - 下一步：Phase A 判决性诊断（oracle gate / zero-reader / frozen official reader / gate stats / PLE-native upper bound）；通过后再做 mixed SFT + 两阶段 curriculum。
 - 新增：`docs/round-142-session-retrospective.md`。
 
+## Session 143–145：oracle upper bound、answer-only SFT、标准 held-out 与 chat template
+
+- 新增 oracle routing upper bound 分析：
+  - layer2 oracle(real/no)=0.575 vs no-reader=0.447；always-real=0.422；
+  - BoolQ unique-correct real-only 14 vs no-reader-only 141；
+  - TriviaQA real-only 142 vs no-reader-only 42；
+  - 结论：oracle 收益主要是“BoolQ 关 PLE + TriviaQA 开 PLE”。
+- gate ablation：
+  - layer2 corpus-only reader 在 BoolQ 上 gate mean 仅 0.037，但仍然有害；
+  - gate=0 恢复 no-reader；gate=0.5/1.0 两任务都崩；
+  - SFT mixed50 reader 在 gate=0.5/1.0 时 BoolQ 0.88/0.92、TriviaQA 0.94/0.90；
+  - 结论：问题是 reader 内容，不是 gate 开关。
+- answer-only QA SFT + corpus next-token（mixed50）：
+  - custom 62 held-out：BoolQ 0.848、TriviaQA 0.917、PPL 28.52；
+  - 3 seeds 稳定；control 也有增益但 real > control。
+- 标准 held-out 1500（BoolQ / TriviaQA rc.wikipedia / NQ-open）：
+  - no-reader：BoolQ 0.672、TriviaQA 0.128、NQ 0.062；
+  - old sft-mixed50：BoolQ 0.772、TriviaQA 0.146、NQ 0.050；
+  - 结论：BoolQ format 修复泛化好；TriviaQA 知识增益没有泛化；custom 62 严重高估。
+- 6000 题大规模 SFT（eval-600）：
+  - real BoolQ 0.742 / TriviaQA 0.157 / NQ 0.050；
+  - control BoolQ 0.715 / TriviaQA 0.155 / NQ 0.042；
+  - no-reader BoolQ 0.645 / TriviaQA 0.145 / NQ 0.055；
+  - 结论：数据 scaling 没有带来泛化知识增益。
+- chat template ablation（300 held-out）：
+  - raw-no-reader：BoolQ 0.61、TriviaQA 0.17、NQ 0.06、overall 0.280；
+  - chat-no-reader：BoolQ 0.74、TriviaQA 0.19、NQ 0.07、overall 0.333；
+  - raw-sft-mixed50：BoolQ 0.75、TriviaQA 0.16、NQ 0.05、overall 0.320；
+  - chat-sft-mixed50：BoolQ 0.70、TriviaQA 0.18、NQ 0.07、overall 0.317；
+  - 结论：chat template 显著提高 no-reader；raw-trained reader 优势基本消失。
+- 新工程能力：
+  - `build_qa_standard_split.py`：6000 train / 1500 eval / 600 / 300；
+  - `run_phase0.py`：chat template eval/SFT、EOS 248044 vs 248046、lazy e_t cache、warmup、gate override、contribution 诊断；
+  - `answers.py` 清洗 `<|im_start|>` / `<|im_end|>` / `</think>`；
+  - `run_large_sft_queue.sh` / `run_chat_sft_queue.sh` / `run_chat_template_ablation.sh` / `run_gate_ablation_overnight.sh` / `run_layer2_full_overnight.sh` / `run_sft_matrix_overnight.sh`。
+- 事故与教训：
+  - AutoDL `shutdown -h +100000` wrapper 忽略时间参数、立即关机；实例被用户重启；
+  - /dev/shm rows 用持久盘恢复；large-SFT 队列 resume 后继续；
+  - 以后只用 AutoDL 控制台定时关机，不再使用容器 shutdown 时间参数；
+  - scp/rsync 挂起：改用 ssh 重定向 / tar-over-ssh。
+- 当前未完成：
+  - large mixed50-warmup250、full 1500 eval、oracle/report；
+  - chat-SFT 队列（sft-chat-mixed50 / warmup250 / full chat eval）等待 LARGE_SFT_DONE；
+  - 2×2 factorial 的 chat/raw 交叉条件；
+  - PLE coverage audit、layer sweep、reader capacity、PLE-native upper bound、thinking ablation。
+- 新增文档：
+  - `docs/round-143-oracle-upper-bound-and-overnight-queue.md`
+  - `docs/round-144-strategic-roadmap.md`
+  - `docs/round-145-standard-heldout-chat-template-and-format-matched-experiments.md`
+

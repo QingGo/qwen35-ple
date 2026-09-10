@@ -161,6 +161,9 @@ def install_reader_hook(
             contribution = reader(hidden, current)
             if short_conv is not None:
                 contribution = short_conv(contribution)
+            # Diagnostic hooks for contribution-norm analysis (no behavior change).
+            model._last_reader_hidden = hidden.detach()
+            model._last_reader_contribution = contribution.detach()
             new_hidden = hidden + contribution
             if isinstance(output, tuple):
                 return (new_hidden,) + output[1:]

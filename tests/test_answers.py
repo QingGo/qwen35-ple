@@ -78,3 +78,9 @@ def test_extract_answer_v2_boolq_explicit_yes_no() -> None:
     assert extract_answer_v2("assistant\nYes, they are the same.", task="boolq") == "yes"
     assert extract_answer_v2("The correct answer is **B. No**.", task="boolq") == "no"
     assert extract_answer_v2("Answer: A. Yes.", task="boolq") == "yes"
+
+
+def test_extract_answer_v2_strips_chat_control_tokens() -> None:
+    gen = "<|im_end|>assistant\n<think>\n\n</think>\n\nParis<|im_end|>"
+    assert extract_answer_v2(gen, task="triviaqa") == "Paris"
+    assert score_answer_v2(gen, "Paris", task="triviaqa")["extracted_exact"] is True

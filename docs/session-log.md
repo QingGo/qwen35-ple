@@ -3085,3 +3085,24 @@ lazy-window gate        ✅
     vLLM-SGLang / Engram paper / TN-gram / HF PEFT / RAG 的借鉴与边界；
   - 工程稳定性规则与立即行动项。
 
+## Session 150：Round 148/149 recap、full-FT 崩塌与 handoff
+
+- Round 149 full-FT 2×2（0.8B backbone 全参 + frozen PLE 表）：
+  - fullft-nople：BoolQ 0.608 / TriviaQA 0.002 / NQ 0.002 / mean 0.204；
+    gold NLL BoolQ 0.729 / TriviaQA 8.957 / NQ 7.992；
+  - fullft-real：同样 0.608 / 0.002 / 0.002 / 0.204；
+    gold NLL 0.821 / 8.932 / 7.954；
+  - fullft-control：BoolQ 0.608 / TriviaQA 0.004 / NQ 0.002 / mean 0.2047；
+    gold NLL 0.815 / 9.045 / 8.001，overall 5.9535；
+    real vs control paired NLL +0.0511 ± 0.0129，但 generation 无差异。
+  - 结论：当前 full-FT 配方（500 步、mixed50、LR 1e-4）导致 open QA 灾难性遗忘/
+    格式崩塌，三个 arm 都退化成 BoolQ-only，无法用于判断 PLE interaction。
+    下一步应改用 LoRA 或更温和的 full-FT（低 LR/少步数/replay/partial FT）。
+- 新增 `--finetune-backbone` 支持：unfreeze 全部 backbone 参数、optimizer 同时
+  优化 backbone + reader，训练后清 grad/cache 再 eval；修复了把 raw Parameter
+  放进 `nn.ModuleList` 的 bug。
+- Qwen3.5-4B（8.8G, hidden 2560）与 2B（4.3G, hidden 2048）已用 ModelScope
+  优先下载完成；数据盘 free ~13G。
+- 新增 `docs/round-150-session-recap-and-handoff.md`：本 session 计划/发现/尝试/
+  坑/完成/未完成/未来 gates，供上下文压缩后恢复使用。
+

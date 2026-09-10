@@ -505,5 +505,30 @@ docs/round-148-format-vs-content-nll-and-oracle-routing-probe.md
 docs/round-149-systematic-roadmap-and-tech-debt.md
 docs/round-150-session-recap-and-handoff.md
 docs/round-151-session-consolidation-and-handoff.md（本文）
+docs/round-152-lora-row-and-g0-4b.md（G1 LoRA 行 + G0 4B）
+docs/round-152-g3-engram-edge-storage-benchmark.md（G3 磁盘服务）
 docs/session-log.md
 ```
+
+---
+
+## 12. 后续补充（Round 152 夜间自主运行）
+
+本文写于上下文压缩前；压缩后同一夜间已继续推进，状态如下：
+
+* **G1 LoRA 行**：`peft 0.20.0` 已装入远程 venv；`run_phase0.py` 新增
+  `--lora/--lora-r/--lora-alpha/--lora-dropout/--lora-target-modules`、
+  `--backbone-dtype`、`--ple-off`、`--qa-max-items`；LoRA 只存 adapter
+  （`<save-reader>.lora/adapter.pt`），不写整份 backbone。
+* 修掉三个会让本行实验失效的问题：`mode=no-reader` 不训练（改用 `--ple-off`
+  作为 2×2 的 no-PLE 格）、`--ple-off` 会顺带跳过 QA SFT cache（导致 no-PLE
+  格只在语料上训练）、`_run_mode` 里 `lora_meta` 未定义的 NameError。
+* **G0 4B**：4B checkpoint 本身是 bf16 存储（9.3GB / 4.2B 参数），改用
+  `--backbone-dtype bfloat16`（无损且省一半显存）；fp32 + 并发任务会在 24GB
+  上 OOM，所以 4B 必须独占 GPU。4B 需要自己的 reader（官方 source reader
+  投影到 2560）。
+* **G3**：NVMe 热缓存 ~462K rows/s（≈28.9K tokens/s，2048 token 预填充约
+  71ms），冷缓存 ~70K rows/s，`/dev/shm` 276–673K rows/s，抓取路径 RSS
+  ~400MB → NVMe 行的吞吐与内存预算通过；USB SSD/SD、移动端功耗/寿命仍未测。
+* 顺手修复了自 round 148 起就红的 CI 测试（`test_oracle_routing_probe` 的
+  stratified folds 断言与实现矛盾）；远程全量套件 143 passed / 7 skipped。

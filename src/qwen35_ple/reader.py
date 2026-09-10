@@ -163,9 +163,21 @@ def install_reader_hook(
     reader: torch.nn.Module,
     short_conv: torch.nn.Module | None = None,
 ):
-    """Install a post-forward hook injecting PLE reader output into a model layer."""
+    """Install a post-forward hook injecting PLE reader output into a model layer.
+
+    ``_current_ple_e_t`` must have shape ``[B, T, D]`` matching the hidden
+    states.  Batched evaluation keeps one row per item (zero-padded on the
+    right) rather than packing items, so the reader's causal convolution always
+    stays within a single item, exactly as in training.
+    """
     backbone = _base_backbone(model)
     layer = backbone.model.layers[layer_index]
+
+    def reader_dtype() -> torch.dtype:
+        """dtype of the reader's own parameters (backbone dtype may differ)."""
+        for param in reader.parameters():
+            return param.dtype
+        return torch.float32
 
     def post_hook(module, input, output):
         if isinstance(output, tuple):
@@ -175,20 +187,30 @@ def install_reader_hook(
         current = getattr(model, "_current_ple_e_t", None)
         if getattr(model, "_ple_disabled", False):
             current = None
-        if current is not None and current.shape[1] == hidden.shape[1]:
-            contribution = reader(hidden, current)
-            if short_conv is not None:
-                contribution = short_conv(contribution)
-            if contribution.dtype != hidden.dtype:
-                contribution = contribution.to(hidden.dtype)
-            # Diagnostic hooks for contribution-norm analysis (no behavior change).
-            model._last_reader_hidden = hidden.detach()
-            model._last_reader_contribution = contribution.detach()
-            new_hidden = hidden + contribution
-            if isinstance(output, tuple):
-                return (new_hidden,) + output[1:]
-            return new_hidden
-        return output
+        if current is None or current.dim() != 3 or hidden.dim() != 3:
+            return output
+        if current.shape[0] == hidden.shape[0] and current.shape[1] == hidden.shape[1]:
+            # A bf16/fp16 backbone (used for the 2B/4B grafting path) feeds
+            # bf16 hidden states, while the reader and its frozen official source
+            # projections are fp32: cast the inputs, not just the output, or the
+            # Linear layers raise "mat1 and mat2 must have the same dtype".
+            target = reader_dtype()
+            reader_hidden = hidden if hidden.dtype == target else hidden.to(target)
+            reader_e_t = current if current.dtype == target else current.to(target)
+            contribution = reader(reader_hidden, reader_e_t)
+        else:
+            return output
+        if short_conv is not None:
+            contribution = short_conv(contribution)
+        if contribution.dtype != hidden.dtype:
+            contribution = contribution.to(hidden.dtype)
+        # Diagnostic hooks for contribution-norm analysis (no behavior change).
+        model._last_reader_hidden = hidden.detach()
+        model._last_reader_contribution = contribution.detach()
+        new_hidden = hidden + contribution
+        if isinstance(output, tuple):
+            return (new_hidden,) + output[1:]
+        return new_hidden
 
     handle = layer.register_forward_hook(post_hook)
     return handle

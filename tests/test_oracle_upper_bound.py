@@ -45,6 +45,28 @@ def test_iter_mode_rows_reads_summary_details():
     assert rows[("real", 0)][0]["answer"] == "Paris"
 
 
+def test_iter_mode_rows_aliases_full_to_no_reader():
+    module = _load_module()
+    data = {
+        "results": [
+            {
+                "mode": "full",
+                "seed": 0,
+                "qa_exact": {"answers": [_row("boolq", "yes", "yes")]},
+            }
+        ]
+    }
+    rows = module._iter_mode_rows(data)
+    assert ("no-reader", 0) in rows
+    assert ("full", 0) not in rows
+
+
+def test_unique_counts_empty_when_modes_missing():
+    module = _load_module()
+    rows_by_mode = {"real": [_row("boolq", "yes", "yes")]}
+    assert module._unique_counts(rows_by_mode, [0], "v2", "auto") == {}
+
+
 def test_summarize_oracle_upper_bounds():
     module = _load_module()
     rows_by_mode = {

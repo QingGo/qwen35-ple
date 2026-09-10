@@ -66,6 +66,22 @@ def _load_answer_helpers():
 score_answer, score_answer_v2 = _load_answer_helpers()
 
 MODES = ("real", "control", "no-reader")
+
+# Phase 0 writes a no-reader run as ``phase1-full.json`` (mode ``full``),
+# while the oracle analysis historically keyed on ``no-reader``.  Normalize
+# the aliases here so the standard held-out full eval can be analyzed without
+# renaming artifacts.
+MODE_ALIASES = {
+    "full": "no-reader",
+    "none": "no-reader",
+    "no_reader": "no-reader",
+    "baseline": "no-reader",
+}
+
+
+def _normalize_mode(mode: Any) -> str:
+    raw = str(mode)
+    return MODE_ALIASES.get(raw, raw)
 TASKS = ("boolq", "triviaqa", "nq")
 
 
@@ -118,7 +134,7 @@ def _iter_mode_rows(data: dict) -> dict[tuple[str, int], list[dict]]:
                 if not isinstance(answers, list):
                     continue
                 seed = int(detail.get("seed", 0))
-                out[(str(mode), seed)] = answers
+                out[(_normalize_mode(mode), seed)] = answers
         if out:
             return out
 
@@ -133,9 +149,12 @@ def _iter_mode_rows(data: dict) -> dict[tuple[str, int], list[dict]]:
             answers = qa.get("answers")
             if not isinstance(answers, list):
                 continue
-            out[(str(detail.get("mode", "unknown")), int(detail.get("seed", 0)))] = (
-                answers
-            )
+            out[
+                (
+                    _normalize_mode(detail.get("mode", "unknown")),
+                    int(detail.get("seed", 0)),
+                )
+            ] = answers
     return out
 
 
@@ -209,6 +228,8 @@ def _unique_counts(
     metric: str,
 ) -> dict[str, int]:
     """Count where real/no-reader are uniquely correct or both wrong."""
+    if "real" not in rows_by_mode or "no-reader" not in rows_by_mode:
+        return {}
     counts = {
         "both_real_no": 0,
         "real_only": 0,

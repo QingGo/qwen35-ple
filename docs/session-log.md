@@ -2993,3 +2993,42 @@ lazy-window gate        ✅
   - `docs/round-144-strategic-roadmap.md`
   - `docs/round-145-standard-heldout-chat-template-and-format-matched-experiments.md`
 
+## Session 146：标准 held-out 终局结果、cross-file oracle、队列收尾
+
+- 两条队列完成：`LARGE_SFT_DONE` 2026-09-10 08:54、`CHAT_SFT_DONE` 10:18；GPU 空闲。
+- 标准 held-out 1500 v2 结果（3 seeds，6000 题 SFT reader）：
+  - raw：no-reader 0.2873；real mean 0.3084 ± 0.0154（BoolQ +0.0667、TriviaQA +0.0180、NQ −0.0213）；
+  - chat：no-reader 0.3233；real mean 0.3089 ± 0.0102（BoolQ +0.0167、TriviaQA −0.0320、NQ −0.0280）；
+  - 300 子集与 ablation 一致；chat-trained reader 仍不优于 chat no-reader。
+- cross-file oracle（把 `phase1-full.json` 当作 no-reader、每个 real seed 复制一份）：
+  - raw oracle(real/no)=0.3689，BoolQ real-only 245 vs no-reader-only 145，TriviaQA 100 vs 73；
+  - chat oracle(real/no)=0.3822，BoolQ real-only 198 vs no-reader-only 173，TriviaQA 49 vs 97，NQ 18 vs 60；
+  - 结论：reader 并非无内容，标准 1500 存在约 +0.06 的 routing headroom；
+    但 chat 下 open QA 的 no-reader-only 更多，需要在 gate 层面做选择性，而非更强的 always-on reader。
+- 修复/新增：
+  - `analyze_oracle_upper_bound.py`：`full`→`no-reader` 别名、缺失 mode 保护；
+  - `scripts/summarize_standard_heldout.py`：标准 1500 raw/chat + 2×2 汇总，支持 300 子集；
+  - 生成 `outputs/standard-heldout-summary(.md/-300.md)`、`oracle-analysis/qa-standard-{raw,chat}-matrix.*`；
+  - 重新生成 `outputs/OVERNIGHT_REPORT.md`。
+- 决策：下一步优先 gate selectivity、dual-layer injection、head/order ablation、hot-row adaptation 上界；
+  不再继续扩大 SFT 数据。
+- 新增文档：`docs/round-146-standard-heldout-final-and-cross-file-oracle.md`。
+
+## Session 147：DeepSeek-V4.1-Flash / Qwen3.8-Next / Engram 原论文对比
+
+- DeepSeek-V4.1-Flash 于 2026-09-10 开源（HF `createdAt=2026-09-10T02:17:58Z`）：
+  552B backbone + 196B Engram，8B active prefill / 16B decode；
+  Engram 在 layers 1/14，orders {2,3,4}，8 heads/order，head_dim 256，FP8 表，
+  去掉 short conv，用 momentum+Sinkhorn 更新，5× LR，RDMA host prefetch。
+- 对比：
+  - 原论文 Engram-27B：5.7B memory / 26.7B total，layers 2/15，orders {2,3}，8 heads，dim 1280，Adam 5× LR；
+  - Qwen3.8-Flash-Next：51.2B table（16 heads × 160），layer 2，orders {2,3}，co-trained，host offload；
+  - 我们：51.2B frozen Qwen table + Qwen3.5-0.8B frozen backbone，只训练 cross-space reader（query_bridge/out_proj）。
+- 关键差异：三者都 co-train table+backbone；我们的 memory/active-compute ratio 约 64×，
+  原论文约 1.4×、Qwen 约 8.5×、V4.1 约 24.5×；现有 gate 在 SFT 后饱和 open，缺少选择性。
+- 可借鉴：
+  - P0：dual-layer injection（layer 2 + middle）、V4.1 风格 per-dim q/k gate 权重 + per-head/branch gate、special-token gate mask、head/order ablation；
+  - P1：hot-row SparseAdam 5× LR 上界诊断、memory cap/allocation 实验、coverage/collision audit；
+  - P2：stateful n-gram cache、Store-P e_t、FP8/sparse optimizer。
+- 新增文档：`docs/round-147-engram-lineage-comparison.md`。
+

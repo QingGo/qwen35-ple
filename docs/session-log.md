@@ -3106,3 +3106,27 @@ lazy-window gate        ✅
 - 新增 `docs/round-150-session-recap-and-handoff.md`：本 session 计划/发现/尝试/
   坑/完成/未完成/未来 gates，供上下文压缩后恢复使用。
 
+
+## Session 151：本轮全量整理、压缩上下文 handoff、运维加固
+
+- 新增 `docs/round-151-session-consolidation-and-handoff.md`：把本轮的终极目标、
+  计划、发现（含全部数据表）、尝试与产出物、坑、完成/未完成、未来 gates 与判定
+  规则、相似项目借鉴边界、运维手册、压缩后恢复动作集中到一份文档，作为上下文
+  压缩后的第一入口。
+- 复核远程实测状态（本次连接确认）：
+  - GPU RTX 4090 24GB 完全空闲（1 MiB 占用、0% 利用率、无进程）；
+  - tmux 仅剩无关旧会话 `learn`；无实验队列运行；
+  - 磁盘 `/root/autodl-tmp` 86G 中 74G 已用、**13G free（86%）**；
+  - `/dev/shm` 与持久目录的 PLE 行各 129 files（约 48G）；
+  - 三个 backbone 就位：0.8B（hidden 1024/24 层）、2B（2048/24）、
+    4B（2560/32，与 PLE 源空间精确对齐），vocab 均 248320；
+  - **远程 venv 未安装 `peft`** → LoRA 行需先安装或使用明确标注临时的 shim；
+  - 本地 `.venv` 无 torch：本地 pytest 有 17 个 collection error（已知环境限制，
+    可收 58 tests / 4 skipped），完整套件交给 CI 与远程 venv。
+- 坑：实例重启后 SSH host key 变更，`BatchMode` 直接
+  `Host key verification failed`。新增 `scripts/ssh_autodl.sh` 封装固定选项
+  （`StrictHostKeyChecking=no` + `UserKnownHostsFile=/dev/null`），已实测可用；
+  首次实现时踩了 `ssh` 参数顺序坑（必须是 `ssh [opts] destination [command]`），
+  已修正并加入 CI shell 语法检查。
+- 下一步（未启动）：LoRA 行 2×2（先 smoke 确认 baseline 不崩，再解释
+  real vs control）→ G0 Qwen3.5-4B frozen graft → G3 EngramDB 磁盘微基准。

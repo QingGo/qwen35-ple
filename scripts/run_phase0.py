@@ -1734,6 +1734,16 @@ def main() -> int:
     )
     parser.add_argument("--qa-max-new-tokens", type=int, default=16)
     parser.add_argument(
+        "--qa-max-items",
+        type=int,
+        default=0,
+        help=(
+            "use only the first N QA items for generation, gold NLL and exact "
+            "match (0 = all); intended for smoke tests, never for reported "
+            "numbers"
+        ),
+    )
+    parser.add_argument(
         "--qa-batch-size",
         type=int,
         default=1,
@@ -2131,6 +2141,10 @@ def main() -> int:
     )
     if args.qa_exact_match or args.qa_gold_nll:
         qa_exact_items = _load_qa_file(args.qa_file)
+        qa_max_items = int(getattr(args, "qa_max_items", 0) or 0)
+        if qa_max_items > 0:
+            qa_exact_items = qa_exact_items[:qa_max_items]
+            print(f"[phase0] --qa-max-items: evaluating only {len(qa_exact_items)} items")
         print(
             f"[phase0] preparing QA eval: {len(qa_exact_items)} items, "
             f"max_new_tokens={args.qa_max_new_tokens}, "

@@ -1984,6 +1984,14 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--load-lora-adapter",
+        default=None,
+        help=(
+            "directory holding adapter.pt/adapter.json saved by --lora; used "
+            "with --lora to re-evaluate a trained LoRA arm without retraining"
+        ),
+    )
+    parser.add_argument(
         "--ple-off",
         action="store_true",
         help=(
@@ -2211,6 +2219,13 @@ def main() -> int:
             f"targets={len(lora_meta['target_modules'])} "
             f"trainable={lora_meta['trainable_params']:,}"
         )
+        adapter_dir = getattr(args, "load_lora_adapter", None)
+        if adapter_dir:
+            info = load_lora_adapter(model, adapter_dir)
+            print(
+                f"[phase0] loaded LoRA adapter from {info['path']} "
+                f"({info['tensors']} tensors)"
+            )
     if getattr(args, "finetune_backbone", False):
         for p in model.parameters():
             p.requires_grad_(True)

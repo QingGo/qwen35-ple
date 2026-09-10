@@ -257,6 +257,7 @@ def _train_reader(
     qa_sft_log_every: int = 0,
     gate_reg_weight: float = 0.0,
     qa_sft_warmup_steps: int = 0,
+    train_backbone: bool = False,
 ) -> tuple[list[float], list[dict]]:
     """Train the reader on corpus next-token loss and/or QA answer-only loss.
 
@@ -265,9 +266,13 @@ def _train_reader(
     mix; ``0.0`` reproduces the original corpus-only training.
     """
     assert len(tokens) > seq_len + 1
-    params = [reader] + ([short_conv] if short_conv is not None else [])
+    params = list(reader.parameters())
+    if short_conv is not None:
+        params += list(short_conv.parameters())
+    if train_backbone:
+        params += [p for p in model.parameters() if p.requires_grad]
     device = next(model.parameters()).device
-    optimizer = torch.optim.AdamW(torch.nn.ModuleList(params).parameters(), lr=lr)
+    optimizer = torch.optim.AdamW(params, lr=lr)
     rng = random.Random(seed)
     qa_rng = random.Random(seed * 10007 + 17)
     losses = []
@@ -1375,7 +1380,14 @@ def _run_mode(
             qa_sft_warmup_steps=int(
                 getattr(args, "qa_sft_warmup_steps", 0) or 0
             ),
+            train_backbone=bool(getattr(args, "finetune_backbone", False)),
         )
+
+    if getattr(args, "finetune_backbone", False):
+        for p in model.parameters():
+            p.grad = None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     val_loss = _window_loss(model, val_tokens, val_eval_e_t, args.seq_len)
     qa = None
@@ -1731,6 +1743,14 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--finetune-backbone",
+        action="store_true",
+        help=(
+            "unfreeze all backbone parameters and train them jointly with the "
+            "reader (use with --gate-override 0.0 for a no-PLE control)"
+        ),
+    )
+    parser.add_argument(
         "--gate-override",
         type=float,
         default=None,
@@ -1938,6 +1958,10 @@ def main() -> int:
     tokenizer, model = _load_model(args.model, args.device)
     for p in model.parameters():
         p.requires_grad_(False)
+    if getattr(args, "finetune_backbone", False):
+        for p in model.parameters():
+            p.requires_grad_(True)
+        print("[phase0] backbone fine-tuning enabled: all parameters trainable")
 
     qa_items = None
     if args.qa:

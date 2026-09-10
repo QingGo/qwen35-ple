@@ -64,6 +64,7 @@ jobs:
           bash -n scripts/run_round148a.sh
           bash -n scripts/run_round148b.sh
           bash -n scripts/download_qwen35_models.sh
+          bash -n scripts/run_round149_fullft.sh
 
       - name: Test
         run: uv run pytest -q

@@ -61,6 +61,7 @@ run_arm() {
     --qa-prompt-template "$PROMPT"
     --qa-boolq-prompt-template "$BOOLQ_PROMPT"
     --qa-file data/qa-standard/eval.jsonl
+    --save-reader "$OUT/adapter-$name-seed{seed}"
   )
   if [[ -n "$gate" ]]; then args+=(--gate-override "$gate"); fi
   args+=(--output "$out")

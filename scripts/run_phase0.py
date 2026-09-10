@@ -1269,6 +1269,7 @@ def _run_mode(
     qa_items,
     qa_exact_items,
     qa_store,
+    lora_meta: dict | None = None,
 ):
     head_mask = _parse_head_mask(getattr(args, "qa_head_mask", None))
     if mode == "no-reader":
@@ -2231,6 +2232,7 @@ def main() -> int:
                 qa_items,
                 qa_exact_items,
                 qa_store,
+                lora_meta=lora_meta,
             )
             if live_store_handle is not None:
                 stats = getattr(live_store_handle, "stats", None)

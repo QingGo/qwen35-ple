@@ -54,14 +54,42 @@ def _em_table(arms: dict[str, dict[str, Any]]) -> list[str]:
     ]
     for label, arm in arms.items():
         metrics = (arm["result"].get("qa_exact") or {}).get("metrics") or {}
+        per_task = _task_em(arm)
         lines.append(
-            f"| {label} | {metrics.get('qa_boolq_em', float('nan')):.3f} | "
-            f"{metrics.get('qa_triviaqa_em', float('nan')):.3f} | "
-            f"{metrics.get('qa_nq_em', float('nan')):.3f} | "
+            f"| {label} | {per_task.get('boolq', float('nan')):.3f} | "
+            f"{per_task.get('triviaqa', float('nan')):.3f} | "
+            f"{per_task.get('nq', float('nan')):.3f} | "
             f"{metrics.get('qa_em_mean', float('nan')):.4f} | "
             f"{int(metrics.get('qa_n', 0))} |"
         )
     return lines
+
+
+def _task_em(arm: dict[str, Any]) -> dict[str, float]:
+    """Per-task EM from the reported metric keys, with an item-level fallback.
+
+    Different evaluation paths name these keys differently (``qa_boolq_em`` vs
+    ``qa_boolq_accuracy``), and a smoke run may not carry them at all, so fall
+    back to counting the per-item ``correct`` flags instead of printing NaN.
+    """
+    metrics = (arm["result"].get("qa_exact") or {}).get("metrics") or {}
+    out: dict[str, float] = {}
+    for task in TASKS:
+        for key in (f"qa_{task}_em", f"qa_{task}_accuracy"):
+            if key in metrics:
+                out[task] = float(metrics[key])
+                break
+    missing = [t for t in TASKS if t not in out]
+    if missing:
+        counts: dict[str, list[int]] = {t: [] for t in missing}
+        for item in _items(arm):
+            task = str(item.get("task") or "")
+            if task in counts:
+                counts[task].append(1 if item.get("correct") else 0)
+        for task, vals in counts.items():
+            if vals:
+                out[task] = sum(vals) / len(vals)
+    return out
 
 
 def _gold_table(arms: dict[str, dict[str, Any]]) -> list[str]:
@@ -77,14 +105,37 @@ def _gold_table(arms: dict[str, dict[str, Any]]) -> list[str]:
         if not metrics:
             lines.append(f"| {label} | - | - | - | - | 0 |")
             continue
+        per_task = _task_nll(arm)
         lines.append(
-            f"| {label} | {metrics.get('qa_boolq_nll', float('nan')):.4f} | "
-            f"{metrics.get('qa_triviaqa_nll', float('nan')):.4f} | "
-            f"{metrics.get('qa_nq_nll', float('nan')):.4f} | "
+            f"| {label} | {per_task.get('boolq', float('nan')):.4f} | "
+            f"{per_task.get('triviaqa', float('nan')):.4f} | "
+            f"{per_task.get('nq', float('nan')):.4f} | "
             f"{metrics.get('qa_mean_nll', float('nan')):.4f} | "
             f"{int(metrics.get('qa_n', 0))} |"
         )
     return lines
+
+
+def _task_nll(arm: dict[str, Any]) -> dict[str, float]:
+    """Per-task gold NLL from reported keys, falling back to item means."""
+    metrics = (arm["result"].get("qa_gold") or {}).get("metrics") or {}
+    out: dict[str, float] = {}
+    for task in TASKS:
+        for key in (f"qa_{task}_nll", f"qa_{task}_gold_nll"):
+            if key in metrics:
+                out[task] = float(metrics[key])
+                break
+    missing = [t for t in TASKS if t not in out]
+    if missing:
+        buckets: dict[str, list[float]] = {t: [] for t in missing}
+        for item in _gold_items(arm):
+            task = str(item.get("task") or "")
+            if task in buckets and "gold_nll" in item:
+                buckets[task].append(float(item["gold_nll"]))
+        for task, vals in buckets.items():
+            if vals:
+                out[task] = sum(vals) / len(vals)
+    return out
 
 
 def _paired(
@@ -183,7 +234,8 @@ def build_report(
                     )
                     + " |"
                 )
-                detail.setdefault("pairs", {})[f"{first} vs {second}"][metric] = stats
+                pair_key = f"{first} vs {second}"
+                detail.setdefault("pairs", {}).setdefault(pair_key, {})[metric] = stats
     return "\n".join(lines) + "\n", detail
 
 

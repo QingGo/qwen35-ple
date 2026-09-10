@@ -239,13 +239,21 @@ def main() -> int:
         entry = report["results"].get(prefill_key, {})
         base = entry.get("warm", {})
         if base:
-            prefill_s = base["p50"]
+            # rows/s from the measured batch, then convert rows -> tokens using
+            # num_heads rows per token (a 2048-token prefill = 32,768 rows).
+            rows_per_s = float(prefill_key) / base["p50"]
+            prefill_rows = args.target_prefill_tokens * args.num_heads
             report["projection"] = {
                 "batch": int(prefill_key),
-                "prefill_fetch_seconds": prefill_s,
-                "prefill_tokens_per_s_fetch_only": int(prefill_key) / prefill_s,
+                "measured_rows": int(prefill_key),
+                "measured_tokens": int(prefill_key) // args.num_heads,
+                "prefill_rows_2048": prefill_rows,
+                "prefill_rows_per_s": rows_per_s,
+                "prefill_seconds_2048": prefill_rows / rows_per_s,
+                "prefill_tokens_per_s_2048": rows_per_s / args.num_heads,
                 "notes": (
-                    "fetch-only throughput; end-to-end decode also pays model "
+                    "fetch-only throughput extrapolated linearly from the "
+                    "nearest measured batch; end-to-end decode also pays model "
                     "compute, so this is an upper bound on the storage share"
                 ),
             }
@@ -283,9 +291,12 @@ def main() -> int:
         if proj:
             lines += [
                 "",
-                f"Prefill projection at batch={proj['batch']}: "
-                f"{proj['prefill_fetch_seconds'] * 1e3:.2f} ms per forward, "
-                f"{proj['prefill_tokens_per_s_fetch_only']:,} tokens/s fetch-only.",
+                f"Prefill projection: one token needs {args.num_heads} rows, so a "
+                f"2048-token prefill needs {proj['prefill_rows_2048']:,} rows.  At "
+                f"the measured p50 of the nearest measured batch that is "
+                f"{proj['prefill_seconds_2048'] * 1e3:.2f} ms of row fetching per "
+                f"2048-token forward, i.e. {proj['prefill_rows_per_s']:,.0f} rows/s "
+                f"= {proj['prefill_tokens_per_s_2048']:,.0f} tokens/s fetch-only.",
             ]
         env = report.get("environment", {})
         if env:

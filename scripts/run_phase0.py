@@ -347,9 +347,32 @@ def _train_reader(
     if short_conv is not None:
         params += list(short_conv.parameters())
     if train_backbone:
-        params += [p for p in model.parameters() if p.requires_grad]
+        # Covers both full fine-tuning (every parameter trainable) and LoRA
+        # (only adapters trainable): the optimizer must receive whatever the
+        # model marks trainable, otherwise adapter weights get gradients but are
+        # never updated and the arm silently measures the frozen backbone.
+        model_params = [p for p in model.parameters() if p.requires_grad]
+        known = {id(p) for p in params}
+        params += [p for p in model_params if id(p) not in known]
     device = next(model.parameters()).device
     optimizer = torch.optim.AdamW(params, lr=lr)
+    # Guard against a silent no-op adaptation row: if the model exposes trainable
+    # parameters (LoRA adapters, unfrozen weights) they must reach the optimizer,
+    # otherwise the arm measures the frozen backbone while claiming adaptation.
+    if train_backbone:
+        optimizer_ids = {id(p) for p in params}
+        missing = [
+            name
+            for name, p in model.named_parameters()
+            if p.requires_grad and id(p) not in optimizer_ids
+        ]
+        if missing:
+            raise RuntimeError(
+                "trainable model parameters missing from the optimizer: "
+                f"{missing[:5]} ({len(missing)} total)"
+            )
+        if not any(id(p) in optimizer_ids for p in model.parameters()):
+            raise RuntimeError("adaptation requested but no model parameter is trained")
     rng = random.Random(seed)
     qa_rng = random.Random(seed * 10007 + 17)
     losses = []
@@ -574,6 +597,7 @@ def _qa_gold_nll(
     chat_template: bool = False,
     chat_enable_thinking: bool = False,
     head_mask: list[int] | None = None,
+    batch_size: int = 8,
 ) -> dict:
     """Teacher-forced gold-answer NLL for the format-matched QA prompt.
 
@@ -582,12 +606,19 @@ def _qa_gold_nll(
     generation uses.  Lower is better.  The continuation is always the raw
     answer tokenization, matching the QA-SFT convention and avoiding a
     leading-space tokenization mismatch between arms.
+
+    Items are scored in right-padded batches.  Right padding is safe because
+    teacher forcing reads each continuation from its own positions, and the PLE
+    rows keep one item per row so the reader's causal convolution stays within
+    an item, exactly as in the unbatched path.
     """
     device = next(model.parameters()).device
     answers: list[dict[str, Any]] = []
     per_task_nll: dict[str, list[float]] = {}
     total_tokens = 0
     total_loss = 0.0
+
+    prepared: list[dict[str, Any]] = []
     for idx, item in enumerate(items):
         prompt_ids = _qa_prompt_ids(
             tokenizer,
@@ -603,46 +634,79 @@ def _qa_gold_nll(
         if not prompt_ids or not cont_ids:
             continue
         full_ids = list(prompt_ids) + list(cont_ids)
-        start = len(prompt_ids)
-        end = len(full_ids)
+        prepared.append(
+            {
+                "idx": idx,
+                "item": item,
+                "answer": answer,
+                "continuation": continuation,
+                "full_ids": full_ids,
+                "start": len(prompt_ids),
+                "end": len(full_ids),
+            }
+        )
+
+    chunk = max(1, int(batch_size))
+    for offset in range(0, len(prepared), chunk):
+        batch = prepared[offset : offset + chunk]
+        max_len = max(len(entry["full_ids"]) for entry in batch)
+        ids_np = np.zeros((len(batch), max_len), dtype=np.int64)
+        mask_np = np.zeros((len(batch), max_len), dtype=np.int64)
+        for row, entry in enumerate(batch):
+            length = len(entry["full_ids"])
+            ids_np[row, :length] = entry["full_ids"]
+            mask_np[row, :length] = 1
+        ids = torch.from_numpy(ids_np).long().to(device)
+        attention_mask = torch.from_numpy(mask_np).long().to(device)
 
         if qa_store is not None:
-            et = qa_store.fetch(full_ids)
-            if control:
-                rng = np.random.default_rng(seed * 1000 + idx)
-                et = et[rng.permutation(len(et))]
-            et = _apply_head_mask(et, head_mask)
-            model._current_ple_e_t = (
-                torch.from_numpy(et).float().unsqueeze(0).to(device)
-            )
+            # One row per item, zero-padded on the right, exactly mirroring the
+            # sequential layout: the reader's causal convolution then only ever
+            # mixes an item's own earlier tokens (row-local), so every scored
+            # logit matches the unbatched computation while the model forward is
+            # shared across the batch.
+            rows = []
+            for entry in batch:
+                et = qa_store.fetch(entry["full_ids"])
+                if control:
+                    rng = np.random.default_rng(seed * 1000 + entry["idx"])
+                    et = et[rng.permutation(len(et))]
+                et = _apply_head_mask(et, head_mask)
+                rows.append(np.asarray(et, dtype=np.float32))
+            padded = np.zeros((len(batch), max_len, rows[0].shape[-1]), dtype=np.float32)
+            for row, et in enumerate(rows):
+                padded[row, : et.shape[0]] = et
+            model._current_ple_e_t = torch.from_numpy(padded).float().to(device)
         else:
             model._current_ple_e_t = None
 
-        ids = torch.tensor([full_ids], dtype=torch.long, device=device)
-        attention_mask = torch.ones_like(ids)
         with torch.no_grad():
             out = model(input_ids=ids, attention_mask=attention_mask)
-        logits = out.logits[0]
-        shift_logits = logits[start - 1 : end - 1, :]
-        labels = ids[0, start:end]
-        loss = F.cross_entropy(shift_logits, labels)
-        value = float(loss.item())
-        n_tokens = int(end - start)
-        answers.append(
-            {
-                "task": str(item.get("task", "unknown")),
-                "question": str(item.get("question", "")),
-                "answer": answer,
-                "gold_nll": value,
-                "n_tokens": n_tokens,
-                "continuation": continuation,
-            }
-        )
-        per_task_nll.setdefault(str(item.get("task", "unknown")), []).append(value)
-        total_loss += value * n_tokens
-        total_tokens += n_tokens
-        if (idx + 1) % 200 == 0:
-            print(f"    gold-NLL {idx + 1}/{len(items)}", flush=True)
+        logits = out.logits.float()
+        for row, entry in enumerate(batch):
+            start, end = entry["start"], entry["end"]
+            shift_logits = logits[row, start - 1 : end - 1, :]
+            labels = ids[row, start:end]
+            loss = F.cross_entropy(shift_logits, labels)
+            value = float(loss.item())
+            n_tokens = int(end - start)
+            task = str(entry["item"].get("task", "unknown"))
+            answers.append(
+                {
+                    "task": task,
+                    "question": str(entry["item"].get("question", "")),
+                    "answer": entry["answer"],
+                    "gold_nll": value,
+                    "n_tokens": n_tokens,
+                    "continuation": entry["continuation"],
+                }
+            )
+            per_task_nll.setdefault(task, []).append(value)
+            total_loss += value * n_tokens
+            total_tokens += n_tokens
+        done = offset + len(batch)
+        if done % 200 == 0 or done == len(prepared):
+            print(f"    gold-NLL {done}/{len(prepared)}", flush=True)
 
     metrics = {
         f"qa_{task}_nll": float(np.mean(vals))
@@ -1335,6 +1399,7 @@ def _run_mode(
                     getattr(args, "qa_chat_enable_thinking", False)
                 ),
                 head_mask=head_mask,
+                batch_size=int(getattr(args, "qa_batch_size", 1) or 1),
             )
         return {
             "mode": mode,
@@ -1474,10 +1539,13 @@ def _run_mode(
             qa_sft_warmup_steps=int(
                 getattr(args, "qa_sft_warmup_steps", 0) or 0
             ),
-            train_backbone=bool(getattr(args, "finetune_backbone", False)),
+            train_backbone=bool(
+                getattr(args, "finetune_backbone", False)
+                or getattr(args, "lora", False)
+            ),
         )
 
-    if getattr(args, "finetune_backbone", False):
+    if getattr(args, "finetune_backbone", False) or getattr(args, "lora", False):
         for p in model.parameters():
             p.grad = None
         if torch.cuda.is_available():
@@ -1532,6 +1600,7 @@ def _run_mode(
                 getattr(args, "qa_chat_enable_thinking", False)
             ),
             head_mask=head_mask,
+            batch_size=int(getattr(args, "qa_batch_size", 1) or 1),
         )
 
     if getattr(args, "save_reader", None) and not getattr(args, "load_reader", None):

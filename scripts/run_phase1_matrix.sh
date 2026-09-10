@@ -58,6 +58,7 @@ QA_SFT_LAZY="${QA_SFT_LAZY:-0}"
 QA_SFT_LAZY_CACHE="${QA_SFT_LAZY_CACHE:-128}"
 QA_SFT_CHAT_TEMPLATE="${QA_SFT_CHAT_TEMPLATE:-0}"
 QA_SFT_CHAT_ENABLE_THINKING="${QA_SFT_CHAT_ENABLE_THINKING:-0}"
+UNFREEZE_OFFICIAL_SOURCE="${UNFREEZE_OFFICIAL_SOURCE:-0}"
 MODES="${MODES:-real control no-reader}"
 BRIDGE_MLP="${BRIDGE_MLP:-1}"
 OUT_MLP="${OUT_MLP:-1}"
@@ -114,6 +115,7 @@ while [[ $# -gt 0 ]]; do
     --qa-sft-lazy-cache) QA_SFT_LAZY_CACHE="$2"; shift 2 ;;
     --qa-sft-chat-template) QA_SFT_CHAT_TEMPLATE=1; shift ;;
     --qa-sft-chat-enable-thinking) QA_SFT_CHAT_ENABLE_THINKING=1; shift ;;
+    --unfreeze-official-source) UNFREEZE_OFFICIAL_SOURCE=1; shift ;;
     --official-reader-path) OFFICIAL_READER_PATH="$2"; shift 2 ;;
     --skip-qa) SKIP_QA=1; shift ;;
     --save-reader) SAVE_READER=1; shift ;;
@@ -201,6 +203,9 @@ if [[ "$QA_SFT_CHAT_TEMPLATE" == "1" ]]; then
 fi
 if [[ "$QA_SFT_CHAT_ENABLE_THINKING" == "1" ]]; then
   QA_SFT_ARGS+=(--qa-sft-chat-enable-thinking)
+fi
+if [[ "$UNFREEZE_OFFICIAL_SOURCE" == "1" ]]; then
+  QA_SFT_ARGS+=(--unfreeze-official-source)
 fi
 
 for C in $CORPORA; do

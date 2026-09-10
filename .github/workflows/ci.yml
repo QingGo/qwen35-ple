@@ -62,6 +62,7 @@ jobs:
           bash -n scripts/run_chat_sft_queue.sh
           bash -n scripts/run_chat_template_ablation.sh
           bash -n scripts/run_round148a.sh
+          bash -n scripts/run_round148b.sh
 
       - name: Test
         run: uv run pytest -q

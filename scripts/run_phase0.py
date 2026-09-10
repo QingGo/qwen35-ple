@@ -1283,6 +1283,9 @@ def _run_mode(
             reader = OfficialSourceQwenReader.from_official_checkpoint(
                 args.official_reader_path,
                 d_target=model.config.hidden_size,
+                freeze_source=not bool(
+                    getattr(args, "unfreeze_official_source", False)
+                ),
                 bridge_mlp=args.bridge_mlp,
                 bridge_hidden=args.bridge_hidden,
                 out_mlp=args.out_mlp,
@@ -1609,6 +1612,14 @@ def main() -> int:
         help=(
             "teacher-forced gold-answer NLL for the same prompt protocol; "
             "a format-insensitive complement to --qa-exact-match"
+        ),
+    )
+    parser.add_argument(
+        "--unfreeze-official-source",
+        action="store_true",
+        help=(
+            "when training an official-source reader, unfreeze the source "
+            "key/value/norm/conv projections (table stays frozen)"
         ),
     )
     parser.add_argument(

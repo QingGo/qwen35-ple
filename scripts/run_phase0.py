@@ -140,24 +140,101 @@ def _install_torch_compat() -> None:
         typing.override = typing_extensions.override
 
 
-def _load_model(model_path: str, device: str = "cpu"):
+def _resolve_backbone_dtype(name: str):
+    mapping = {
+        "float32": torch.float32,
+        "bfloat16": torch.bfloat16,
+        "float16": torch.float16,
+    }
+    return mapping[str(name or "float32").lower()]
+
+
+def _load_model(model_path: str, device: str = "cpu", dtype: str = "float32"):
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    target_dtype = _resolve_backbone_dtype(dtype)
     tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
     model = AutoModelForCausalLM.from_pretrained(
         model_path, local_files_only=True, dtype=torch.float32
     )
     # Newer Transformers releases may still load the checkpoint in its original
-    # bf16 dtype even when dtype=float32 is requested.  Our reader and eval
-    # path currently assume float32 on CPU/GPU, so force a consistent dtype.
-    if next(model.parameters()).dtype != torch.float32:
-        model = model.to(torch.float32)
+    # bf16 dtype even when dtype=float32 is requested.  The default research path
+    # assumes float32 on CPU/GPU; --backbone-dtype bfloat16 is the escape hatch
+    # for 2B/4B backbones that do not fit in float32 on one GPU.
+    if next(model.parameters()).dtype != target_dtype:
+        model = model.to(target_dtype)
     model.eval()
     if device != "cpu":
         model = model.to(device)
     return tokenizer, model
+
+
+def save_lora_adapter(model, path: Path) -> Path:
+    """Persist only the LoRA adapter weights (never a full backbone)."""
+    from peft import get_peft_model_state_dict
+
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    state = get_peft_model_state_dict(model)
+    torch.save({k: v.detach().cpu() for k, v in state.items()}, path / "adapter.pt")
+    meta = {
+        "format": "peft-state-dict-v1",
+        "num_tensors": len(state),
+        "num_params": int(sum(v.numel() for v in state.values())),
+    }
+    (path / "adapter.json").write_text(
+        json.dumps(meta, indent=2) + "\n", encoding="utf-8"
+    )
+    return path
+
+
+def load_lora_adapter(model, path) -> dict:
+    """Load adapter weights saved by :func:`save_lora_adapter` in place."""
+    from peft import set_peft_model_state_dict
+
+    path = Path(path)
+    state = torch.load(path / "adapter.pt", map_location="cpu", weights_only=True)
+    result = set_peft_model_state_dict(model, state)
+    meta_path = path / "adapter.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    loaded = len(state)
+    return {"path": str(path), "tensors": loaded, "meta": meta, "result": str(result)}
+
+
+def _apply_lora(model, args) -> dict:
+    """Wrap the frozen backbone in LoRA adapters; returns metadata for logging."""
+    from peft import LoraConfig, get_peft_model
+
+    raw_targets = str(getattr(args, "lora_target_modules", "") or "").strip()
+    if raw_targets in {"", "all-linear"}:
+        target_modules = "all-linear"
+        target_list: list[str] = ["all-linear"]
+    else:
+        target_list = [t.strip() for t in raw_targets.split(",") if t.strip()]
+        target_modules = target_list
+    config = LoraConfig(
+        r=int(getattr(args, "lora_r", 16)),
+        lora_alpha=int(getattr(args, "lora_alpha", 32)),
+        lora_dropout=float(getattr(args, "lora_dropout", 0.0)),
+        bias="none",
+        target_modules=target_modules,
+        task_type="CAUSAL_LM",
+    )
+    peft_model = get_peft_model(model, config)
+    trainable = 0
+    for name, param in peft_model.named_parameters():
+        param.requires_grad_(("lora_" in name) or name.startswith("modules_to_save"))
+        if param.requires_grad:
+            trainable += int(param.numel())
+    return {
+        "r": int(config.r),
+        "alpha": int(config.lora_alpha),
+        "dropout": float(config.lora_dropout),
+        "target_modules": target_list,
+        "trainable_params": trainable,
+    }
 
 
 def _load_features(feature_dir: Path, model_dir: str, scale: float | None):
@@ -1490,6 +1567,17 @@ def _run_mode(
                 save_bundle(bundle, bundle_path)
                 print(f"  [{mode}] saved bundle -> {bundle_path}")
 
+    adapter_path = None
+    if getattr(args, "lora", False) and getattr(args, "save_reader", None):
+        # Adapter-only checkpoint: a LoRA row must never write a full backbone
+        # (disk retention policy; see docs/round-151 section 9).
+        adapter_path = Path(
+            _format_reader_save_path(str(args.save_reader), mode, seed)
+        ).with_suffix(".lora")
+        adapter_path.mkdir(parents=True, exist_ok=True)
+        save_lora_adapter(model, adapter_path)
+        print(f"  [{mode}] saved LoRA adapter -> {adapter_path}")
+
     handle.remove()
     return {
         "mode": mode,
@@ -1502,6 +1590,8 @@ def _run_mode(
         "qa": qa,
         "qa_exact": qa_exact,
         "qa_gold": qa_gold,
+        "lora": lora_meta,
+        "adapter_path": str(adapter_path) if adapter_path else None,
     }
 
 
@@ -1743,6 +1833,51 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--lora",
+        action="store_true",
+        help=(
+            "adapt the backbone with LoRA instead of full fine-tuning: keeps "
+            "the base weights frozen and trains only low-rank adapters plus "
+            "the reader (gentler than --finetune-backbone; use with "
+            "--gate-override 0.0 for a no-PLE arm)"
+        ),
+    )
+    parser.add_argument(
+        "--lora-r",
+        type=int,
+        default=16,
+        help="LoRA rank (default 16)",
+    )
+    parser.add_argument(
+        "--lora-alpha",
+        type=int,
+        default=32,
+        help="LoRA alpha (default 2x rank)",
+    )
+    parser.add_argument(
+        "--lora-dropout",
+        type=float,
+        default=0.0,
+        help="LoRA dropout (default 0.0, deterministic)",
+    )
+    parser.add_argument(
+        "--lora-target-modules",
+        default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+        help=(
+            "comma-separated LoRA target module names, or 'all-linear' to let "
+            "peft select every Linear/Conv1D projection"
+        ),
+    )
+    parser.add_argument(
+        "--backbone-dtype",
+        default="float32",
+        choices=["float32", "bfloat16", "float16"],
+        help=(
+            "dtype for the loaded backbone; keep float32 for the 0.8B "
+            "research path, use bfloat16 to fit 2B/4B backbones on one GPU"
+        ),
+    )
+    parser.add_argument(
         "--finetune-backbone",
         action="store_true",
         help=(
@@ -1955,9 +2090,19 @@ def main() -> int:
         f"val_frac={args.val_frac}"
     )
 
-    tokenizer, model = _load_model(args.model, args.device)
+    tokenizer, model = _load_model(
+        args.model, args.device, getattr(args, "backbone_dtype", "float32")
+    )
     for p in model.parameters():
         p.requires_grad_(False)
+    lora_meta: dict | None = None
+    if getattr(args, "lora", False):
+        lora_meta = _apply_lora(model, args)
+        print(
+            f"[phase0] LoRA enabled: r={lora_meta['r']} alpha={lora_meta['alpha']} "
+            f"targets={len(lora_meta['target_modules'])} "
+            f"trainable={lora_meta['trainable_params']:,}"
+        )
     if getattr(args, "finetune_backbone", False):
         for p in model.parameters():
             p.requires_grad_(True)

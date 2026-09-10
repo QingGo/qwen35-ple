@@ -142,6 +142,21 @@ class EngramReader(torch.nn.Module):
         return torch.stack(contributions, dim=0).mean(dim=0)
 
 
+def _base_backbone(model: torch.nn.Module) -> torch.nn.Module:
+    """Return the underlying backbone, unwrapping peft/LoRA wrappers.
+
+    With peft, ``model.model`` is a ``LoraModel`` and the transformer lives at
+    ``model.model.model``; the reader hook must attach to the real decoder
+    layer so PLE injection happens at the same point in both modes.
+    """
+    getter = getattr(model, "get_base_model", None)
+    if callable(getter):
+        candidate = getter()
+        if candidate is not model:
+            return candidate
+    return model
+
+
 def install_reader_hook(
     model: torch.nn.Module,
     layer_index: int,
@@ -149,7 +164,8 @@ def install_reader_hook(
     short_conv: torch.nn.Module | None = None,
 ):
     """Install a post-forward hook injecting PLE reader output into a model layer."""
-    layer = model.model.layers[layer_index]
+    backbone = _base_backbone(model)
+    layer = backbone.model.layers[layer_index]
 
     def post_hook(module, input, output):
         if isinstance(output, tuple):
@@ -161,6 +177,8 @@ def install_reader_hook(
             contribution = reader(hidden, current)
             if short_conv is not None:
                 contribution = short_conv(contribution)
+            if contribution.dtype != hidden.dtype:
+                contribution = contribution.to(hidden.dtype)
             # Diagnostic hooks for contribution-norm analysis (no behavior change).
             model._last_reader_hidden = hidden.detach()
             model._last_reader_contribution = contribution.detach()

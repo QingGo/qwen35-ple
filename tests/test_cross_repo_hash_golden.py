@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import types
 from pathlib import Path
@@ -32,8 +33,6 @@ def _require_or_skip(message: str) -> None:
     cross-repository contract, and a skip that nobody reads is how the contract
     went unchecked on the machine that produced round 161's results.
     """
-    import os
-
     if os.environ.get("QWEN35_REQUIRE_GOLDEN") == "1":
         raise AssertionError(
             f"{message} -- and QWEN35_REQUIRE_GOLDEN=1, so a missing cross-repo "

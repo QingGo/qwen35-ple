@@ -10,6 +10,7 @@ requiring a Rust/PyO3 build; the same fixture must later be used against
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -64,13 +65,9 @@ def _require_or_skip(message: str) -> None:
     "171 passed, 7 skipped" looked healthy.  CI sets QWEN35_REQUIRE_GOLDEN=1 so
     a missing fixture is an error there.
     """
-    import os
-
     if os.environ.get("QWEN35_REQUIRE_GOLDEN") == "1":
         raise AssertionError(
             f"{message} -- and QWEN35_REQUIRE_GOLDEN=1, so a missing cross-repo "
             "golden fixture is a failure rather than a skip"
         )
-    import pytest
-
     pytest.skip(message)

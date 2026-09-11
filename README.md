@@ -1,769 +1,329 @@
 # qwen35-ple
 
-**Qwen3.5 主干 + Qwen3.8-Flash-Next PLE 记忆表**的实验项目：继续预训练（CPT）与后训练
-（SFT/RL），目标是一个知识/长上下文更强的模型，并在 CPU 上以 100 tok/s 推理。
+**Qwen3.5 主干 + Qwen3.8-Flash-Next PLE 记忆表**的嫁接实验仓库。本仓库是四仓库协作中的
+**编排者**：实现存储与模型核心的是兄弟仓库，这里做的是消融设计、评测协议、数据与实验编排。
 
-本仓库是四仓库协作中的「编排者」，自身不实现存储与模型核心：
+> **本仓库的首要产出不是"一个更好的模型"，而是一组关于「哈希 n-gram 外部记忆到底能做什么」
+> 的可复现结论 —— 其中一条是证明，不是经验。** 详见下方「结论摘要」。
 
+---
+
+## 结论摘要（TL;DR）
+
+经过 round 130–158 的连续实验，PLE 嫁接这条线得出了**封闭结论**：
+
+**1. 这条通道有一个可证明的天花板，它只能承载 n-gram 先验。**
+
+`PleSpec.rowids_for_seq`（`src/qwen35_ple/ple_hash.py`）只把 `shift = 0/1/2` 折进哈希，
+即 `token[t]`、`token[t-1]`、`token[t-2]`。所以 16 个头**全部**是 (t-2, t-1, t) 的确定性函数：
+
+```text
+e_t = f(token[t-2], token[t-1], token[t])
+⟹  I(e_t ; token[t+1]) ≤ I( trigram ; token[t+1] )     ← 数据处理不等式
 ```
-engram-peft  (模型库: DeepSeek Engram 一致性实现, 记忆层/训练/TRL 基础设施)
-EngramDB     (存储: PLE/Engram n-gram 行表, badge 布局, Store-P 视图, C ABI)
+
+这条上界**与 reader 的深度、宽度、线性与否、训练量全都无关**。"外部记忆注入知识"
+不是五次没做对，是**设计上不可能**：上下文条件化取回需要"按查询取回不同内容"，
+而取回键只有 trigram。详见 `docs/round-157-why-the-graft-is-a-prior-not-a-knowledge-channel.md`。
+
+**2. 这个先验值多少钱，已经量化了 —— 而且很小。**
+
+| | NLL | top-1 | 存储 |
+|---|---:|---:|---:|
+| 四阶计数 n-gram（MKN，1M token 语料） | **5.3368** | **25.25%** | **32 MB** |
+| trigram 后验天花板（渐近估计，R²=0.96） | ≈4.94 | ≈27–28% | — |
+| 冻结 PLE 表 | ? | ? | **47.684 GiB** |
+
+即：**整张 47.684 GiB 的表，在理论最优下也只比一张 32 MB 的计数表好 ≈0.40 nat / ≈2 个点。**
+而计数格式每条 n-gram 密 9.4 倍 —— 把这张表的 320,001,536 行用精确计数表示只要 ≈5.44 GB，
+多出来的 8.8 倍买的是"每行是个 160 维可微向量"这件事本身，不是更多记忆。
+详见 `docs/round-158-ngram-reference-frame.md`。
+
+**3. 它确实有一个真实、可复现的效应 —— 但是格式，不是知识。**
+
+零注入时 4B **不遵守** raw 续写协议，会退回对话先验吐出 `<think>` 脚手架；
+**注入 PLE（real 与乱序行皆然）才会把它压回 raw 格式**。这是机制性的、与表内容无关的
+**格式/协议先验**，可能是这条通道唯一可产品化的东西。
+详见 `docs/round-156-g0-nople-format-vs-content-and-metric-bugs.md`。
+
+**4. 已否证清单**（每一条都带实验）：
+
+| 假设 | 判定 | 证据 |
+|---|---|---|
+| 冻结嫁接可注入知识 | ✗ | round 148/149 |
+| reader 容量 / 源空间对齐是瓶颈 | ✗ | round 148-B |
+| oracle routing 可线性学到 | ✗ | `scripts/train_oracle_routing_probe.py` |
+| 靠数据规模可解锁 | ✗ | 1M→ 更大语料无改善 |
+| full-FT 可解锁（反而崩塌） | ✗ | round 149 |
+| LoRA 共适应可解锁 | ✗ | round 152：+2.8–3.5 点但 real−control = **+0.0000** |
+| 4B（hidden 精确对齐源空间）可解锁 | ✗ | round 155/156：那是 control 解码崩塌造成的假象 |
+
+**5. 仍然开放的问题**：上述 4.94 的天花板是**自然文本**的。n-gram 记忆的价值强烈依赖分布
+（代码、日志、结构化语料的天花板会不同）。跨分布扫描进行中，判据是
+**长尾 NLL 占比 + 逐字续写命中率**，而不是天花板本身。
+
+---
+
+## 仓库角色与依赖
+
+```text
+engram-peft     (模型库: DeepSeek Engram 一致性实现, 记忆层/训练/TRL 基础设施)
+EngramDB        (存储: PLE/Engram n-gram 行表, badge 布局, Store-P 视图, C ABI)
    ▲              ▲
    └──────┬───────┘
-    qwen35-ple  (本仓库: 嫁接实验编排, 依赖以上两者)
+    qwen35-ple   (本仓库: 嫁接实验编排, 依赖以上两者)
        ▲
-LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 100 tok/s 目标)
+LLM-CompileForge (推理: MLIR 编译 .dylib + Rust runtime, CPU 推理目标)
 ```
 
-## 公开 Artifact
+依赖方向严格无环：`LLM-CompileForge → EngramDB`；`qwen35-ple → {engram-peft, EngramDB}`。
+契约唯一权威是 `docs/integration-contract.md`（v1，冻结），纪律是**只允许新增**。
 
-- Hugging Face 模型/artifact 仓库：
-  [DefEki/qwen35-ple-auditable-ngram-memory](https://huggingface.co/DefEki/qwen35-ple-auditable-ngram-memory)
-- 论文源码：`paper/paper.typ`
-- 编译 PDF：`paper.pdf`
-- 可复现清单：`docs/reproducibility-manifest.md`
-- 评测卡：`docs/evaluation-card-paper.md`
+---
 
-## 关键文档
+## 评测协议与纪律
 
-| 文档 | 内容 |
-|---|---|
-| [docs/qwen35-ple-design.md](docs/qwen35-ple-design.md) | 项目设计：嫁接方案、CPT/后训练、消融矩阵、里程碑 |
-| [docs/integration-contract.md](docs/integration-contract.md) | **四仓库交互契约 v1**（存储/模型/推理/数据四条契约，冻结原则） |
-| [docs/roadmap.md](docs/roadmap.md) | 战略路线图：终极目标、技术债、借鉴矩阵、阶段计划 |
-| [docs/round-21-full-summary.md](docs/round-21-full-summary.md) | 本轮完整汇总：计划/发现/尝试/踩坑/完成/未完成/未来 |
-| [docs/round-23-upgrade-assessment.md](docs/round-23-upgrade-assessment.md) | engram-peft 1.2.7 / EngramDB 0.2.12 升级评估与后续计划 |
-| [docs/phase0-live1m-qa150-analysis.md](docs/phase0-live1m-qa150-analysis.md) | 1M 150 题三线结果、bad case、语料重叠分析 |
-| [docs/round-24-full-summary.md](docs/round-24-full-summary.md) | 本轮系统性思考、技术债、语料混比与后续计划 |
-| [docs/round-25-mix-corpus.md](docs/round-25-mix-corpus.md) | M1–M5 1M 混合语料构建、来源、比例、污染审计 |
-| [docs/round-26-systematic.md](docs/round-26-systematic.md) | 系统性思考：语义对齐证据、机制分析技术债、RL 门禁、借鉴矩阵 |
-| [docs/round-27-manifold-alignment.md](docs/round-27-manifold-alignment.md) | 流形/语义空间对齐调研、数学工具、机制验证与 case 分析计划 |
-| [docs/round-27-full-summary.md](docs/round-27-full-summary.md) | 本轮全量总结：计划、发现、尝试、踩坑、完成/未完成、未来计划 |
-| [docs/round-28-mechanism.md](docs/round-28-mechanism.md) | 第一批机制验证：CKA/Procrustes/kNN/reader 参数/activation patch |
-| [docs/round-29-alignment-math.md](docs/round-29-alignment-math.md) | 数学推导：条件增量可解释性、gate/value 分工、正交化注入、实验指导 |
-| [docs/round-30-multimath-alignment.md](docs/round-30-multimath-alignment.md) | 多视角数学推导：信息论/谱方法/随机矩阵/最优传输/核方法/图谱/优化动力学/流形假设 |
-| [docs/round-31-deeper-math.md](docs/round-31-deeper-math.md) | 更深数学分支：统计决策/因果推断/贝叶斯GP/微分几何/最优控制/拓扑/信息几何 |
-| [docs/round-32-first-principles-alignment.md](docs/round-32-first-principles-alignment.md) | 第一性原理：对齐的本质是条件充分性，不是几何相似；含命题 A-D 证明草图 |
-| [docs/round-33-proofs.md](docs/round-33-proofs.md) | 完整证明：数据处理上界、线性增量 R²、正交化不损失、几何对齐不充分/不必要、Hilbert 投影 |
-| [docs/round-34-empirical-theory.md](docs/round-34-empirical-theory.md) | 实证验证：梯度残差增量 R²、E⊥ 正交化、与 QA/scale sweep 一致性 |
-| [docs/round-35-preregistered.md](docs/round-35-preregistered.md) | 预注册：PCA/高残差子集实验的不同结果判读标准 |
-| [docs/round-36-experiment-results.md](docs/round-36-experiment-results.md) | 实际结果：信号分散高维、高梯度 token 反而负增益、低梯度 token 正增益 |
-| [docs/round-37-preregistered.md](docs/round-37-preregistered.md) | 预注册：PLS 监督压缩与稀有 token 实验判读 |
-| [docs/round-38-results-pls-rare.md](docs/round-38-results-pls-rare.md) | 实测：PLS 低秩有效、稀有 token 增量约为常见 token 两倍 |
-| [docs/round-39-oracle-mlp-results.md](docs/round-39-oracle-mlp-results.md) | Oracle MLP：非线性可将增量 R² 提升约 3–4 倍，E⊥ 在非线性下最好 |
-| [docs/round-40-mlp-reader-theory.md](docs/round-40-mlp-reader-theory.md) | MLP Value Reader 数学理论：线性容量瓶颈、E⊥ 去相关、PLS 非线性次优、残差监督 |
-| [docs/round-41-mlp-residual-reader.md](docs/round-41-mlp-residual-reader.md) | MLP Value 原型：残差监督可达 Oracle R²，但 real/control/random 几乎无差异 |
-| [docs/round-42-mlp-reader-experiments.md](docs/round-42-mlp-reader-experiments.md) | MLP Reader 深入：h_to_e 退化、E⊥ 需与 H 联合、differential 注入信号太弱 |
-| [docs/round-43-research-directions.md](docs/round-43-research-directions.md) | 下一步研究方向：rare-token 评测/条件 gate/稳定对比损失/大规模训练/记忆表示学习 |
-| [docs/round-44-end-to-end-plan.md](docs/round-44-end-to-end-plan.md) | 最大化端到端智能：评测集/reader增强/backbone适配/SFT-RL/混合记忆/CPU推理 |
-| [docs/round-45-math-validity.md](docs/round-45-math-validity.md) | 数学论证：信息上界、backbone适配必要性、differential注入、rare gate、SFT/RL边界 |
-| [docs/round-46-loss-vs-intelligence.md](docs/round-46-loss-vs-intelligence.md) | 为什么 Loss 在 Scaling Law 中可作代理，但 PLE 场景失效：分布偏移/style/条件互信息/EM不敏感性 |
-| [docs/round-47-systematic-strategy.md](docs/round-47-systematic-strategy.md) | 系统性战略：终极目标、技术债、借鉴矩阵、Phase A-E 开发计划、停止条件 |
-| [docs/round-48-full-summary.md](docs/round-48-full-summary.md) | 本轮完整总结：计划/发现/尝试/踩坑/完成/未完成/技术债/未来计划 |
-| [docs/round-49-phase-a.md](docs/round-49-phase-a.md) | Phase A：rare-token 知识评测集、任务级 ΔR²、logit-patch 分层结果与门禁判定 |
-| [docs/round-50-systematic-plan.md](docs/round-50-systematic-plan.md) | 系统性复盘：终极目标、技术债、借鉴矩阵、低资源 PLE 使用方案、蒸馏与停止条件 |
-| [docs/round-51-full-summary.md](docs/round-51-full-summary.md) | 本轮完整总结：计划/发现/尝试/踩坑/完成/未完成/未来计划 |
-| [docs/round-52-p1-memory-prototype.md](docs/round-52-p1-memory-prototype.md) | P1 记忆接口原型：exact bank + TokenMem cross-attention + distribution memory/router，训练与评测入口 |
-| [docs/round-53-p1-results.md](docs/round-53-p1-results.md) | P1 实测：rare real−control 不显著，门禁未通过，转向 RAG/蒸馏/语义记忆 |
-| [docs/round-54-rag-baseline.md](docs/round-54-rag-baseline.md) | RAG 同口径 baseline：BM25 top-3 显著提升 rare/common，支持转向 RAG/蒸馏 |
-| [docs/round-55-theory-revision.md](docs/round-55-theory-revision.md) | 理论修正：条件互信息是必要不充分，需补可实现通道/任务信息分解/评测协议 |
-| [docs/round-56-tighter-bounds.md](docs/round-56-tighter-bounds.md) | 更紧的 PLE 上下界：完整信息/低秩/backbone可见/logit-space 分层界与实现 |
-| [docs/round-57-optimal-memory-method.md](docs/round-57-optimal-memory-method.md) | 相关工作调研 + 最优记忆注入推导：logit 层条件对数似然比是最优修正 |
-| [docs/round-58-systematic-rethink.md](docs/round-58-systematic-rethink.md) | 系统性复盘：终极目标、技术债、借鉴矩阵、RAG/蒸馏优先开发计划 |
-| [docs/round-59-b3-logit-results.md](docs/round-59-b3-logit-results.md) | B3 logit-space 直接记忆下界：连绕开 Jacobian 也得不到 real>control，PLE 信息不足 |
-| [docs/round-60-multitask-harness.md](docs/round-60-multitask-harness.md) | 多任务评测 harness：知识/算术/代码输出，后续统一评测入口 |
-| [docs/round-61-contamination-audit.md](docs/round-61-contamination-audit.md) | RAG 语料污染审计：答案表面污染率 6.7%，需继续做严格去污染 |
-| [docs/round-62-rag-product-prototype.md](docs/round-62-rag-product-prototype.md) | RAG 产品化原型：可复用 BM25 模块 + 单条查询 demo |
-| [docs/round-63-hybrid-rag-serving.md](docs/round-63-hybrid-rag-serving.md) | 混合检索：分块+metadata+BM25+dense+RRF+prompt/stopping+HTTP serving |
-| [docs/round-64-end-to-end-routes-and-ple-usage.md](docs/round-64-end-to-end-routes-and-ple-usage.md) | 0.8B 提升路线与 PLE 正确定位：RAG/蒸馏为主，PLE 改为局部低熵先验 |
-| [docs/round-65-teacher-distillation-with-current-resources.md](docs/round-65-teacher-distillation-with-current-resources.md) | 现有资源怎么跑教师蒸馏：离线 teacher-text LoRA 已跑通，下一步 RAG self-distill |
-| [docs/round-66-running-qwen38-teacher.md](docs/round-66-running-qwen38-teacher.md) | 有限 GPU 跑 Qwen3.8-Flash-Next：8GB GPU+48GB RAM 可跑/离线 teacher 解耦方案 |
-| [docs/round-67-research-routes-limited-resources.md](docs/round-67-research-routes-limited-resources.md) | 有限资源技术路线全景：RAG自蒸馏/QLoRA/MoRA/teacher蒸馏/自我训练/合并/PERK/PLE |
-| [docs/round-68-ple-as-ngram-memory.md](docs/round-68-ple-as-ngram-memory.md) | PLE 新思路：训练无关 n-gram 词法记忆，与 RAG/base 形成三级记忆 |
-| [docs/round-69-ple-paths-10plus-searches.md](docs/round-69-ple-paths-10plus-searches.md) | 10+ 轮调研后的 PLE 使用路径大全：n-gram LM/代码/专名/混合检索/约束解码/缓存等 |
-| [docs/round-70-most-effective-path-math.md](docs/round-70-most-effective-path-math.md) | 数学推导最有效路径：通道排序/Blackwell信息序/多源凸融合/资源性价比/λ* |
-| [docs/round-71-engram-vs-llm-intelligence.md](docs/round-71-engram-vs-llm-intelligence.md) | 深层次反思：Engram为何无法替代LLM智能；应改造成可寻址残差/长尾记忆 |
-| [docs/round-72-systematic-rethink-v2.md](docs/round-72-systematic-rethink-v2.md) | 系统性复盘 v2：PLE 作为主创新的目标、技术债、借鉴矩阵、后续开发计划 |
-| [docs/round-73-full-summary.md](docs/round-73-full-summary.md) | 本轮完整总结：计划/发现/尝试/踩坑/完成/未完成/未来计划 |
-| [docs/round-74-ple1-ngram-results.md](docs/round-74-ple1-ngram-results.md) | PLE-1 首个实证结果：n-gram 词法记忆 code/name/number real>control 通过 |
-| [docs/round-75-ple2-addressable-memory.md](docs/round-75-ple2-addressable-memory.md) | PLE-2 可寻址 n-gram 外部记忆原型：离散 key + 外部 value |
-| [docs/round-76-ple2-addressable-results.md](docs/round-76-ple2-addressable-results.md) | PLE-2 可寻址外部记忆实证：real 检索/continuation 远优于 control |
-| [docs/round-77-ple2-rag-integration.md](docs/round-77-ple2-rag-integration.md) | PLE-2 接入 RAG：N-gram 精确寻址成为混合检索第三通道 |
-| [docs/round-78-multisource-fusion.md](docs/round-78-multisource-fusion.md) | 多源 log-linear 融合与 n-gram 校准工具 |
-| [docs/round-79-rag-channel-ablation.md](docs/round-79-rag-channel-ablation.md) | 真实 RAG 三通道消融：BM25/Dense/N-gram/Hybrid 文档与QA检索 |
-| [docs/round-80-fusion-calibration.md](docs/round-80-fusion-calibration.md) | 真实 base logits 上单λ/scale+bias/temperature 校准 |
-| [docs/round-81-ngram-router-integration.md](docs/round-81-ngram-router-integration.md) | 校准后 n-gram 融合接入 RAGServingAdapter 与独立 router |
-| [docs/round-82-semantic-values-3seed.md](docs/round-82-semantic-values-3seed.md) | 语义 value（函数块/段落）+ 3-seed 可寻址记忆结果 |
-| [docs/round-83-cap1-rag-self-distill-start.md](docs/round-83-cap1-rag-self-distill-start.md) | CAP-1 启动：RAG self-distill 数据与 LoRA 训练入口，待GPU长跑 |
-| [docs/round-84-cap1-actual-training.md](docs/round-84-cap1-actual-training.md) | CAP-1 实际训练：GTX1070 跑通 LoRA/QLoRA，held-out logprob 正向 |
-| [docs/round-85-cap1-scaling.md](docs/round-85-cap1-scaling.md) | CAP-1 扩展到199条：LoRA/QLoRA 39条held-out显著正提升 |
-| [docs/round-86-cap1-multitask-eval.md](docs/round-86-cap1-multitask-eval.md) | CAP-1 多任务评测：LoRA 提升 code/arithmetic，knowledge 略降 |
-| [docs/round-87-mora-implemented.md](docs/round-87-mora-implemented.md) | MoRA 已实现并训练：held-out 最优，code-output 提升显著 |
-| [docs/round-88-entity-value-memory.md](docs/round-88-entity-value-memory.md) | 实体 value 3-seed 评测：n-gram 对语义实体记忆极弱 |
-| [docs/round-89-multiround-research-math.md](docs/round-89-multiround-research-math.md) | 33轮多轮搜索调研 + 多视角数学推导与实验指导 |
-| [docs/round-90-sft-rl-opd-direct-weight.md](docs/round-90-sft-rl-opd-direct-weight.md) | SFT/RL/OPD/OPSD机制、直接权重调整、不用RL提升能力调研 |
-| [docs/round-91-rl-scaling-analysis.md](docs/round-91-rl-scaling-analysis.md) | 业界RL Scaling合理性/不合理性分析与低资源项目决策 |
-| [docs/round-92-systematic-rethink-v3.md](docs/round-92-systematic-rethink-v3.md) | 系统性复盘v3：终极目标、技术债、借鉴矩阵、稳定开发计划 |
-| [docs/round-93-task-router-and-calibrated-config.md](docs/round-93-task-router-and-calibrated-config.md) | 任务条件 router、log-density gate、校准配置持久化与 serving 接入 |
-| [docs/round-94-p0-multisource-ablation.md](docs/round-94-p0-multisource-ablation.md) | P0 多源消融：base/RAG/PLE/MoRA/all，3-seed，PLE 暂无正收益 |
-| [docs/round-95-math-vs-p0-results.md](docs/round-95-math-vs-p0-results.md) | 数学推导与 P0 实测差异分析：任务口径/记忆域/gate/校准需修正 |
-| [docs/round-96-optimal-multisource-math-proof.md](docs/round-96-optimal-multisource-math-proof.md) | 35轮搜索 + 最优多源记忆融合数学推导与证明 |
-| [docs/round-97-multibranch-math-proof.md](docs/round-97-multibranch-math-proof.md) | 多分支数学推导：黎曼几何/流形/优化/控制/系统/运筹/信息论/贝叶斯 |
-| [docs/round-98-optimal-method-formal-proof.md](docs/round-98-optimal-method-formal-proof.md) | 最优多源记忆融合形式化推导与证明 |
-| [docs/round-99-systematic-rethink-v4.md](docs/round-99-systematic-rethink-v4.md) | 系统性复盘 v4：PLE 证据修复、技术债、开发计划、借鉴矩阵 |
-| [docs/round-100-p0-ple-evidence-results.md](docs/round-100-p0-ple-evidence-results.md) | P0 PLE 证据修复结果：真局部任务 + 同域 bank + per-task 校准 |
-| [docs/round-101-per-task-calibration-serving.md](docs/round-101-per-task-calibration-serving.md) | Per-task 校准参数持久化并接入 Serving |
-| [docs/round-102-p1-p2-tooling.md](docs/round-102-p1-p2-tooling.md) | P1/P2 工具链：正式评测、Purified OPSD、CPU 基准 |
-| [docs/round-103-purified-opsd-results.md](docs/round-103-purified-opsd-results.md) | Purified OPSD 实跑：正式基准 + held-out 结果 |
-| [docs/round-104-systematic-rethink-v5.md](docs/round-104-systematic-rethink-v5.md) | 系统性复盘 v5：组件证据、技术债、联合评测与产品化计划 |
-| [docs/round-105-publication-readiness-gap.md](docs/round-105-publication-readiness-gap.md) | 顶刊发表差距分析：实验/基线/统计/理论/可复现 |
-| [docs/round-106-limited-resource-next-steps.md](docs/round-106-limited-resource-next-steps.md) | 资源有限现状下的下一步方向与资源分配 |
-| [docs/round-107-limited-resource-experiments.md](docs/round-107-limited-resource-experiments.md) | 有限资源实验执行：Purified OPSD 多 seed + PLE 基线消融结果 |
-| [docs/round-108-systematic-next-plan.md](docs/round-108-systematic-next-plan.md) | 系统性下一步计划：PLE Projector + learned token/ngram router + 评测升级 |
-| [docs/reproducibility-manifest.md](docs/reproducibility-manifest.md) | 可复现清单：环境、数据、命令、固定随机性、输出文件 |
-| [docs/session-log.md](docs/session-log.md) | 会话复盘：完成项、发现的技术债、下一步 |
+这一节是本项目最可迁移的产出。**我们曾因为协议缺陷两次得出错误结论**，以下每条都由真实事故换来。
 
-## EngramDB 配置即用（自动注入）
+### 指标定义（务必分清）
 
-`table_source="engramdb:store"` 现在由 engram-peft 自动消费：在 `EngramConfig` 中配置
+| 指标 | 正确用法 | 已知陷阱 |
+|---|---|---|
+| `qa_<task>_em` | 与历史轮次可比 | **子串匹配**，会虚高脚手架输出最多 33 个点（`Nouser` 含子串 `no`） |
+| `qa_em_token_mean` | **跨臂比较用这个** | token 级窗口判等，拒绝"答案被融合进更大 token"的假命中 |
+| `qa_fmt_*` | **每个臂都必须带** | 脚手架率 / 空串率 / distinct 率 / BoolQ yes 率 |
+| `qa_mean_nll` | 历史可比口径 | 评的是**不带前导空格**的答案分词（`'yes'`=9405），而模型实际吐 `' yes'`=9542 |
+| `qa_mean_nll_spaced` | **诊断口径**（`--qa-gold-nll-spaced`） | 与上面之差 = 格式敏感度 |
 
-```python
-config = EngramConfig(
-    ...,
-    engine="qwen_ple",
-    table_spec="PLE_QWEN_V1",
-    table_source="engramdb:store",
-    table_store_path="/path/to/rows",
-    table_model_dir="/path/to/Qwen3.8-Flash-Next",
-    table_dtype="float8_e4m3fn",
-)
-model = get_engram_model(base_model, config, tokenizer)
-```
+### 四条硬纪律
 
-无需手动调用 `install_disk_multi_head_embedding` / `install_real_qwen_ple_embedding`。
+1. **`control`（乱序行）不能替代 `no-PLE` 对照。** 前者是**主动扰动**，只回答"内容是否匹配"；
+   后者才回答"有 PLE 是否比没有好"。缺 `--ple-off` 臂会让假阳性无法被内部证伪
+   —— round 152 的 G0 正是这么产生了一个后来被推翻的"正结果"。
+2. **任一臂偏离分布时，生成 EM 不是有效的内容探针。** 它测的是解码稳定性。
+   必须同时报 teacher-forced NLL，且**两者矛盾时先排查分词/格式，而不是默认信 NLL**。
+3. **没有格式指纹就不许跨臂比较任何指标。**
+4. **训练与评测必须同协议。** 复用 raw 训练的 adapter 去 chat 评测，同一 adapter 的
+   gold NLL 会从 2.40 变到 5.02 —— 这个差距量化的是协议不匹配，不是能力。
 
-从 qwen35-ple YAML 配置可以直接转换：
+### 无效臂审计
 
-```python
-from qwen35_ple.config import load_config
+`scripts/audit_reader_checkpoints.py` 强制检查：冻结源张量跨臂**逐位一致**、adapter **确实移动过**、
+**跨臂范数比**在阈值内。这条纪律的直接来源是一次事故：LoRA 权重曾从未进入 optimizer，
+500 步后 96/96 个 `lora_B` 全为 0，而"训练后"的臂与冻结基线逐位相同。
 
-cfg = load_config("configs/your.yaml")
-engram_cfg = cfg.to_engram_config(
-    hidden_size=model.config.hidden_size,
-    compressed_vocab_size=model.config.vocab_size,
-    pad_id=tokenizer.pad_token_id,
-    tokenizer_name_or_path="...",
-)
-model = get_engram_model(base_model, engram_cfg, tokenizer)
-```
+### 预注册
 
-真实 FP8 Store-I e2e：
+判读标准必须在看数字之前写进文档。round-155 §7 写下的方向性预测，让后续一个
+**与预期相反**的结果能被立刻定位，而不是事后挑选解释。
 
-```bash
-PYTHONPATH=src:../EngramDB/python \
-python scripts/run_m0_smoke.py --e2e \
-  --model /path/to/Qwen3.5-0.8B \
-  --store-dir /path/to/qwen38-rows \
-  --ple-model-dir /path/to/qwen38-ple
-```
-
-轻量版（不需要完整 engram-peft 的 TRL/datasets 依赖）：
-
-```bash
-PYTHONPATH=src:../EngramDB/python \
-python scripts/run_real_fp8_e2e.py \
-  --model /path/to/Qwen3.5-0.8B \
-  --store-dir /path/to/qwen38-rows \
-  --ple-model-dir /path/to/qwen38-ple
-```
-
-## 与兄弟仓库的交互契约（摘要）
-
-- **存储契约 C1**（EngramDB → 使用方）：行语义 `PLE_QWEN_V1`（16 头/160 维/320M 行）、
-  视图格式（`<view>.manifest.json` + keys 文件）、C ABI 符号冻结规则。
-- **模型契约 C2**（engram-peft → 本仓库）：`EngramConfig` 只增不改字段，新增
-  `engine="deepseek"（默认）| "qwen_ple"`；`get_engram_model` 签名不变；
-  磁盘注入单点 `install_disk_multi_head_embedding(store)`。
-- **推理契约 C3**（LLM-CompileForge ↔ EngramDB）：`sfa_abi.proto` 加
-  `SfaWeightSource`（只增字段）；视图可作为外部权重源；运行时 dlopen 加载 C ABI。
-- **数据契约 C4**：tokenizer 唯一来源 = Qwen 官方（vocab 248320 与 Flash-Next 相同，已核实）。
-
-契约变更纪律见契约文档 `§0`：**只允许新增，禁止改语义/删除；ABI 演进 = 新符号
-（`_v2` 后缀）**。
+---
 
 ## 快速开始
+
+### 本地开发
 
 ```bash
 # 前置: uv、Rust 工具链（engramdb-python 需要 maturin 构建）
 uv sync --all-groups
-
-# 冒烟: 依赖可导入
 uv run python -c "import engram_peft, engramdb, qwen35_ple; print('ok')"
-
-# 本地提交前 lint 钩子
 uv run pre-commit install
+
+make lint    # ruff（范围与 CI 一致）
+make test    # pytest
+make check   # lint + test
 ```
+
+> **注意**：本机 `.venv` 不含 torch，`pytest` 会有若干 collection error；
+> 权威环境是远端（见下）。
+
+### 远端（AutoDL）
+
+```bash
+bash scripts/ssh_autodl.sh                 # 交互 shell
+bash scripts/ssh_autodl.sh 'uptime; df -h' # 单条命令
+QWEN35_PORT=40783 bash scripts/ssh_autodl.sh '...'   # 端口随实例变化，用 env 覆盖
+```
+
+远端布局（`/root/autodl-tmp/qwen35-ple/`）：
+
+| 路径 | 内容 |
+|---|---|
+| `repo/` | 本仓库检出；`PYTHONPATH=src` 是**必需**的（venv 有 engramdb 但没有 qwen35_ple） |
+| `venv/` | Python 环境（torch 2.6.0+cu124 / transformers 5.16.1 / peft 0.20.0） |
+| `models/` | `Qwen3.5-0.8B` / `Qwen3.5-2B` / `Qwen3.5-4B` / `qwen38_ple` / `Qwen3.8-Flash-Next-FP8-tokenizer` |
+| `qwen38-rows/` | PLE 行表，**128 个 `shard_NNN.bin`，各 400,001,920 B**（只读） |
+| `outputs/` | 实验产物 |
+| `logs/` | 运行日志 |
+
+`/dev/shm/qwen38-rows` **重启即失**；需要时用
+`bash scripts/ensure_qwen38_rows.sh --python /root/autodl-tmp/qwen35-ple/venv/bin/python` 重建。
+
+---
+
+## 复现主要结果
+
+### 1. PLE 表的天花板（计数参照系，无需 GPU）
+
+```bash
+bash scripts/ssh_autodl.sh 'cd /root/autodl-tmp/qwen35-ple/repo && \
+  /root/autodl-tmp/qwen35-ple/venv/bin/python scripts/bench_ngram_reference.py \
+  --train-npy data/phase1/PURE_WIKI/tokens.npy \
+  --eval-npy  data/phase1/wikitext-heldout-decon/tokens.npy \
+  --orders 1,2,3,4 --smoothing mkn --uniform-vocab 248047 \
+  --acc-positions 20000 --acc-candidates 5000 \
+  --output outputs/ngram-reference.json'
+```
+
+约 45 秒。自带 `--self-test` 回归覆盖。
+
+### 2. 表的可读出性探针（无需 GPU）
+
+`scripts/probe_table_next_token.py` —— 原始 2560 维行 → 下一个 token，对照显式计数 trigram
+与**乱序行控制**（必须崩到下限，否则结论作废）。自带 `scripts/selftest_probe_table.py`
+（signal 模式必须检出、noise 模式必须崩塌）。
+
+### 3. 嫁接评测（需要 GPU）
+
+```bash
+ROOT=/root/autodl-tmp/qwen35-ple
+$ROOT/venv/bin/python scripts/run_phase0.py \
+  --live-store --tokens-npy data/phase1/PURE_WIKI/tokens.npy \
+  --rows-dir /root/autodl-tmp/qwen35-ple/qwen38-rows \
+  --model-dir $ROOT/models/qwen38_ple --model $ROOT/models/Qwen3.5-0.8B \
+  --backbone-dtype bfloat16 --reader official --layer 2 --device cuda --bridge-mlp --out-mlp \
+  --official-reader-path data/official_ple_reader.pt \
+  --steps 0 --seeds 0 --modes real \
+  --qa --qa-exact-match --qa-gold-nll --qa-gold-nll-spaced \
+  --qa-file data/qa-standard/eval.jsonl --qa-max-new-tokens 32 \
+  --qa-prompt-template $'Question: {question}\nAnswer:' \
+  --qa-boolq-prompt-template $'Question: {question}\nAnswer with one word, Yes or No:' \
+  --output outputs/arm.json
+```
+
+关键 flag：`--ple-off`（no-PLE 对照格）、`--lora`（主干共适应）、`--qa-max-items`（冒烟）。
+**`--modes no-reader` 在训练前就返回**，所以 2×2 的 no-PLE 格必须用 `--ple-off`。
+
+### 4. 汇总与审计
+
+```bash
+python scripts/summarize_arms.py    --run A=a.json --run B=b.json --pair A=B --output arms.md
+python scripts/summarize_gold_nll.py --run A=a.json --baseline A --output gold.md
+python scripts/audit_reader_checkpoints.py --reference real=r.pt --arm control=c.pt --init data/official_ple_reader.pt
+python scripts/bench_engram_edge.py --rows-dir ... --label nvme-persistent --cold
+```
+
+---
+
+## 工具索引
+
+| 脚本 | 用途 |
+|---|---|
+| `run_phase0.py` | **主评测/训练入口**（三线 real/control/no-reader、LoRA、`--ple-off`、QA EM/gold NLL） |
+| `bench_ngram_reference.py` | 计数 n-gram 参照系（MKN 1–4 阶，精度/字节） |
+| `probe_table_next_token.py` | 表的可读出性探针（含乱序控制） |
+| `audit_reader_checkpoints.py` | 无效臂审计（冻结一致性 / adapter 漂移 / 范数比） |
+| `summarize_arms.py` / `summarize_gold_nll.py` | 配对汇总（逐 item delta + SEM） |
+| `bench_engram_edge.py` | 端侧存储基准（热/冷缓存、batch sweep、RSS） |
+| `build_mix.py` / `build_qa_standard_split.py` | 语料混合与标准 QA 切分（含 `--exclude-qa` 去污染） |
+| `ssh_autodl.sh` | 远端入口（**端口随实例变化**） |
+
+`scripts/` 共 125 个 Python + 31 个 shell 脚本；完整清单见 `docs/reproducibility-manifest.md`。
+
+---
 
 ## 目录结构
 
-```
-src/qwen35_ple/   实验编排代码（config / engine / data / train / eval / infer）
-configs/          训练与推理配置（初值样例，消融矩阵见设计文档 §6）
-scripts/          一次性脚本（数据构建、表资产、评测）
-docs/             本仓库文档（设计 + 契约，契约以本仓库为准）
-tests/            一致性冒烟测试（golden 对拍）
-```
-
-## 当前状态
-
-- [x] 仓库初始化（2026-08-30）
-- [x] 设计文档 + 四仓库契约 v1（冻结）
-- [x] 战略路线图（`docs/roadmap.md`）
-- [x] `PLE_QWEN_V1` 纯 Python golden 参考与测试
-- [x] Store-P 视图构建/校验脚本骨架
-- [x] YAML 配置加载与契约校验（`src/qwen35_ple/config.py`）
-- [x] engram-peft 按契约 C2 新增字段 + `QwenPleHashMapping` + 跨仓 golden
-- [x] M0 磁盘版 MultiHeadEmbedding quick 自检
-- [x] Qwen3.5-0.8B + engram-peft PLE-lite CPU e2e
-- [x] 官方 `refs/qwen4_exp_modeling.py` 快照 + 4096 forward golden
-- [x] 真实 PLE FP8 `e_t` 预计算（EngramDB `fetch_e_t_tensor` 快速路径）
-- [x] live-store 直接读取（`run_phase0.py --live-store`，无需 10GB `e_t.npy`）
-- [x] 真实 PLE 知识探针（线性分类 72.7% vs 16.7%）
-- [x] XMemTransfer 风格 reader 完整实验矩阵
-- [x] 官方 Qwen PLE reader 权重复用（`OfficialSourceQwenReader` + 可切换 MLP bridge/out_proj）
-- [x] 1M token live-store 懒加载三线实验（real / control / no-reader）
-- [x] 1M QA exact-match（9题）三线评测完成（`outputs/phase0-live1m-qa.json`）
-- [x] 扩大 QA 集：50 TriviaQA-style + 50 NQ + 50 BoolQ（`assets/qa-expanded-150.json`）
-- [x] 150 题三线 QA 完成（seed 0：no-reader 53.3% / real 42.0% / control 30.7%；bad case 与语料分析见 `docs/phase0-live1m-qa150-analysis.md`）
-- [x] M1–M5 1M 混合语料构建完成（`build_mix.py`，含 ModelScope chat/wiki/cot/tool 来源与 `--exclude-qa` 严格污染过滤；审计全部 low）
-- [x] 污染审计脚本与报告（`audit_contamination.py` + `outputs/contamination-M*.json`）
-- [x] 批处理入口：`scripts/run_mix_batch.sh`（WSL 批量跑 M1–M5 三线 QA）
-- [x] M1 三线 150 QA 已完成：real 50.7% / control 52.7% / no-reader 53.3%；机制分析见 `docs/round-26-systematic.md`
-- [x] 关键认知：混合语料 val loss 降低不等于能力提升；control 也会出现“知识型”good case
-- [x] 第一批机制分析：reader 参数 / CKA / Procrustes / kNN / intrinsic dimension / logit-level patching（详见 `docs/round-28-mechanism.md`）
-- [ ] 固定外部评测集与科学 mix 选择
-- [ ] RL 决策门禁（当前不提前做 RL）
-- [x] 依赖收口：engram-peft>=1.2.7、engramdb-python>=0.2.12（CI 同步固定正式 tag）
-- [x] target-side reader checkpoint 保存/加载（`--save-reader` / `--load-reader`）
-- [x] 通用 serving adapter（`QwenReaderServingAdapter`）
-- [x] P1 记忆接口原型代码：exact n-gram bank + TokenMem cross-attention + distribution memory/router（`docs/round-52-p1-memory-prototype.md`）
-- [x] P1 真表实测：rare real−control 不显著，门禁未通过，转向 RAG/蒸馏/语义记忆（`docs/round-53-p1-results.md`）
-- [x] RAG 同口径 baseline：BM25 top-3 在 rare/common 上显著提升（`docs/round-54-rag-baseline.md`）
-- [x] B3 logit-space 直接记忆下界：无 real>control，进一步确认 PLE 信息不足（`docs/round-59-b3-logit-results.md`）
-- [ ] 真实 vLLM/SGLang 引擎 serving 适配与 A/B
-- [x] CI 改用 uv 管理依赖与测试（`uv sync --all-groups` + `uv run ruff/pytest`）
-- [x] pre-commit 已配置（ruff）
-- [ ] CP/后训练正式消融与 100 tok/s 推理闭环
-
-## 最新实验结果（2026-09-03）
-
-### M1 混合语料 1M token 三线 150 QA
-
-| 线 | val loss | PPL | QA EM | TriviaQA | NQ | BoolQ |
-|---|---:|---:|---:|---:|---:|---:|
-| no-reader | 2.4563 | 11.66 | **53.3%** | 70% | 0% | **90%** |
-| real | **2.3949** | **10.97** | 50.7% | **76%** | 0% | 76% |
-| control | 2.4391 | 11.46 | 52.7% | 84% | 4% | 70% |
-
-### 核心结论
-
-1. **val loss：real < control < no-reader**
-   PLE 对语言建模仍有正信号。
-
-2. **QA EM：no-reader > control > real**
-   PLE 当前没有带来任务级净收益。
-
-3. **control 不是原版模型**
-   control = Qwen3.5 + 训练后 reader + 随机打乱的 PLE e_t。
-   control 也退化，说明“注入扰动 + 训练 reader”本身就会干扰 BoolQ。
-
-4. **control 也有“知识型”good case**
-   control 也能做对 Shakespeare / Newton / Rome / Poseidon，
-   因此“答案不在语料中”不能单独证明 PLE 语义对齐。
-
-5. **当前真正属于 real 独有且不在语料中的增益很弱**
-   例如 Leonardo da Vinci；其余主要是 BoolQ 上的 yes/no 差异。
-
-### 机制验证第一批结果（2026-09-03）
-
-在 `data/ple-books-160k` 上采样 2048 token，测量 PLE e_t 与 Qwen hidden：
-
-| layer | CKA | Procrustes alignment | kNN overlap (k=10) | hidden PR |
-|---|---:|---:|---:|---:|
-| 1 | 0.222 | 0.051 | 0.079 | 77.9 |
-| 8 | 0.151 | 0.034 | 0.075 | 41.2 |
-| 16 | 0.192 | 0.023 | 0.084 | 58.1 |
-| 23 | 0.151 | 0.010 | 0.068 | 37.5 |
-
-- PLE intrinsic dimension ≈ 765.6，Qwen ≈ 37–78。
-- 随机 kNN baseline ≈ 0.039，实际仅 0.068–0.084。
-- 结论：两个空间全局线性对齐弱、局部邻域接近随机；当前 reader 更像可训练投影，尚不是稳定流形对齐记忆读取器。
-
-Logit-level activation patching（完整 150 题：50 BoolQ + 50 NQ + 50 TriviaQA）：
-
-| 条件 | BoolQ logprob | BoolQ entropy | NQ logprob | Trivia logprob | 总体 logprob | 总体 entropy |
-|---|---:|---:|---:|---:|---:|---:|
-| no-reader | -10.01 | 0.84 | -6.90 | -9.57 | -8.83 | 2.45 |
-| real | **-7.62** | 2.23 | -6.80 | -9.39 | **-7.94** | 3.25 |
-| control | -8.09 | 2.33 | **-6.76** | **-9.26** | -8.04 | 3.36 |
-| random | -9.74 | 0.91 | -6.90 | -9.58 | -8.74 | 2.49 |
-| zero | -10.01 | 0.84 | -6.90 | -9.57 | -8.83 | 2.45 |
-
-- real/control 都显著增加 next entropy，random/zero 接近 no-reader。
-- real 相对 control 仅 +0.10 总体 logprob，逐题胜负 76:74，接近抛硬币；仅 BoolQ 上 real 优势较明显（+0.47）。
-- 说明当前效应主要来自“注入 PLE 类向量”，而不是“真实 token 顺序的语义内容”。
-- 详细报告：`docs/round-28-mechanism.md`。
-
-额外 BoolQ scale sweep（50 题，`--inject-scale`）：
-
-| scale | real logprob | control logprob | real-control | real entropy |
-|---:|---:|---:|---:|---:|
-| 0.25 | -9.51 | -9.64 | +0.14 | 0.89 |
-| 0.5 | -8.78 | -9.16 | +0.38 | 1.20 |
-| 1.0 | -7.62 | -8.21 | +0.59 | 2.23 |
-| 2.0 | -7.46 | **-7.19** | -0.27 | 3.95 |
-
-- real 优势在 scale=1.0 附近最大；2.0 时 control 反超且 entropy 大幅上升。
-- 低强度 0.25/0.5 可降低扰动，但 real-control 优势也缩小。
-- 初步认为 0.5 附近是“低破坏 + 仍有真实信号”的候选区间，但优势仍不够强。
-
-### 当前状态
-
-- M2–M5 已暂停，不再继续混比微调。
-- 已完成第一批机制验证工具与结果：
-  - reader 参数 / gate 统计；
-  - CKA / Procrustes / kNN / intrinsic dimension；
-  - logit-level activation patching。
-- 下一阶段：
-  - 增加 zero/random reader 对照；
-  - layer / gate 扫描（scale sweep 已完成）；
-  - 设计 contrastive / neighbor / KL 约束 loss；
-  - 完成 BoolQ logit lens 与错误分类。
-- 详细分析见：
-  - `docs/round-26-systematic.md`
-  - `docs/round-27-manifold-alignment.md`
-  - `docs/round-27-full-summary.md`
-  - `docs/round-28-mechanism.md`
-
-
-
-## 推理 / Serving 现状与规划（2026-09-01）
-
-### 当前推理现状
-
-- 当前 `run_phase0.py --qa-exact-match` 仍是 **Transformers 手动逐 token forward**。
-- 未使用 vLLM / SGLang，也没有 KV cache / continuous batching。
-- 因此 150 题规模 QA 会比较慢，主要瓶颈是重复 forward + 每步 EngramDB fetch。
-
-### EngramDB 已有的 vLLM / SGLang 适配
-
-EngramDB 仓库中已有：
-
 ```text
-engramdb/vllm_plugin.py     DiskPleEmbedding + patch_model_class_ple
-engramdb/sglang.py          install_sglang_ple + IoUringReader
-engramdb/vllm.py            fetch_e_t_tensor / PleDiskGather
+src/qwen35_ple/    实验编排代码（config / engine / data / train / eval / infer / serving）
+  ple_hash.py      PLE 行 id 计算 —— §1 那条上界的来源
+  reader.py        OfficialSourceQwenReader 等 reader 实现
+  live_store.py    PLE 行表懒加载（LiveETStore / LiveETDataset）
+configs/           训练与推理配置
+scripts/           一次性脚本（数据构建、表资产、评测、审计）
+docs/              158 篇文档（索引见下）
+tests/             35 个测试文件（golden 对拍与不变量）
+paper/             paper.typ + figures（编译产物 paper.pdf）
 ```
 
-但这些适配主要面向：
-
-```text
-源模型 / 源 PLE embedding 表（Qwen3.8-Flash-Next、Gemma 风格）
-→ 把 nn.Embedding 换成 EngramDB 磁盘表
-```
-
-**不能直接覆盖我们的 target-side reader**：
-
-```text
-Qwen3.5 backbone
-  + OfficialSourceQwenReader
-  + 每步用 [T,16] rowids 取 e_t
-  + 注入到 layer 8
-```
-
-### qwen35-ple 侧需要做的工程
-
-1. ✅ `run_phase0.py` 已支持保存 / 加载训练后的 target-side reader checkpoint（`--save-reader` / `--load-reader`），并包含 `ShortConv` extra state。
-2. ✅ 已建立 `reader_registry`（`src/qwen35_ple/reader_registry.py`），基于 EngramDB `TargetReaderRegistry`：
-   - `official_source_qwen_v1`
-   - `engram_v1`
-   - `simple_v1`
-   - future：dual-layer / multi-layer / LoRA
-3. ✅ 已定义统一 bundle（`src/qwen35_ple/serving/bundle.py`）：
-   - backbone 路径
-   - PLE table 描述
-   - reader config + checkpoint
-   - 兼容 EngramDB `engramdb-bundle-v1`
-4. ✅ 已新增通用 serving adapter（`src/qwen35_ple/serving/adapter.py`）：
-   - `QwenReaderServingAdapter`
-   - `install_qwen_reader_adapter`
-   - `install_qwen_reader_adapter_from_bundle`
-   - `install_vllm_reader_from_bundle` / `install_sglang_reader_from_bundle`
-   - 待做：接入真实 vLLM / SGLang 引擎并做 A/B
-5. no-reader 基线可先直接用 vLLM / SGLang 加速。
-
-### 已完成的后续数据准备
-
-- 已生成扩大 QA 集：
-  ```text
-  assets/qa-expanded-150.json
-  50 TriviaQA-style + 50 NQ + 50 BoolQ
-  ```
-
-### Reader checkpoint 用法（已落地）
-
-训练并保存 reader：
-
-```bash
-PYTHONPATH=src:../EngramDB/python:../engram-peft/src \
-python scripts/run_phase0.py \
-  --live-store --rows-dir /path/to/rows --model-dir /path/to/qwen38-ple \
-  --tokens-npy data/wet-1m-first.npy --reader official \
-  --modes real --seeds 0 \
-  --save-reader outputs/reader-{mode}-seed{seed}.pt \
-  --save-bundle outputs/bundle-{mode}-seed{seed}.json
-```
-
-后续 eval-only 直接加载，跳过训练：
-
-```bash
-PYTHONPATH=src:../EngramDB/python:../engram-peft/src \
-python scripts/run_phase0.py \
-  --live-store --rows-dir /path/to/rows --model-dir /path/to/qwen38-ple \
-  --tokens-npy data/wet-1m-first.npy --reader official \
-  --modes real --seeds 0 --load-reader outputs/reader-real-seed0.pt \
-  --qa-exact-match --qa-file assets/qa-expanded-150.json
-```
-
-
-### 相关协调
-
-- EngramDB v0.2.12 已发布：包含 `DiskSlotIndex` v3、`PleMemory` / `PleSequence`、
-  `BundleManifest` / `TargetReaderRegistry`、`PleMemoryAdapter` / `TargetReaderHook`。
-- engram-peft v1.2.7 已发布：`engine="qwen_ple"` + `table_source="engramdb:store"`
-  自动消费已正式可用。
-- qwen35-ple 已完成最低版本收口（`pyproject.toml` / `uv.lock` / CI tag / WSL 脚本），
-  后续按 `docs/round-23-upgrade-assessment.md` 接入统一 reader/bundle serving 协议。
-
-
-## 实验方法与当前结论（2026-08-30）
-
-### 1. 真实 PLE 特征预计算
-
-```bash
-PYTHONPATH=src:../EngramDB/python \
-python scripts/precompute_real_ple_features.py \
-  --rows-dir "/Volumes/My Passport/qwen38-rows" \
-  --tokenizer data/models/Qwen3.5-0.8B \
-  --corpus data/padapter-corpus.txt \
-  --output data/ple-features
-```
-
-输出：
-
-```text
-tokens.npy
-keys.npy
-e_t.npy
-meta.json
-```
-
-
-#### Live-store 直接读取（推荐，避免 10GB `e_t.npy`）
-
-```bash
-PYTHONPATH=src:../EngramDB/python \
-python scripts/run_phase0.py --live-store \
-    --tokens-npy /path/to/tokens.npy \
-    --rows-dir "/Volumes/My Passport/qwen38-rows" \
-    --model-dir "/Volumes/My Passport/qwen38-ple"
-```
-
-可复现基准：
-
-```bash
-PYTHONPATH=src:../EngramDB/python \
-python scripts/bench_live_store.py \
-    --rows-dir "/Volumes/My Passport/qwen38-rows" \
-    --tokens 20000 --reps 3 --csv /tmp/live-store-bench.csv
-```
-
-核心 API：`engramdb.fetch_e_t_tensor()` / `PleDiskGather.fetch_tensor()`；
-`real_ple.fetch_e_t` 已不再使用旧 Python 字节展开路径。
-
-Store-I vs Store-P 同口径 A/B 骨架：
-
-```bash
-PYTHONPATH=src:../EngramDB/python \
-python scripts/bench_store_vs_view.py \
-    --rows-dir "/Volumes/My Passport/qwen38-rows" \
-    --tokens 20000 --reps 3 --csv /tmp/store-vs-view.csv
-```
-
-懒加载逐窗口基准（Track B/C，不会物化全量 e_t）：
-
-```bash
-PYTHONPATH=src:../EngramDB/python \
-python scripts/bench_lazy_windows.py \
-    --rows-dir "/Volumes/My Passport/qwen38-rows" \
-    --tokens 100000 --seq-len 128 --step 128 \
-    --csv /tmp/lazy-100k-store.csv
-```
-
-本机 Mac 外盘实测（非 WSL 结论）：
-
-- 100k token Store-I 懒加载：781 窗口，约 60.5s
-- 100k token Store-P 懒加载：781 窗口，约 0.58s
-- 1M token Store-P 懒加载：7812 窗口，约 7.1s
-- 1M token Store-P 控制/置换访问：3 seeds 约 17.2–17.9s，说明访问序/顺序化仍有 2.4× 收益
-
-WSL 真表初测：
-
-- 20k Store-I 懒加载：156 窗口，约 22.4s
-- 100k Store-P 懒加载：781 窗口，约 1.9s
-- 1M Store-P 懒加载：7812 窗口，约 23.9s
+---
 
-Access-order A/B 基准（V136 起步）：
+## 文档索引
 
-```bash
-PYTHONPATH=src:../EngramDB/python \
-python scripts/bench_access_order.py \
-    --view /tmp/corpus.view \
-    --slot-indices-npy /tmp/corpus.slot_indices.npy \
-    --tokens 100000 --seq-len 128 --step 128 --reps 3 \
-    --csv /tmp/access-order.csv
-```
+`docs/` 共 158 篇。**不要通读**，按主题进入：
 
-WSL 复现环境脚本（V131）：
-
-```bash
-bash scripts/wsl_repro.sh
-# 或完整测试：
-bash scripts/wsl_repro.sh --full
-```
+**起点（想快速了解现状）**
 
-#### Access-order Store-P 语义视图（P0 起步）
-
-构建一个“语料 access-order Store-P 视图”：
-
-```bash
-PYTHONPATH=src:../EngramDB/python \
-python scripts/build_corpus_store_p_view.py \
-    --rows-dir "/Volumes/My Passport/qwen38-rows" \
-    --tokens-npy /path/to/tokens.npy \
-    --model-dir "/Volumes/My Passport/qwen38-ple" \
-    --output-view /tmp/corpus.view \
-    --keys-out /tmp/corpus.keys \
-    --slot-indices-out /tmp/corpus.slot_indices.npy \
-    --engramdb-bin /path/to/engramdb \
-    --verify
-```
-
-因为槽位顺序 = 语料 token 顺序，所以：
-
-```python
-slot_indices = np.load("/tmp/corpus.slot_indices.npy")  # arange(T)
-store_p = LiveETViewStore(view, slot_indices, scale, view_path="/tmp/corpus.view")
-```
-
-本机已验证：该 access-order Store-P 与 Store-I 逐 token e_t `maxdiff=0.0`。
-`run_phase0.py` 可直接用：
-
-```bash
-python scripts/run_phase0.py --live-store \
-    --store-p-view /tmp/corpus.view \
-    --store-p-slot-indices /tmp/corpus.slot_indices.npy \
-    --tokens-npy /path/to/tokens.npy \
-    --rows-dir "/Volumes/My Passport/qwen38-rows"
-```
+| 文档 | 内容 |
+|---|---|
+| `round-157-why-the-graft-is-a-prior-not-a-knowledge-channel.md` | **可证明的天花板 + 为何它只能承载先验**（建议先读） |
+| `round-158-ngram-reference-frame.md` | **计数参照系：这张表必须打败的数字** |
+| `round-156-g0-nople-format-vs-content-and-metric-bugs.md` | 格式 vs 知识；两个指标 bug；关机事故复盘 |
+| `round-154-session-consolidation-and-handoff.md` | 会话交接总览 |
+| `round-153-goal-tech-debt-and-development-plan.md` | 目标精确化、技术债、停止规则 |
 
-> **推荐方式（1M token/内存受限机器）**：`--live-store` 现在不会预加载完整 10GB `e_t`，
-> 而是只保留 `[T,16]` rowids，训练/评测时按当前窗口懒加载对应 PLE 行。
-> 因此 1M token 也可以直接跑，只要单窗口内存足够（~seq_len × 2560 × 4B）。
-> 不需要先做全量 chunk npy，也不需要全量 `e_t` 常驻内存。
+**契约与设计**：`integration-contract.md`（唯一权威）、`qwen35-ple-design.md`、`roadmap.md`
 
-#### P0 完成：通用 rowid→slot 语义索引 + 自动访问序调度
+**评测协议**：`round-145-*`（标准 held-out 与 chat 模板）、`round-146-*`（cross-file oracle）、
+`round-148-*`（format vs content 判决）、`evaluation-card-paper.md`、`phase0-protocol.md`
 
-**V123 通用语义索引**：
+**否定性结果（重要，避免重复劳动）**：`round-148` / `149` / `150` / `152` / `155` / `156` / `157` / `158`
 
-构建器会在视图旁自动写出 `*.slot_index.npz`（也可用 `--slot-index-out` 指定）：
+**存储与端侧**：`round-152-g3-engram-edge-storage-benchmark.md`
 
-```python
-from qwen35_ple.slot_index import SlotIndex
+**可复现**：`reproducibility-manifest.md`
 
-index = SlotIndex.load("/tmp/corpus.slot_index.npz")
-slots = index.to_slots(rowids)  # 任意 token 流 -> 对应 Store-P 物理槽
-store_p = LiveETViewStore.from_slot_index(view, rowids, index, scale, access_order=True)
-```
-
-`run_phase0.py` 可直接用通用索引：
+**历史**：`round-19` … `round-147`（早期 PLE 探针、机制分析、RAG/蒸馏路线、多轮系统性复盘）。
+其中 round 44–123 主要探索 RAG / 蒸馏 / 可寻址记忆，结论已收敛并记录在 `session-log.md`。
 
-```bash
-python scripts/run_phase0.py --live-store \
-    --store-p-view /tmp/corpus.view \
-    --store-p-slot-index /tmp/corpus.slot_index.npz \
-    --access-order \
-    --tokens-npy /path/to/tokens.npy \
-    --rows-dir "/Volumes/My Passport/qwen38-rows"
-```
+`session-log.md` 是按会话的连续记录，含每轮的坑与修复。
 
-**V124 自动访问序调度**：
+---
 
-- `LiveETViewStore(access_order=True)` 在每个窗口内按物理槽位排序读取，再散射回 token 顺序；
-- `LiveETDataset(access_order=True)` 还会按窗口最小物理槽位调度窗口顺序，使跨窗口 I/O 更接近顺序读；
-- `run_phase0.py --access-order` 与 `bench_lazy_windows.py --access-order` 均已接入。
+## 工程状态与技术债
 
-新增测试：`tests/test_slot_index.py`（SlotIndex 保存/加载、重复 rowid 代表槽、keys 文件构建、access-order 调度正确性）。
+**已落地**
 
-#### LiveETDataset：通用懒加载数据流（Track A）
+- 契约 v1 冻结，CI 绿（lint + shell 语法 + pytest + 两个 synthetic gate + 论文 PDF）
+- 三线评测协议、配对统计、gold NLL 分批（数值等价且 3× 加速）
+- reader checkpoint / LoRA adapter 存取、bundle + serving adapter、reader registry
+- 端侧存储基准、无效臂审计、计数参照系、表探针
+- 自动关机 finisher（含生产者存活检测与失败即关机）
 
-任意实验脚本只需三行即可接入 live-store：
+**已知技术债（按优先级）**
 
-```python
-from qwen35_ple.live_store import LiveETStore, LiveETDataset
+| 优先级 | 项 |
+|---|---|
+| P0 | 跨分布扫描未完成：4.94 的天花板是自然文本的，代码/结构化语料待测 |
+| P0 | gold NLL 的空格主口径尚未成为默认（现为诊断 flag） |
+| P1 | 真实 vLLM / SGLang 引擎 A/B 未做 |
+| P1 | 端侧只测了 NVMe；USB SSD / SD 与移动端功耗未测 |
+| P2 | `docs/` 158 篇缺少系列化的归档策略，检索成本偏高 |
 
-live = LiveETStore(store, rowids, scale, store_path=rows_dir,
-                   shards=128, rows_per_shard=2_500_012, width=160)
-dataset = LiveETDataset(tokens, live, seq_len=128, step=128)
-for batch in dataset:
-    # batch.tokens + batch.e_t are already fetched from disk, no full e_t
-    ...
-```
+**停止规则（已触发）**
 
-`LiveETDataset` 支持：
+round-153 预注册：若比例扫描在任何比例下都不显示相对同预算纯参数的劣势优势，
+则把 PLE 重新定位为**格式先验 + 可热插拔的领域先验**，通用能力目标交还给参数与数据。
+round-157/158 的证明与量化已经满足该条件 —— **不要再跑冻结嫁接的 QA 消融**。
 
-- 直接 `for` 迭代，或传给 `torch.utils.data.DataLoader(..., num_workers=N)`
-- 每 worker 自动分片，并且每个 worker 会重新打开自己的 Store 句柄
-- `control=True` 做 e_t 行乱序对照
-- `LiveETStore.stats` 记录每窗口/累计 `rows`、`unique_rows`、`cache_hits`、`fetch_seconds`
-- Store-P 路径可使用 `LiveETViewStore` 从 `engramdb.View` 按物化槽位直接读取，供 Track B 做 Store-I vs Store-P A/B
+---
 
-冒烟命令：
+## 与兄弟仓库的交互契约（摘要）
 
-```bash
-PYTHONPATH=src:../EngramDB/python \
-python scripts/run_live_et_dataset_smoke.py \
-    --rows-dir "/Volumes/My Passport/qwen38-rows" \
-    --tokens-npy /path/to/tokens.npy \
-    --model-dir "/Volumes/My Passport/qwen38-ple" \
-    --seq-len 128 --max-batches 4
-```
+- **存储契约 C1**（EngramDB → 使用方）：行语义 `PLE_QWEN_V1`（16 头 / 160 维 / 320,001,536 行）、
+  视图格式（`<view>.manifest.json` + keys 文件）、C ABI 符号冻结规则。
+- **模型契约 C2**（engram-peft → 本仓库）：`EngramConfig` 只增不改；
+  `engine="deepseek"（默认）| "qwen_ple"`；`table_source="engramdb:store"` 自动注入。
+- **推理契约 C3**（LLM-CompileForge ↔ EngramDB）：`sfa_abi.proto` 加 `SfaWeightSource`；
+  视图可作为外部权重源；运行时 dlopen 加载 C ABI。
+- **数据契约 C4**：tokenizer 唯一来源 = Qwen 官方（vocab 248320，与 Flash-Next 相同，已核实）。
 
-核心代码：`src/qwen35_ple/live_store.py`、`src/qwen35_ple/slot_index.py`、`src/qwen35_ple/real_ple.py`。
+变更纪律：**只允许新增，禁止改语义/删除；ABI 演进用 `_v2` 新符号。**
 
-### 2. PLE 知识探针
+---
 
-```bash
-PYTHONPATH=src:../EngramDB/python \
-python scripts/run_ple_knowledge_probe.py \
-  --rows-dir "/Volumes/My Passport/qwen38-rows" \
-  --tokenizer data/models/Qwen3.5-0.8B
-```
+## 公开 Artifact
 
-结果：
-
-```text
-test accuracy = 72.7%
-random baseline = 16.7%
-```
-
-结论：真实 PLE `e_t` 含语义类别信息。
-
-### 3. Reader 实验矩阵
-
-支持：
-
-```text
---layer 1 / 8
---branches 1 / 4
---short-conv
---mode real / control
-```
-
-一键跑矩阵：
-
-```bash
-bash scripts/run_full_matrix.sh
-```
-
-结果（held-out loss，baseline=4.428）：
-
-| layer | branches | short_conv | real after | control after |
-|---:|---:|---:|---:|---:|
-| 1 | 1 | 无 | 5.046 | 5.921 |
-| 1 | 4 | 无 | 5.437 | 6.328 |
-| 1 | 4 | 有 | 5.196 | 5.993 |
-| 8 | 1 | 无 | **4.851** | 5.434 |
-| 8 | 4 | 无 | 5.112 | 5.664 |
-| 8 | 4 | 有 | 5.047 | 5.389 |
-
-结论：
-
-- 所有组合中真实 PLE 都优于 shuffled control。
-- 但最佳 real 仍高于 no-reader baseline。
-- 当前最佳为 `layer=8, branches=1, short_conv=off`。
-- 下一步应降低初始扰动、延长训练、换知识评测，或直接使用官方 Qwen PLE gating 结构。
-
-### 4. 官方 PLE reader + MLP bridge/out_proj（最新结果）
-
-使用 `OfficialSourceQwenReader`，复用 Qwen3.8 官方 PLE key/value/norm/conv，
-只训练：
-
-- `query_bridge`：Qwen3.5 hidden → Qwen3.8 source query 空间
-- `out_proj`：source PLE output → Qwen3.5 hidden
-
-支持 1 层线性或 2 层 MLP。
-
-#### 160k / 500 steps / 3 seeds
-
-| 线 | val loss | 结论 |
-|---|---:|---|
-| real | 3.69394 | 3 seeds 均优于 control |
-| control | 3.70218 | — |
-
-#### 1M tokens / live-store / 500 steps / 3 seeds
-
-| 线 | val loss | PPL |
-|---|---:|---:|
-| no-reader | 2.9896 | 19.88 |
-| control | 2.8738 | 17.70 |
-| **real** | **2.8167** | **16.72** |
-
-关键差距：
-
-```text
-real − control = −0.0571
-real − no-reader = −0.1729
-control − no-reader = −0.1158
-```
-
-#### 1M QA exact-match / 9题 / 3 seeds
-
-| 线 | QA EM mean | 3 seeds |
-|---|---:|---|
-| no-reader | 44.44% | 44.4 / 44.4 / 44.4 |
-| control | 48.15% | 44.4 / 33.3 / 66.7 |
-| **real** | **51.85%** | 66.7 / 44.4 / 44.4 |
-
-```text
-real − control = +3.70pp
-real − no-reader = +7.41pp
-control − no-reader = +3.70pp
-```
-
-分 task 均值（3 seeds 合并）：
-
-| task | no-reader | control | real |
-|---|---:|---:|---:|
-| TriviaQA | 100% | 77.8% | 100% |
-| NQ | 33.3% | 55.6% | 55.6% |
-| BoolQ | 0% | 11.1% | 0% |
-
-结论：
-
-- PPL 三线仍然是最强信号：real 稳定优于 control，且超过 no-reader。
-- QA exact-match 上也出现 real > control > no-reader 的平均排序：
-  - real − control = +3.70pp
-  - real − no-reader = +7.41pp
-- 但 QA 集只有 9 题，种子间波动大（real 2/3 seeds 超过 control，1 seed 被 control 反超），不能单独作为决定性证据。
-- 下一步仍然应该上 5M 正式矩阵，并把 QA 集扩大到标准 TriviaQA / NQ / BoolQ 子集。
+- Hugging Face：[DefEki/qwen35-ple-auditable-ngram-memory](https://huggingface.co/DefEki/qwen35-ple-auditable-ngram-memory)
+- 论文源码 `paper/paper.typ`，编译产物 `paper.pdf`
+- 可复现清单 `docs/reproducibility-manifest.md`，评测卡 `docs/evaluation-card-paper.md`

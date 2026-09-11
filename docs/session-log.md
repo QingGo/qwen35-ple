@@ -3206,3 +3206,42 @@ lazy-window gate        ✅
   填掉 round-152 §2.2 / §3 的 RESULTS 占位符并加推翻批注。
 - **进行中**：判决性对照臂 `g0-nople`（同 real reader + `--ple-off`，注入恒零）已跑，
   预注册预测已写入 round-155 §7；跑完自动关机。
+
+## Session 156：G0-nople 落地、格式 vs 知识、两个指标 bug、SIGHUP 关机失效
+
+- **实验全部跑完**：round152（LoRA 行，01:15 DONE）、round152chat（08:49 DONE）、
+  round152g0（14:27 DONE，三臂 real/control/nople 齐备）。无 `FINISH_BLOCKED`。
+- **自动关机没有生效**（用户提问核对）：`logs/round152-finish.log` 最后一行停在 **08:07:13**，
+  新 finisher 于 14:27:46 启动却**一行日志都没写**。根因：g0 脚本用 `bash finisher.sh &`
+  后台启动，而脚本本身跑在 tmux 里 → 脚本退出时 tmux 关闭 session →
+  **同 session 的后台 finisher 被 SIGHUP 静默杀死**（比写第一行日志还早）。
+  实例因此一直跑到**欠费被断**。
+  修复：`setsid nohup bash "$ROOT/round152_finish.sh" >>"$LOG" 2>&1 </dev/null &`。
+  * 通用教训：tmux/screen 里脚本的后台子进程与脚本同 session；凡是"脚本退出后还要活着"的
+    工作必须 `setsid`/`nohup`/`disown` 脱离，否则会在脚本成功退出那刻被静默杀死。
+- **G0 三臂结果**（standard 1500 raw）：报告 EM real 0.4587 / control 0.3587 / **nople 0.4787**；
+  gold NLL 4.1624 / 4.5569 / **8.4737**（frozen-0.8b 参照 8.7429）。
+  **两个指标排序完全相反。**
+- **决定性观察：三臂输出格式根本不同。** nople 高频输出
+  `'\n\n<think>\n\n</think>\n\nNouser\n...'` —— 零注入的 4B **不遵守 raw 协议**，
+  退回对话先验输出 chat/thinking 脚手架；注入 PLE（**real 与乱序行皆然**）才把它压回
+  raw 续写格式。**PLE 首先是一个格式先验**（与 round-148 的 format vs content 判决同源）。
+  这也解释了 nople 的 NLL 为何≈0.8B：两者都在测"是否处在 raw 模式"。
+- **指标 bug #1（子串 EM）**：`run_phase0.py:1274` 用 `answer in generated`；
+  `Yes`/`No` 紧跟 chat 模板的 `user` 解码成 `Yesuser`/`Nouser`，**含子串** `yes`/`no` → 误判答对。
+  重算：real 0.4587→词序列 0.3620→严格 0.3860；control 0.3587→0.3147→0.3460；
+  **nople 0.4787→0.1427→0.0000（虚高 33 个点）**。
+  但词序列口径又**低估**脚手架臂（nople 确实吐了 `No` token，只是与 `user` 粘连）
+  → **任何字符串级规则都无法跨格式比较，必须改 token 级评分。**
+- **指标 bug #2（gold NLL 分词）**：`_qa_gold_nll` 用原始答案分词，但 tokenizer 实测
+  `'yes'`→9405、`' yes'`→9542 是**不同 token**，而模型自然吐带空格那个。
+  于是 BoolQ 二选一任务的 NLL 高达 6–14 nat（p≈10⁻⁵）却有 0.88 EM —— 自相矛盾。
+  → gold NLL 在 raw 协议下主要测**空格 token 约定与格式模式**，不能单独作知识探针；
+  **与 EM 冲突时不能默认信 NLL**（修正 round-155 §6 第 3 条）。
+- **G0 最终结论**：既**不能**说"real PLE 提升 4B"，也**不能**说"real PLE 无用"；
+  能确定的是**现有指标下任何 PLE 内容效应结论都不可靠**，必须先修指标。
+  round-155 的 control 损伤诊断则被 nople 证实（264/500 vs 0/500 空串）。
+- **新增 P0 技术债**：token 级 EM、gold NLL 空格主口径、每 arm 输出格式指纹
+  （脚手架率/空串率/distinct/标签分布），任一异常即拒绝跨臂比较。
+- **新增文档**：`docs/round-156-g0-nople-format-vs-content-and-metric-bugs.md`；
+  round-155 §7.1 补记结果并修正 §6 第 3 条。

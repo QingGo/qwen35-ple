@@ -189,7 +189,16 @@ echo done > "$OUT/DONE"
 # Hand off to the finisher, which validates every artifact before it will stop
 # the instance.  Running it from here means one evaluator of the exit criteria,
 # started exactly once, at the moment the work is actually finished.
+#
+# CRITICAL (round-155b): this MUST be detached with setsid/nohup.  This script
+# runs inside tmux; a plain `bash finisher.sh &` lives in the same session, so
+# when the script exits and tmux tears the session down the finisher is killed by
+# SIGHUP before it writes its first log line.  That is exactly what happened on
+# 2026-09-11: the runner logged "started finisher", exited 0, and the finisher
+# left *zero* trace in logs/round152-finish.log -- the instance then ran until
+# the account ran out of credit instead of stopping itself.  setsid puts it in a
+# new session so tmux teardown cannot reach it; nohup is belt-and-braces.
 if [[ "${G0_NO_FINISH:-0}" != "1" ]]; then
-  bash "$ROOT/round152_finish.sh" >/dev/null 2>&1 &
-  log "started finisher"
+  setsid nohup bash "$ROOT/round152_finish.sh" >>"$LOG" 2>&1 </dev/null &
+  log "started finisher (detached via setsid+nohup, pid=$!)"
 fi

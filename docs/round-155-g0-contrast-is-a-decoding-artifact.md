@@ -184,6 +184,24 @@ TriviaQA 上 122:16 的不对称（7.6×）配上一个**更差**的 NLL，方�
 
 无论哪个方向，都同时记录 teacher-forced NLL、生成 EM 与退化统计三项。
 
+### 7.1 结果（Round 156 补记）
+
+**方向性预测成立，但结论比预测更深。**
+
+* ✅ 预测 1 成立：`g0-nople` **不崩塌**（TriviaQA 空串 0/500，control 264/500），
+  生成 EM 报告值最高（0.4787）。control 的损伤是真实的，round-155 §5 的诊断成立。
+* ⚠️ 预测 2 **未能按预期解读**：nople 的 gold NLL 是三者中**最差**（8.4737），
+  而不是"≤ real"。原因是它**根本不处在 raw 续写格式里** —— 它输出
+  `\n\n<think>\n\n</think>\n\nNouser\n...` 这类 chat/thinking 脚手架。
+  注入 PLE（real 与乱序行**皆然**）才会把 4B 压回 raw 格式。
+* 🚨 由此暴露两个指标 bug：**子串匹配 EM 虚高脚手架臂最多 33 个点**
+  （`Nouser` 含 `no`），以及 **gold NLL 评的是模型不会吐的 token**
+  （`'yes'`=9405 vs 实际吐出 `' yes'`=9542）。
+
+完整拆解与修复方向见 `docs/round-156-g0-nople-format-vs-content-and-metric-bugs.md`。
+**§6 第 3 条据此修正**：生成 EM 与 teacher-forced NLL 冲突时，**不能默认以 NLL 为准**，
+必须先排查分词口径与输出格式是否跨臂一致。
+
 ---
 
 ## 8. 本轮新增的工具与坑

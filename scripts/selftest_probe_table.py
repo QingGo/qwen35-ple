@@ -181,7 +181,7 @@ sys.argv = [
     "--pure-wiki-corpus", str(SCRATCH / "nope.txt"),
     "--manifest", str(SCRATCH / "nope.json"),
     "--tokenizer", str(REPO), "--qa-exclude", str(SCRATCH / "no-qa.json"),
-    "--skip-value-proj", "--topk", str(V),
+    "--skip-value-proj", "--no-mlp", "--topk", str(V),
     "--n-probe-train", "3000", "--n-probe-val", "800", "--n-eval", "1500",
     "--n-dev", "600", "--chunk", "500", "--rowid-window", "4096",
     "--dev-tokens", "4000", "--out", str(SCRATCH / f"out-{MODE}.json"),

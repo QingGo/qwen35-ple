@@ -158,6 +158,98 @@ def _norm(text: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Contamination filter -- authoritative held-out verification
+# --------------------------------------------------------------------------- #
+_CONTAM_BASE = np.uint64(1_000_003)
+
+
+def _window_hashes(arr: np.ndarray, window: int, chunk_bytes: int = 4_000_000) -> np.ndarray:
+    """uint64 polynomial hashes of every length-``window`` slice of ``arr``.
+
+    Vectorised with ``sliding_window_view`` and chunked so peak memory stays
+    bounded.  Arithmetic is mod 2**64 by numpy unsigned wraparound; with ~1e7
+    windows the birthday collision probability is ~1e-5, and a collision can
+    only cause a *false* contamination verdict (a dropped clean record), never a
+    false clean one.
+    """
+    n = len(arr)
+    if n < window:
+        return np.empty(0, dtype=np.uint64)
+    powv = np.ones(window, dtype=np.uint64)
+    with np.errstate(over="ignore"):  # uint64 wraparound is the intended modulus
+        for j in range(1, window):
+            powv[j] = powv[j - 1] * _CONTAM_BASE
+    powv = powv[::-1].copy()
+    out = np.empty(n - window + 1, dtype=np.uint64)
+    step = max(1, chunk_bytes // max(1, window))
+    for s in range(0, n - window + 1, step):
+        e = min(n - window + 1, s + step)
+        win = np.lib.stride_tricks.sliding_window_view(arr[s : e + window - 1], window)
+        out[s:e] = (win.astype(np.uint64) * powv).sum(axis=1)
+    return out
+
+
+def contamination_filter(
+    texts: list[str],
+    heldout: np.ndarray,
+    corpus_txt: Path,
+    *,
+    window: int = 32,
+    min_chars: int = 64,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Drop held-out records whose text actually appears in PURE_WIKI.
+
+    Reproducing the ``build_mix`` selection is a *proxy* for "this record is not
+    in the graft's training corpus" and it is not exact (the manifest's record
+    count includes 512-token shards, so it over-counts source records).  This
+    function replaces the proxy with a direct test: a record is held out only if
+    NO length-``window`` normalised substring of it occurs anywhere in
+    PURE_WIKI/corpus.txt.
+
+    Records too short to test reliably are dropped rather than trusted.
+    """
+    if not corpus_txt.is_file():
+        return heldout, {"skipped": True}
+    corpus = np.frombuffer(
+        _norm(corpus_txt.read_text(encoding="utf-8", errors="ignore")).encode("ascii", "ignore"),
+        dtype=np.uint8,
+    )
+    corpus_hash = np.sort(_window_hashes(corpus, window))
+    log(
+        f"contamination filter: corpus {len(corpus)} chars -> {len(corpus_hash)} "
+        f"window hashes (L={window})"
+    )
+
+    keep: list[int] = []
+    contaminated = too_short = 0
+    t0 = time.time()
+    for i in heldout.tolist():
+        norm = _norm(texts[i])
+        if len(norm) < min_chars:
+            too_short += 1
+            continue
+        h = _window_hashes(np.frombuffer(norm.encode("ascii", "ignore"), dtype=np.uint8), window)
+        pos = np.searchsorted(corpus_hash, h)
+        pos = np.clip(pos, 0, len(corpus_hash) - 1)
+        if (corpus_hash[pos] == h).any():
+            contaminated += 1
+        else:
+            keep.append(i)
+    stats = {
+        "window": window,
+        "min_chars": min_chars,
+        "heldout_before": int(len(heldout)),
+        "heldout_clean": len(keep),
+        "dropped_contaminated": contaminated,
+        "dropped_too_short": too_short,
+        "contamination_rate_of_tested": contaminated / max(1, contaminated + len(keep)),
+        "seconds": time.time() - t0,
+    }
+    log(f"contamination filter: {stats}")
+    return np.asarray(keep, dtype=np.int64), stats
+
+
+# --------------------------------------------------------------------------- #
 # Row-table pre-flight
 # --------------------------------------------------------------------------- #
 DEFAULT_EXPECTED_SHARDS = 128
@@ -737,6 +829,80 @@ def ridge_predict(X: np.ndarray, W: np.ndarray, out_dtype=np.float32) -> np.ndar
     return (X.astype(np.float64) @ W).astype(out_dtype)
 
 
+class MLPProbe:
+    """Small nonlinear probe: standardised e_t -> hidden -> K logits.
+
+    Why this exists.  The ridge probe answers "is the next token *linearly*
+    decodable from the row?".  But the row is a constant per n-gram, so the
+    honest map from row to continuation distribution is a lookup table, which is
+    not linear in the row coordinates.  A negative or merely weak linear result
+    therefore cannot, on its own, distinguish
+
+        (a) the rows carry no recoverable next-token signal, from
+        (b) the rows carry it but not in a linearly decodable form.
+
+    The official reader is not purely linear either (value_proj -> RMSNorm ->
+    depthwise causal conv -> out_proj with scalar gates), so (b) is a live
+    architectural question and this probe is what settles it.  It gets its own
+    shuffled-label control, which is mandatory for exactly the same reason.
+    """
+
+    def __init__(
+        self, D: int, K: int, *, hidden: int, seed: int, lr: float,
+        epochs: int, batch: int, threads: int, tag: str,
+    ) -> None:
+        import torch
+
+        torch.manual_seed(seed)
+        torch.set_num_threads(max(1, threads))
+        self.torch = torch
+        self.net = torch.nn.Sequential(
+            torch.nn.Linear(D, hidden),
+            torch.nn.GELU(),
+            torch.nn.Linear(hidden, K),
+        )
+        self.K, self.lr, self.epochs, self.batch, self.tag = K, lr, epochs, batch, tag
+        self.history: list[float] = []
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "MLPProbe":
+        torch = self.torch
+        n = X.shape[0]
+        opt = torch.optim.Adam(self.net.parameters(), lr=self.lr)
+        lossf = torch.nn.CrossEntropyLoss()
+        self.net.train()
+        for ep in range(self.epochs):
+            perm = np.random.default_rng(10_000 + ep).permutation(n)
+            tot, nb = 0.0, 0
+            t0 = time.time()
+            for s in range(0, n, self.batch):
+                idx = perm[s : s + self.batch]
+                xb = torch.from_numpy(np.ascontiguousarray(X[idx], dtype=np.float32))
+                yb = torch.from_numpy(np.ascontiguousarray(y[idx], dtype=np.int64))
+                opt.zero_grad()
+                loss = lossf(self.net(xb), yb)
+                loss.backward()
+                opt.step()
+                tot += float(loss)
+                nb += 1
+            self.history.append(tot / max(1, nb))
+            log(
+                f"  mlp[{self.tag}] epoch {ep + 1}/{self.epochs} "
+                f"loss={self.history[-1]:.4f} ({time.time() - t0:.0f}s)"
+            )
+        return self
+
+    def predict(self, X: np.ndarray, step: int = 8192) -> np.ndarray:
+        torch = self.torch
+        self.net.eval()
+        out = np.empty((X.shape[0], self.K), dtype=np.float32)
+        with torch.no_grad():
+            for s in range(0, X.shape[0], step):
+                xb = torch.from_numpy(np.ascontiguousarray(X[s : s + step], dtype=np.float32))
+                out[s : s + step] = self.net(xb).numpy()
+                del xb
+        return out
+
+
 # --------------------------------------------------------------------------- #
 def sample_positions(
     tokens: np.ndarray, *, n: int, lo: int, hi: int,
@@ -863,6 +1029,18 @@ def main() -> int:
         help="run even if the row table is incomplete (produces a WRONG answer)",
     )
     ap.add_argument(
+        "--no-contamination-filter", action="store_true",
+        help="trust the build_mix replication only; do NOT verify against corpus.txt",
+    )
+    ap.add_argument("--contam-window", type=int, default=32)
+    ap.add_argument("--contam-min-chars", type=int, default=64)
+    ap.add_argument("--no-mlp", action="store_true", help="skip the nonlinear probe")
+    ap.add_argument("--mlp-hidden", type=int, default=512)
+    ap.add_argument("--mlp-epochs", type=int, default=4)
+    ap.add_argument("--mlp-batch", type=int, default=4096)
+    ap.add_argument("--mlp-lr", type=float, default=1e-3)
+    ap.add_argument("--torch-threads", type=int, default=16)
+    ap.add_argument(
         "--smoke", action="store_true",
         help="tiny end-to-end validation run (seconds, not minutes)",
     )
@@ -900,6 +1078,9 @@ def main() -> int:
         # reproduction selects every record and nothing is left held out
         args.budget_tokens = min(args.budget_tokens, 20_000)
         args.checkpoint_every = 1
+        args.mlp_hidden = min(args.mlp_hidden, 64)
+        args.mlp_epochs = min(args.mlp_epochs, 1)
+        args.mlp_batch = min(args.mlp_batch, 256)
         if not args.out or args.out == "data/probe-table-next-token.json":
             args.out = "data/probe-table-next-token-smoke.json"
     MAX_ALLOC = int(args.max_alloc_mb) * 2**20
@@ -1007,7 +1188,28 @@ def main() -> int:
     log(f"held-out split: {split_stats}")
     log(f"containment check: {cont}")
     if not split_stats["reproduction_matches_manifest"]:
-        report["warnings"].append("PURE_WIKI selection reproduction != manifest")
+        report["warnings"].append(
+            "PURE_WIKI selection reproduction != manifest (note: the manifest's "
+            "'records' counts 512-token SHARDS, so it legitimately over-counts source "
+            "records; the contamination filter below is the authoritative check)"
+        )
+
+    # The replication is only a proxy for "not in the graft corpus".  Verify it
+    # directly against the decoded corpus text and drop whatever fails.
+    if args.no_contamination_filter:
+        report["heldout_split"]["contamination_filter"] = {"skipped": True}
+        report["warnings"].append("contamination filter DISABLED by flag")
+    else:
+        heldout_idx, filt = contamination_filter(
+            texts, heldout_idx, Path(args.pure_wiki_corpus),
+            window=args.contam_window, min_chars=args.contam_min_chars,
+        )
+        report["heldout_split"]["contamination_filter"] = filt
+        if filt.get("contamination_rate_of_tested", 0) > 0.005:
+            report["warnings"].append(
+                f"{filt['dropped_contaminated']} held-out records were actually inside "
+                f"PURE_WIKI and have been excluded ({filt['contamination_rate_of_tested']:.2%})"
+            )
 
     eos = int(tokenizer.eos_token_id) if tokenizer.eos_token_id is not None else 248044
     eval_ids: list[int] = []
@@ -1438,6 +1640,97 @@ def main() -> int:
         log(f"pass 2 done in {time.time() - t0:.0f}s; peak RSS {rss_mb():.0f} MiB")
         if state_path is not None:
             dump_pass2("pass2_done")
+
+        # ---- nonlinear probe -------------------------------------------------- #
+        # The linear probe answers "is the next token LINEARLY decodable?".  The
+        # row is a per-n-gram constant, so the honest read-out is a lookup table,
+        # which is not linear -- this stage is what separates "no signal in the
+        # rows" from "signal present but not linearly decodable".
+        if not args.no_mlp:
+            t0 = time.time()
+            fit_n = min(args.n_probe_train, n_tr)
+            guard(fit_n * 2560 * 2, "mlp float16 feature cache")
+            cache = np.empty((fit_n, 2560), dtype=np.float16)
+            for s, e in chunks(fit_n, args.chunk):
+                cache[s:e] = design(fetch(rd_tr[s:e]))[:, :-1].astype(np.float16)
+            log(
+                f"mlp feature cache: {cache.shape} float16 "
+                f"({cache.nbytes / 2**30:.2f} GiB); peak RSS {rss_mb():.0f} MiB"
+            )
+            mlp_ok = True
+            try:
+                probe_mlp = MLPProbe(
+                    2560, args.topk, hidden=args.mlp_hidden, seed=args.seed, lr=args.mlp_lr,
+                    epochs=args.mlp_epochs, batch=args.mlp_batch,
+                    threads=args.torch_threads, tag="real",
+                ).fit(cache, l_tr[:fit_n])
+                ctrl_mlp = MLPProbe(
+                    2560, args.topk, hidden=args.mlp_hidden, seed=args.seed + 1, lr=args.mlp_lr,
+                    epochs=args.mlp_epochs, batch=args.mlp_batch,
+                    threads=args.torch_threads, tag="shuffled-labels",
+                ).fit(cache, l_tr_shuf[:fit_n])
+            except (RuntimeError, MemoryError, ImportError) as exc:  # noqa: BLE001
+                mlp_ok = False
+                report["warnings"].append(f"MLP probe failed: {exc}")
+                log(f"MLP probe FAILED: {exc}")
+            del cache
+
+            if mlp_ok:
+                sc_va_mlp, sc_va_mlp_shuf = Scores(n_va), Scores(n_va)
+                sc_ev_mlp, sc_ev_mlp_shuf = Scores(n_ev), Scores(n_ev)
+                for tag2, rd2, lab2, lab_shuf2, npos2, a_real, a_shuf in (
+                    ("val", rd_va, l_va, l_va, n_va, sc_va_mlp, sc_va_mlp_shuf),
+                    ("eval", rd_ev, l_ev, l_ev_shuf, n_ev, sc_ev_mlp, sc_ev_mlp_shuf),
+                ):
+                    for s, e in chunks(npos2, args.chunk):
+                        Xf = design(fetch(rd2[s:e]))[:, :-1]
+                        a_real.update(s, probe_mlp.predict(Xf), lab2[s:e], lab_shuf2[s:e])
+                        a_shuf.update(s, ctrl_mlp.predict(Xf), lab2[s:e], lab2[s:e])
+                        del Xf
+                    log(f"  mlp predict[{tag2}] done; peak RSS {rss_mb():.0f} MiB")
+                T_mlp, _ = sc_va_mlp.fit_temperature(l_va)
+                T_mlp_s, _ = sc_va_mlp_shuf.fit_temperature(l_va)
+                add_result(
+                    "probe_mlp_raw_rows",
+                    sc_va_mlp.metrics(l_va, temperature=T_mlp),
+                    sc_ev_mlp.metrics(l_ev, temperature=T_mlp),
+                )
+                add_result(
+                    "control_shuffled_train_rows_mlp",
+                    sc_va_mlp_shuf.metrics(l_va, temperature=T_mlp_s),
+                    sc_ev_mlp_shuf.metrics(l_ev, temperature=T_mlp_s),
+                )
+                report["mlp"] = {
+                    "hidden": args.mlp_hidden, "epochs": args.mlp_epochs,
+                    "batch": args.mlp_batch, "lr": args.mlp_lr,
+                    "fit_positions": int(fit_n),
+                    "real_loss_history": probe_mlp.history,
+                    "shuffled_loss_history": ctrl_mlp.history,
+                    "seconds": time.time() - t0,
+                }
+                # NOTE: the linear results are registered after this block, so read
+                # the accumulators directly rather than through `results`.
+                mlp_top1 = sc_ev_mlp.metrics(l_ev, temperature=T_mlp)["top1"]
+                mlp_ctrl_top1 = sc_ev_mlp_shuf.metrics(l_ev, temperature=T_mlp_s)["top1"]
+                linear_top1 = sc_ev_real.metrics(l_ev, temperature=T_probe)["top1"]
+                tri_top1 = results["count_trigram"]["eval"]["top1"]
+                maj_top1 = results["majority_train_prior"]["eval"]["top1"]
+                mlp_floor = max(maj_top1, mlp_ctrl_top1)
+                report["mlp_vs_linear"] = {
+                    "mlp_top1": mlp_top1,
+                    "mlp_control_top1": mlp_ctrl_top1,
+                    "linear_top1": linear_top1,
+                    "trigram_top1": tri_top1,
+                    "mlp_control_floor": mlp_floor,
+                    "mlp_minus_control_floor": mlp_top1 - mlp_floor,
+                    "mlp_minus_trigram": mlp_top1 - tri_top1,
+                    "mlp_minus_linear": mlp_top1 - linear_top1,
+                }
+                log(
+                    f"  MLP vs linear: mlp={mlp_top1:.4f} linear={linear_top1:.4f} "
+                    f"mlp_control={mlp_ctrl_top1:.4f} floor={mlp_floor:.4f} "
+                    f"trigram={tri_top1:.4f}"
+                )
     finally:
         close = getattr(store, "close", None)
         if callable(close):
@@ -1616,7 +1909,9 @@ def main() -> int:
 
     order_names = [
         "majority_train_prior", "count_bigram", "count_trigram", "probe_raw_rows",
-        "probe_frozen_value_proj", "control_shuffled_train_rows", "control_shuffled_eval_rows",
+        "probe_frozen_value_proj", "probe_mlp_raw_rows",
+        "control_shuffled_train_rows", "control_shuffled_eval_rows",
+        "control_shuffled_train_rows_mlp",
     ]
     # The pre-registered rule is printed BEFORE any number, so the result cannot
     # be read as post-hoc.

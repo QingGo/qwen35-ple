@@ -62,6 +62,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_mix as bm  # noqa: E402  (sibling script, deliberately reused)
+from bench_ngram_reference import ngram_hash_keys  # noqa: E402  (single canonical copy)
 
 
 def log(msg: str) -> None:
@@ -105,32 +106,6 @@ def sha256_text(text: str) -> str:
 
 def _normalize(text: str) -> str:
     return " ".join(text.split())
-
-
-def ngram_hash_keys(stream: np.ndarray, n: int, vocab: int,
-                    mults: np.ndarray) -> np.ndarray:
-    """Deterministic 64-bit hash of every length-``n`` window of ``stream``.
-
-    Windows are folded in chunks of three symbols (3 x 18 bits fits exactly in
-    int64 for token ids, and 3 bytes for text), each chunk mixed with an odd
-    64-bit multiplier and XOR-combined.  Collision probability for ~4e6
-    reference keys against ~1.5e6 queries is ~3e-7.
-    """
-    N = int(stream.shape[0]) - n + 1
-    if N <= 0:
-        return np.zeros(0, dtype=np.uint64)
-    keys = np.zeros(N, dtype=np.uint64)
-    chunk = 3
-    for c in range(0, n, chunk):
-        ln = min(chunk, n - c)
-        win = np.lib.stride_tricks.sliding_window_view(stream, ln)[c : c + N]
-        acc = np.zeros(N, dtype=np.int64)
-        for j in range(ln):
-            acc *= vocab
-            acc += win[:, j].astype(np.int64)
-        keys ^= acc.astype(np.uint64) * np.uint64(mults[(c // chunk) % mults.shape[0]])
-        del win, acc
-    return keys
 
 
 def _text_keys(text: str, n: int, mults: np.ndarray) -> np.ndarray:

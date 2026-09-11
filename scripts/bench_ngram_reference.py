@@ -509,10 +509,15 @@ class NgramModel:
         return np.where(found, lvl.counts[probe].astype(np.int64), 0)
 
     # -- scoring -----------------------------------------------------------
-    def stream_logprob(self, stream: np.ndarray):
-        """Per-position ln p(target) over every position with a full context."""
+    def stream_logprob(self, stream: np.ndarray, positions: Optional[np.ndarray] = None):
+        """Per-position ln p(target) for ``positions`` (default: all with a full context)."""
         M = self.order
-        pos = np.arange(M - 1, stream.shape[0], dtype=np.int64)
+        if positions is None:
+            pos = np.arange(M - 1, stream.shape[0], dtype=np.int64)
+        else:
+            pos = np.asarray(positions, dtype=np.int64)
+            if pos.size and int(pos.min()) < M - 1:
+                raise SystemExit("stream_logprob got a position without a full context")
         w = stream[pos].astype(np.int64)
         p = self.p1_dense[w]
         top_level = np.ones(pos.shape[0], dtype=np.int8)
@@ -592,6 +597,9 @@ class NgramModel:
         n_out = int(np.count_nonzero(cand_col[stream[positions].astype(np.int64)] < 0))
         inside = cand_col[stream[positions].astype(np.int64)] >= 0
         return {
+            "_top1_mask": top1,
+            "_top5_mask": top5,
+            "_inside_mask": inside,
             "n_positions": int(positions.shape[0]),
             "n_candidates": int(C),
             "n_targets_outside_candidates": n_out,
@@ -677,6 +685,10 @@ def main() -> int:
     ap.add_argument("--eval-npy", default=None, help="held-out token stream (.npy)")
     ap.add_argument("--holdout-tail", type=int, default=0,
                     help="instead of --eval-npy: hold out the last N tokens of --train-npy")
+    ap.add_argument("--train-cap", type=int, default=0,
+                    help="truncate the stream to --train-cap + --holdout-tail tokens "
+                         "before splitting, so several corpora can be run with identical "
+                         "train and eval sizes")
     ap.add_argument("--orders", default="1,2,3,4")
     ap.add_argument("--smoothing", choices=["mkn", "kn", "addk"], default="mkn")
     ap.add_argument("--addk", type=float, default=0.1, help="k for add-k smoothing")
@@ -698,6 +710,25 @@ def main() -> int:
                     help="storage budget to project onto (default 48 GiB = PLE table)")
     ap.add_argument("--ple-row-bytes", type=int, default=160,
                     help="bytes per frozen PLE row (fp8, 160 dims)")
+    ap.add_argument("--tail-analysis", action="store_true",
+                    help="bucket scored positions by the TRAIN count of their trigram "
+                         "context and report position/NLL share and top-1 per bucket")
+    ap.add_argument("--tail-buckets", default=DEFAULT_BUCKETS,
+                    help="bucket edges for --tail-analysis")
+    ap.add_argument("--verbatim-ks", default="",
+                    help="comma list of context lengths k; report the fraction of scored "
+                         "positions whose gold continuation follows the same k-token "
+                         "context in the training stream (e.g. 1,2,3,4,8,16)")
+    ap.add_argument("--source-text", default=None,
+                    help="source text file (e.g. corpus.txt) for tokenizer-normalised "
+                         "storage: bytes per source byte and tokens per source byte")
+    ap.add_argument("--position-decon-against", default=None,
+                    help="token .npy of the training stream; scored positions whose "
+                         "N-token window also occurs there are dropped before scoring")
+    ap.add_argument("--position-decon-ngram", type=int, default=64,
+                    help="window length for --position-decon-against")
+    ap.add_argument("--decon-sensitivity", default="16,32,64,128",
+                    help="also report the dropped-position fraction at these windows")
     ap.add_argument("--self-test", action="store_true",
                     help="run the built-in invariant tests (ragged search, "
                          "normalisation, floor) and exit")
@@ -716,6 +747,14 @@ def main() -> int:
     max_order = max(orders)
 
     train_full = load_tokens(train_path)
+    if args.train_cap:
+        want = int(args.train_cap) + int(args.holdout_tail)
+        if train_full.shape[0] < want:
+            raise SystemExit("--train-cap needs {:,} tokens, stream has {:,}".format(
+                want, train_full.shape[0]))
+        train_full = np.ascontiguousarray(train_full[:want])
+        log("train stream truncated to {:,} tokens (+{:,} held out) for a common geometry"
+            .format(args.train_cap, args.holdout_tail))
     if args.holdout_tail:
         if args.holdout_tail >= train_full.shape[0]:
             raise SystemExit("--holdout-tail larger than the training stream")
@@ -740,9 +779,12 @@ def main() -> int:
         split = {"kind": "disjoint stream", "train_tokens": int(train.shape[0]),
                  "eval_tokens": int(eval_stream.shape[0]), "eval_stream": str(eval_path)}
     del train_full
-    cand_src = load_tokens(Path(args.candidate_from)) if args.candidate_from else train
-    if args.candidate_from:
+    if args.candidate_from and args.candidate_from != "train":
+        cand_src = load_tokens(Path(args.candidate_from))
         split["candidate_source"] = args.candidate_from
+    else:
+        cand_src = train
+        split["candidate_source"] = "in-memory training stream" if args.candidate_from else "train"
 
     if args.uniform_vocab == "auto":
         vocab = int(max(int(train.max()), int(eval_stream.max())) + 1)
@@ -755,9 +797,63 @@ def main() -> int:
 
     prefixes = sorted({float(p) for p in args.scaling_prefixes.split(",") if p.strip()})
     positions_all = np.arange(max_order - 1, eval_stream.shape[0], dtype=np.int64)
+    if positions_all.shape[0] <= 0:
+        raise SystemExit("evaluation stream shorter than the largest order")
+
+    # ---- optional per-position decontamination ---------------------------
+    decon_info = {"applied": False}
+    if args.position_decon_against:
+        if args.position_decon_against == "train":
+            ref_train = np.ascontiguousarray(train)
+            ref_path = Path("<in-memory training stream>")
+        else:
+            ref_path = Path(args.position_decon_against)
+            if not ref_path.exists():
+                raise SystemExit("decontamination stream not found: {}".format(ref_path))
+            ref_train = load_tokens(ref_path)
+        mults = np.random.default_rng(args.seed).integers(
+            1, 2 ** 63, size=512, dtype=np.uint64) | np.uint64(1)
+        keep, usable = ngram_present_mask(ref_train, eval_stream, positions_all,
+                                          args.position_decon_ngram, vocab, mults)
+        n_usable = int(usable.sum())
+        sensitivity = {}
+        for n in sorted({int(x) for x in args.decon_sensitivity.split(",") if x.strip()}):
+            ref = np.unique(ngram_hash_keys(ref_train, n, vocab, mults))
+            keys = ngram_hash_keys(eval_stream, n, vocab, mults)
+            u = positions_all >= (n - 1)
+            hit = np.zeros(positions_all.shape[0], dtype=bool)
+            if u.any():
+                hit[u] = np.isin(keys[positions_all[u] - (n - 1)], ref)
+            sensitivity[str(n)] = int((hit & u).sum())
+            del ref, keys
+            gc.collect()
+        decon_info = {
+            "applied": True,
+            "reference_stream": str(ref_path),
+            "reference_tokens": int(ref_train.shape[0]),
+            "reference_is_in_memory_train": args.position_decon_against == "train",
+            "window_tokens": int(args.position_decon_ngram),
+            "scored_positions_before": int(positions_all.shape[0]),
+            "positions_with_full_window": n_usable,
+            "positions_dropped": int(keep.sum()),
+            "positions_dropped_share_of_full_window": (
+                float(keep.sum()) / n_usable if n_usable else 0.0),
+            "sensitivity_dropped_by_window": sensitivity,
+            "note": ("a scored position is dropped when its window (context+gold) also "
+                     "occurs in the training stream; the window is deliberately longer "
+                     "than the --verbatim-ks windows so the memorisation analysis below "
+                     "is not zeroed by construction"),
+        }
+        positions_all = positions_all[~keep]
+        log("position decontamination: dropped {:,} of {:,} positions whose {}-token "
+            "window occurs in the training stream (sensitivity {})".format(
+                int(keep.sum()), n_usable, args.position_decon_ngram, sensitivity))
+        del ref_train, keep, usable
+        gc.collect()
+
     n_positions = int(positions_all.shape[0])
     if n_positions <= 0:
-        raise SystemExit("evaluation stream shorter than the largest order")
+        raise SystemExit("no scored positions left after decontamination")
 
     def subsample(n: int):
         if n and n < n_positions:
@@ -786,6 +882,13 @@ def main() -> int:
 
     notes: List[str] = []
     peak_rss_build_start = peak_rss_bytes()
+    if args.tail_analysis or args.verbatim_ks or args.source_text:
+        log("=" * 78)
+        for line in PRE_REGISTERED_RULE.splitlines():
+            log(line)
+        log("operationalisation (fixed before the numbers): "
+            + json.dumps(PREREGISTERED_OPERATIONALISATION))
+        log("=" * 78)
 
     # ---- full-size count tables (built once, shared by all orders) --------
     log("counting n-grams at the full training size ...")
@@ -900,7 +1003,7 @@ def main() -> int:
         model = NgramModel(M, levels, vocab, args.smoothing, args.addk, notes)
         packed_bytes = int(sum(levels[k].nbytes for k in levels))
         scoring_side = int(sum(levels[k].scoring_side_bytes for k in levels))
-        lp, top_level, pos, n_zero = model.stream_logprob(eval_stream)
+        lp, top_level, pos, n_zero = model.stream_logprob(eval_stream, positions_all)
         nll = float(-lp.mean())
         hist = {}
         for k in range(1, M + 1):
@@ -926,7 +1029,9 @@ def main() -> int:
         log("order {}: NLL={:.4f} nats ppl={:.2f} ctx-hit[top]={:.3f} "
             "target-in-train-vocab={:.4f} zero-prob={}".format(
                 M, nll, metrics["perplexity"], hist[str(M)], target_seen, n_zero))
-        del lp, top_level, pos
+        if M != max_order:
+            del lp, pos
+        del top_level
         gc.collect()
 
         acc = {}
@@ -936,7 +1041,13 @@ def main() -> int:
         if cand_topk is not None:
             acc["top{}".format(args.acc_candidates)] = model.accuracy(
                 eval_stream, acc_pos, cand_topk, args.acc_chunk)
+        acc_masks = {name: {"top1": a.pop("_top1_mask"), "top5": a.pop("_top5_mask"),
+                            "inside": a.pop("_inside_mask")} for name, a in acc.items()}
         metrics["accuracy"] = acc
+        if M == max_order:
+            analysis_cache = {"lp": lp, "pos": pos, "order": M,
+                              "acc_pos": acc_pos, "acc_masks": acc_masks,
+                              "model": model, "levels": levels}
         for name, a in acc.items():
             log("  acc[{}]: top1={:.4f} top5={:.4f} (coverage={:.4f}, outside={:,})".format(
                 name, a["top1"], a["top5"], a["candidate_coverage"],
@@ -950,7 +1061,8 @@ def main() -> int:
         }
         results.append({"order": M, "metrics": metrics, "storage": storage,
                         "peak_rss_bytes_after_model": peak_rss_bytes()})
-        del model, levels
+        if M != max_order:
+            del model, levels
         gc.collect()
 
     # the full-size scaling point reuses the headline numbers
@@ -1079,6 +1191,130 @@ def main() -> int:
             "measured_bytes_per_ple_row": args.ple_row_bytes,
         })
 
+    # ---- distribution analysis (round 159) --------------------------------
+    analysis: Dict[str, object] = {
+        "enabled": bool(args.tail_analysis or args.verbatim_ks or args.source_text),
+        "pre_registered_rule": PRE_REGISTERED_RULE,
+        "pre_registered_operationalisation": PREREGISTERED_OPERATIONALISATION,
+        "position_decontamination": decon_info,
+    }
+    if args.tail_analysis or args.verbatim_ks:
+        buckets = parse_buckets(args.tail_buckets)
+        am = analysis_cache
+        raw3 = full_levels.get("raw3")
+        if raw3 is None:
+            raise SystemExit("--tail-analysis needs order 3 in --orders (raw trigram counts)")
+        counts_all = trigram_context_counts(eval_stream, am["pos"], raw3, am["model"])
+        bidx_all = bucket_index(counts_all, buckets)
+        lp_all = am["lp"]
+        nll_all = -lp_all
+        total_nll = float(nll_all.sum())
+        bucket_rows = []
+        for b, (lo, hi, label) in enumerate(buckets):
+            m = bidx_all == b
+            n_b = int(m.sum())
+            nll_b = float(nll_all[m].sum()) if n_b else 0.0
+            bucket_rows.append({
+                "bucket": label, "count_min": lo, "count_max": hi,
+                "n_positions": n_b,
+                "share_positions": n_b / max(1, am["pos"].shape[0]),
+                "nll_sum": nll_b,
+                "share_nll": nll_b / total_nll if total_nll > 0 else 0.0,
+                "nll_mean": (nll_b / n_b) if n_b else None,
+            })
+        # top-1 per bucket on the accuracy subsample (same positions for all orders)
+        counts_acc = trigram_context_counts(eval_stream, am["acc_pos"], raw3, am["model"])
+        bidx_acc = bucket_index(counts_acc, buckets)
+        masks = {}
+        for name in (("top{}".format(args.acc_candidates)) if cand_topk is not None
+                     else "full_vocab",):
+            mk = am["acc_masks"].get(name)
+            if mk is None:
+                continue
+            t1 = mk["top1"]
+            ins = mk["inside"]
+            per = []
+            for b, (_lo, _hi, label) in enumerate(buckets):
+                sel = (bidx_acc == b) & ins
+                n_sel = int(sel.sum())
+                per.append({"bucket": label, "n_scored": n_sel,
+                            "top1": float(t1[sel].mean()) if n_sel else None})
+            masks[name] = per
+        analysis["tail_buckets"] = {
+            "order_used": am["order"],
+            "bucketed_by": "raw train count of the trigram context ending at position-1",
+            "positions_scored": int(am["pos"].shape[0]),
+            "total_nll": total_nll,
+            "buckets": bucket_rows,
+            "top1_by_bucket": masks,
+            "top1_by_bucket_candidate_set": (
+                "top{}".format(args.acc_candidates) if cand_topk is not None else "full_vocab"),
+            "n_accuracy_positions": int(am["acc_pos"].shape[0]),
+            "head_tail_split": {
+                "tail_share_nll_count_le_10": float(sum(
+                    r["share_nll"] for r in bucket_rows if r["count_min"] <= 10
+                    and (r["count_max"] is None or r["count_max"] <= 10))),
+                "tail_share_positions_count_le_10": float(sum(
+                    r["share_positions"] for r in bucket_rows if r["count_min"] <= 10
+                    and (r["count_max"] is None or r["count_max"] <= 10))),
+            },
+        }
+        ks = [int(x) for x in args.verbatim_ks.split(",") if x.strip()]
+        if ks:
+            mults_v = np.random.default_rng(args.seed).integers(
+                1, 2 ** 63, size=512, dtype=np.uint64) | np.uint64(1)
+            verb = {}
+            joint = {}
+            for k in ks:
+                hit, usable = ngram_present_mask(train, eval_stream, am["pos"], k + 1,
+                                                 vocab, mults_v)
+                n_use = int(usable.sum())
+                verb[str(k)] = {
+                    "n_positions_with_full_context": n_use,
+                    "hit_rate": float(hit[usable].mean()) if n_use else None,
+                }
+                per_bucket = []
+                for b, (_lo, _hi, label) in enumerate(buckets):
+                    sel = usable & (bidx_all == b)
+                    n_sel = int(sel.sum())
+                    per_bucket.append({"bucket": label, "n_positions": n_sel,
+                                       "hit_rate": float(hit[sel].mean()) if n_sel else None})
+                joint[str(k)] = per_bucket
+                del hit, usable
+                gc.collect()
+            analysis["verbatim_continuation"] = {
+                "definition": ("fraction of scored positions whose gold continuation "
+                               "follows the same k-token context somewhere in the "
+                               "TRAINING stream (exact up to 64-bit hash collisions, "
+                               "p ~ 1e-7); necessary, not sufficient, for a table to help"),
+                "per_k": verb,
+                "per_k_by_bucket": joint,
+            }
+    if args.source_text:
+        src = Path(args.source_text)
+        if not src.exists():
+            raise SystemExit("source text not found: {}".format(src))
+        src_bytes = int(src.stat().st_size)
+        per_order = {}
+        for r in results:
+            b = r["storage"]["packed_bytes_total"]
+            per_order[str(r["order"])] = {
+                "packed_bytes": int(b),
+                "bytes_per_source_byte": b / src_bytes if src_bytes else None,
+                "bytes_per_train_token": b / max(1, int(train.shape[0])),
+            }
+        analysis["storage_normalised"] = {
+            "source_text": str(src),
+            "source_bytes": src_bytes,
+            "train_tokens": int(train.shape[0]),
+            "tokens_per_source_byte": int(train.shape[0]) / src_bytes if src_bytes else None,
+            "train_tokens_times_8_bytes": int(train.shape[0]) * 8,
+            "note": ("bytes-per-stored-ngram is tokenizer dependent, so the table is "
+                     "also expressed per byte of source text; corpus.txt is the decoded "
+                     "text the tokens were built from (newlines normalised), not the "
+                     "raw upstream file"),
+            "per_order": per_order,
+        }
     assumptions = [
         "packed_bytes_* are measured numpy nbytes of the packed CSR arrays "
         "(int64 exact context keys, int32 token ids, uint32 counts, int64 offsets); "
@@ -1133,6 +1369,7 @@ def main() -> int:
         "sanity": sanity,
         "projection": projection,
         "byte_budget": byte_budget,
+        "analysis": analysis,
         "assumptions": assumptions,
     }
     if args.output:
@@ -1203,6 +1440,133 @@ def quality_at_bytes(curve: Sequence[Dict[str, float]], target: float,
     return out
 
 
+
+def ngram_hash_keys(stream: np.ndarray, n: int, vocab: int,
+                    mults: np.ndarray) -> np.ndarray:
+    """Deterministic 64-bit hash of every length-``n`` window of ``stream``.
+
+    Windows are folded in chunks of three symbols (3 x 18 bits fits exactly in
+    int64 for token ids, and 3 bytes for text), each chunk mixed with an odd
+    64-bit multiplier and XOR-combined.  Collision probability for ~1e6 reference
+    keys against ~1e6 queries is ~1e-7, i.e. far below any effect measured here.
+
+    This is the single canonical implementation; ``build_wikitext_heldout.py``
+    imports it rather than keeping a second copy.
+    """
+    N = int(stream.shape[0]) - n + 1
+    if N <= 0:
+        return np.zeros(0, dtype=np.uint64)
+    keys = np.zeros(N, dtype=np.uint64)
+    chunk = 3
+    for c in range(0, n, chunk):
+        ln = min(chunk, n - c)
+        win = np.lib.stride_tricks.sliding_window_view(stream, ln)[c : c + N]
+        acc = np.zeros(N, dtype=np.int64)
+        for j in range(ln):
+            acc *= vocab
+            acc += win[:, j].astype(np.int64)
+        keys ^= acc.astype(np.uint64) * np.uint64(mults[(c // chunk) % mults.shape[0]])
+        del win, acc
+    return keys
+
+
+# --------------------------------------------------------------------------
+# distribution analysis (round 159): tail buckets, verbatim memorisation,
+# tokenizer-normalised storage.  Additive: nothing below runs unless the new
+# flags are given, so every round-158 number keeps its meaning.
+# --------------------------------------------------------------------------
+PRE_REGISTERED_RULE = """PRE-REGISTERED INTERPRETATION RULE (fixed before any number below was computed)
+  * tail share of NLL large AND verbatim hit rate high at k>=4  => strong candidate for external memory; quantify how much of the tail is memorisable.
+  * tail share small OR verbatim hit rate ~0                     => external memory has no niche on this distribution regardless of how good the read-out is.
+  * if NO corpus in the set beats PURE_WIKI materially on those two axes, the honest conclusion is that the limitation is a property of n-gram memory itself, not of prose, and the round-157/158 verdict generalises."""
+
+# The rule above is not decidable as written: "large", "high" and "materially"
+# have no thresholds.  They are operationalised here, BEFORE the numbers were
+# seen, so the verdict is not chosen after the fact.  Both the raw numbers and
+# this operationalisation are reported so a reader can apply their own.
+PREREGISTERED_OPERATIONALISATION = {
+    "tail_share_large": "share_nll of buckets with train trigram-count <= 10 is >= 0.50",
+    "verbatim_high_k_ge_4": "hit rate at k=4 over all scored positions is >= 0.50",
+    "beats_wiki_materially": ("on BOTH axes: tail share (count<=10) at least 0.10 higher "
+                              "than PURE_WIKI, or verbatim hit rate at k=4 at least 0.10 "
+                              "higher, and not worse on the other axis by more than 0.05"),
+    "bucket_edges": "train count of the trigram context ending at the previous token: 0 / 1 / 2-4 / 5-10 / 11-100 / >100",
+}
+
+DEFAULT_BUCKETS = "0,1,2-4,5-10,11-100,101+"
+
+
+def parse_buckets(spec: str):
+    """Parse ``0,1,2-4,5-10,11-100,101+`` into [(lo, hi, label), ...]."""
+    out = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if part.endswith("+"):
+            lo = int(part[:-1])
+            out.append((lo, None, part))
+        elif "-" in part:
+            lo, hi = part.split("-", 1)
+            out.append((int(lo), int(hi), part))
+        else:
+            out.append((int(part), int(part), part))
+    if not out:
+        raise SystemExit("empty --tail-buckets")
+    return out
+
+
+def bucket_index(counts: np.ndarray, buckets) -> np.ndarray:
+    """Map per-position counts to bucket indices (last matching bucket wins)."""
+    idx = np.full(counts.shape[0], -1, dtype=np.int64)
+    for b, (lo, hi, _label) in enumerate(buckets):
+        m = counts >= lo
+        if hi is not None:
+            m &= counts <= hi
+        idx[m] = b
+    return idx
+
+
+def trigram_context_counts(stream: np.ndarray, positions: np.ndarray,
+                           raw3: "LevelTable", model: "NgramModel") -> np.ndarray:
+    """Raw TRAIN count of the trigram context that ends at ``position - 1``.
+
+    The graft's row id is a function of (token[t-2], token[t-1], token[t]) and is
+    used to predict token[t+1], so for a scored target at index j the relevant
+    context is the trigram ending at j-1.
+    """
+    if positions.shape[0] == 0:
+        return np.zeros(0, dtype=np.int64)
+    pos_ctx = positions - 1
+    if int(pos_ctx.min()) < 2:
+        raise SystemExit("positions too early for a trigram context")
+    ck = context_keys_at(stream, pos_ctx, 2, model.vocab)
+    idx, valid = model.row_index(raw3, ck)
+    return model.row_counts(raw3, idx, valid, stream[pos_ctx].astype(np.int64))
+
+
+def ngram_present_mask(train_stream: np.ndarray, query_stream: np.ndarray,
+                       positions: np.ndarray, n: int, vocab: int,
+                       mults: np.ndarray):
+    """For each scored position: does its length-``n`` window (context+gold) occur in train?
+
+    The window for the target at index j is query[j-n+1 : j+1], i.e. the n-1
+    preceding tokens plus the gold continuation.  Positions without a full window
+    are reported as not applicable (``None`` in the returned mask's companion).
+    """
+    usable = positions >= (n - 1)
+    out = np.zeros(positions.shape[0], dtype=bool)
+    if not usable.any():
+        return out, usable
+    ref = np.unique(ngram_hash_keys(train_stream, n, vocab, mults))
+    keys = ngram_hash_keys(query_stream, n, vocab, mults)
+    start = positions[usable] - (n - 1)
+    out[usable] = np.isin(keys[start], ref)
+    del ref, keys
+    return out, usable
+
+
+
 def self_test() -> int:
     """Cheap invariants for the two places that are easy to get silently wrong.
 
@@ -1236,7 +1600,27 @@ def self_test() -> int:
     print("[self-test] ragged search == linear scan: {}".format(ok_search))
     print("[self-test] floor={:.3e}  sum_w p1(w)={:.12f}".format(model.floor, total))
     print("[self-test] normalization notes: {}".format(notes or "none"))
-    ok = ok_search and abs(total - 1.0) < 1e-9 and model.floor > 0 and not notes
+    # 3. tail buckets: edges, ordering, and that every count lands somewhere
+    buckets = parse_buckets(DEFAULT_BUCKETS)
+    probe = np.array([0, 1, 2, 4, 5, 10, 11, 100, 101, 10 ** 6], dtype=np.int64)
+    got = bucket_index(probe, buckets)
+    want = np.array([0, 1, 2, 2, 3, 3, 4, 4, 5, 5], dtype=np.int64)
+    ok_buckets = bool(np.array_equal(got, want))
+    # 4. verbatim-continuation detection on a stream with a known repeat
+    stream = np.array([1, 2, 3, 4, 5, 9, 9, 1, 2, 3, 4, 7], dtype=np.int64)
+    train_s = stream[:6]          # contains 1,2,3,4,5
+    positions = np.array([4, 11], dtype=np.int64)   # targets 5 (seen 4-gram) and 7 (unseen)
+    mv = np.random.default_rng(0).integers(1, 2 ** 63, size=512, dtype=np.uint64) | np.uint64(1)
+    hit, usable = ngram_present_mask(train_s, stream, positions, 5, 16, mv)
+    ok_verbatim = bool(usable.all() and hit[0] and not hit[1])
+    # 5. position decontamination only drops windows that really occur in train
+    keep, _u = ngram_present_mask(train_s, stream, positions, 5, 16, mv)
+    ok_decon = bool(keep[0] and not keep[1])
+    print("[self-test] bucket edges: {}".format(ok_buckets))
+    print("[self-test] verbatim hit (seen 5-gram True / unseen False): {}".format(ok_verbatim))
+    print("[self-test] position decontamination: {}".format(ok_decon))
+    ok = (ok_search and abs(total - 1.0) < 1e-9 and model.floor > 0 and not notes
+          and ok_buckets and ok_verbatim and ok_decon)
     print("[self-test] {}".format("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 
@@ -1244,6 +1628,14 @@ def self_test() -> int:
 def render_markdown(out: Dict[str, object]) -> str:
     K = out["acc_candidates"]
     lines = ["# Count-based n-gram reference ({})".format(out["schema"]), ""]
+    an = out.get("analysis") or {}
+    if an.get("enabled"):
+        lines.append("## Pre-registered interpretation rule (printed before the numbers)")
+        lines.append("")
+        lines.append("```")
+        lines.append(an["pre_registered_rule"])
+        lines.append("```")
+        lines.append("")
     lines.append("split: {} | train {:,} tokens | eval {:,} tokens | V_uni={:,}".format(
         out["split"]["kind"], out["split"]["train_tokens"], out["split"]["eval_tokens"],
         out["uniform_vocab"]))
@@ -1273,6 +1665,86 @@ def render_markdown(out: Dict[str, object]) -> str:
     lines.append("")
     lines.append("majority-class (unigram) rate: {:.4f} (token id {})".format(
         out["sanity"]["majority_token_rate"], out["sanity"]["majority_token_id"]))
+    if an.get("enabled"):
+        lines.append("")
+        lines.append("operationalisation of the rule (thresholds fixed before the run): "
+                     "`{}`".format(json.dumps(an["pre_registered_operationalisation"])))
+        pd = an.get("position_decontamination") or {}
+        if pd.get("applied"):
+            lines.append("")
+            lines.append("position decontamination: dropped {:,} of {:,} scored positions "
+                         "({:.4f}) whose {}-token window occurs in the training stream; "
+                         "dropped-count sensitivity by window: {}".format(
+                             pd["positions_dropped"], pd["positions_with_full_window"],
+                             pd["positions_dropped_share_of_full_window"],
+                             pd["window_tokens"],
+                             json.dumps(pd["sensitivity_dropped_by_window"])))
+        tb = an.get("tail_buckets")
+        if tb:
+            lines.append("")
+            lines.append("## Long-tail decomposition (order {}; bucketed by the raw TRAIN "
+                         "count of the trigram context)".format(tb["order_used"]))
+            lines.append("")
+            lines.append("| train count of trigram context | positions | share of positions | "
+                         "share of total NLL | mean NLL | top-1 (cand={}) | n acc |".format(
+                             tb["top1_by_bucket_candidate_set"]))
+            lines.append("|---|---|---|---|---|---|---|")
+            t1map = {r["bucket"]: r for r in tb["top1_by_bucket"].get(
+                tb["top1_by_bucket_candidate_set"], [])}
+            for r in tb["buckets"]:
+                m = t1map.get(r["bucket"], {})
+                lines.append("| {} | {:,} | {:.4f} | {:.4f} | {} | {} | {:,} |".format(
+                    r["bucket"], r["n_positions"], r["share_positions"], r["share_nll"],
+                    ("{:.4f}".format(r["nll_mean"]) if r["nll_mean"] is not None else "n/a"),
+                    ("{:.4f}".format(m["top1"]) if m.get("top1") is not None else "n/a"),
+                    m.get("n_scored", 0)))
+            lines.append("")
+            lines.append("tail share of NLL for contexts with train count <= 10: "
+                         "**{:.4f}** (positions: {:.4f}); order used: {}; NLL positions: "
+                         "{:,}; top-1 positions: {:,}".format(
+                             tb["head_tail_split"]["tail_share_nll_count_le_10"],
+                             tb["head_tail_split"]["tail_share_positions_count_le_10"],
+                             tb["order_used"], tb["positions_scored"],
+                             tb["n_accuracy_positions"]))
+        vb = an.get("verbatim_continuation")
+        if vb:
+            lines.append("")
+            lines.append("## Verbatim-continuation hit rate (gold continuation follows the "
+                         "same k-token context in TRAINING)")
+            lines.append("")
+            lines.append("| k | positions with full context | hit rate |")
+            lines.append("|---|---|---|")
+            for k, v in sorted(vb["per_k"].items(), key=lambda kv: int(kv[0])):
+                lines.append("| {} | {:,} | {} |".format(
+                    k, v["n_positions_with_full_context"],
+                    ("{:.4f}".format(v["hit_rate"]) if v["hit_rate"] is not None else "n/a")))
+            lines.append("")
+            lines.append("hit rate broken down by the tail buckets (rows = k, columns = "
+                         "train trigram count):")
+            lines.append("")
+            blabels = [r["bucket"] for r in tb["buckets"]] if tb else []
+            lines.append("| k | " + " | ".join(blabels) + " |")
+            lines.append("|---|" + "---|" * len(blabels))
+            for k, rows in sorted(vb["per_k_by_bucket"].items(), key=lambda kv: int(kv[0])):
+                cells = []
+                for r in rows:
+                    cells.append("{:.4f} (n={:,})".format(r["hit_rate"], r["n_positions"])
+                                 if r["hit_rate"] is not None else "n/a")
+                lines.append("| {} | {} |".format(k, " | ".join(cells)))
+        sn = an.get("storage_normalised")
+        if sn:
+            lines.append("")
+            lines.append("## Tokenizer-normalised storage ({})".format(sn["source_text"]))
+            lines.append("")
+            lines.append("source bytes {:,}; train tokens {:,}; tokens per source byte "
+                         "{:.4f}".format(sn["source_bytes"], sn["train_tokens"],
+                                         sn["tokens_per_source_byte"]))
+            lines.append("")
+            lines.append("| order | packed bytes | bytes per source byte | bytes per train token |")
+            lines.append("|---|---|---|---|")
+            for k, r in sorted(sn["per_order"].items(), key=lambda kv: int(kv[0])):
+                lines.append("| {} | {:,} | {:.6f} | {:.2f} |".format(
+                    k, r["packed_bytes"], r["bytes_per_source_byte"], r["bytes_per_train_token"]))
     lines.append("")
     lines.append("## Projection onto {:.0f} GiB ({} bytes)".format(
         out["projection"]["target_gib"], int(out["projection"]["target_bytes"])))

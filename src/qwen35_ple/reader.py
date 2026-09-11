@@ -174,9 +174,18 @@ def install_reader_hook(
     layer = backbone.model.layers[layer_index]
 
     def reader_dtype() -> torch.dtype:
-        """dtype of the reader's own parameters (backbone dtype may differ)."""
-        for param in reader.parameters():
-            return param.dtype
+        """dtype of the reader's own parameters (backbone dtype may differ).
+
+        Kept duck-typed on purpose: the rest of this hook only requires the
+        reader to be callable as ``reader(h, e_t)``, and the serving tests pass a
+        minimal non-``nn.Module`` stub.  Assuming ``nn.Module`` here (round 152)
+        broke that contract, so a reader without ``parameters()`` falls back to
+        float32 -- the dtype the research path used before the cast existed.
+        """
+        parameters = getattr(reader, "parameters", None)
+        if callable(parameters):
+            for param in parameters():
+                return param.dtype
         return torch.float32
 
     def post_hook(module, input, output):

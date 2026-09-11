@@ -832,6 +832,7 @@ def main() -> int:
             scaling.append({
                 "fraction": 1.0, "train_tokens": int(train.shape[0]),
                 "per_model_order": {M: dict(full_bytes_per_model[M]) for M in orders},
+                "quality": None,  # filled in from the headline results below
                 "note": "full-size tables reused (not rebuilt)",
             })
             continue
@@ -847,6 +848,9 @@ def main() -> int:
                 lvls[k] = build_level(c2[k][0], c2[k][1], vocab)
                 del c2[k]
         del r2, c2
+        # the prefix models need discounts/Z/retained mass too
+        for k in sorted(lvls):
+            finalize_level(lvls[k], args.smoothing, args.addk, vocab, notes)
         gc.collect()
         per_model = {}
         for M in orders:
@@ -856,8 +860,28 @@ def main() -> int:
                             "levels": {k: {"distinct_ngrams": lvls[k].n_entries,
                                            "bytes": lvls[k].nbytes}
                                        for k in range(1, M + 1)}}
+        # quality at this byte budget: same eval stream, same positions, same
+        # candidate sets as the headline table
+        quality = {}
+        for M in orders:
+            m = NgramModel(M, {k: lvls[k] for k in range(1, M + 1)}, vocab,
+                           args.smoothing, args.addk, notes)
+            lp, _tl, pos, _nz = m.stream_logprob(eval_stream)
+            q = {"nll": float(-lp.mean()), "n_positions": int(pos.shape[0])}
+            q["perplexity"] = float(math.exp(q["nll"])) if q["nll"] < 700 else float("inf")
+            if acc_pos_full is not None:
+                a = m.accuracy(eval_stream, acc_pos_full, seen_vocab, args.acc_chunk)
+                q["top1_full_vocab"] = a["top1"]
+                q["top5_full_vocab"] = a["top5"]
+            if cand_topk is not None:
+                a = m.accuracy(eval_stream, acc_pos, cand_topk, args.acc_chunk)
+                q["top1_top{}".format(args.acc_candidates)] = a["top1"]
+                q["top5_top{}".format(args.acc_candidates)] = a["top5"]
+            quality[str(M)] = q
+            del m, lp, pos
+            gc.collect()
         scaling.append({"fraction": frac, "train_tokens": int(n),
-                        "per_model_order": per_model})
+                        "per_model_order": per_model, "quality": quality})
         log("  prefix {:.3f} ({:,} tokens): order-{} bytes={:,} distinct={:,}".format(
             frac, n, max_order, per_model[max_order]["bytes"],
             per_model[max_order]["distinct_ngrams"]))
@@ -929,6 +953,20 @@ def main() -> int:
         del model, levels
         gc.collect()
 
+    # the full-size scaling point reuses the headline numbers
+    for s_ in scaling:
+        if s_.get("quality") is None:
+            s_["quality"] = {str(r["order"]): {
+                "nll": r["metrics"]["nll_nats"],
+                "perplexity": r["metrics"]["perplexity"],
+                "top1_full_vocab": r["metrics"]["accuracy"].get(
+                    "full_vocab", {}).get("top1"),
+                "top5_full_vocab": r["metrics"]["accuracy"].get(
+                    "full_vocab", {}).get("top5"),
+                "top1_top{}".format(args.acc_candidates): r["metrics"]["accuracy"].get(
+                    "top{}".format(args.acc_candidates), {}).get("top1"),
+            } for r in results}
+
     # ---- sanity checks ----------------------------------------------------
     nlls = [r["metrics"]["nll_nats"] for r in results]
     accs = [r["metrics"]["accuracy"]["full_vocab"]["top1"]
@@ -996,6 +1034,51 @@ def main() -> int:
             "saturation_note": saturation_note(M, fit_distinct, scaling, vocab),
         })
 
+    # ---- quality vs bytes: learning curves + byte-budget reading ----------
+    byte_budget = {
+        "ple_bytes": target,
+        "ple_row_bytes": args.ple_row_bytes,
+        "measured_count_bytes_per_stored_ngram": {},
+        "ngrams_storable_in_target_at_count_density": {},
+        "per_order": [],
+    }
+    for r in results:
+        M = r["order"]
+        ngrams = sum(l["distinct_ngrams"] for l in r["storage"]["per_order"])
+        b = r["storage"]["packed_bytes_total"]
+        bpn = b / ngrams if ngrams else None
+        byte_budget["measured_count_bytes_per_stored_ngram"][str(M)] = bpn
+        byte_budget["ngrams_storable_in_target_at_count_density"][str(M)] = (
+            target / bpn if bpn else None)
+        curve = []
+        for s_ in scaling:
+            q = s_["quality"].get(str(M))
+            if not q:
+                continue
+            curve.append({"train_tokens": s_["train_tokens"],
+                          "bytes": s_["per_model_order"][M]["bytes"],
+                          "nll": q["nll"], "perplexity": q["perplexity"],
+                          "top1_full_vocab": q.get("top1_full_vocab"),
+                          "nll_at_1M_tokens_measured": s_["train_tokens"] == int(train.shape[0])})
+        fit = fit_learning_curve([(c["train_tokens"], c["nll"]) for c in curve])
+        fit_acc = fit_learning_curve(
+            [(c["train_tokens"], -c["top1_full_vocab"]) for c in curve
+             if c.get("top1_full_vocab") is not None])
+        if fit_acc is not None:  # same functional form, fitted to top-1 accuracy
+            fit_acc = {"asymptote_top1": -fit_acc["asymptote_nll"],
+                       "slope": fit_acc["slope"], "r2": fit_acc["r2"],
+                       "n_points": fit_acc["n_points"]}
+        byte_budget["per_order"].append({
+            "order": M,
+            "curve": curve,
+            "learning_curve_fit": fit,
+            "learning_curve_fit_top1": fit_acc,
+            "quality_at_target_bytes_extrapolated": quality_at_bytes(
+                curve, target, fit["asymptote_nll"] if fit else None),
+            "ple_row_equivalents": target / args.ple_row_bytes,
+            "measured_bytes_per_ple_row": args.ple_row_bytes,
+        })
+
     assumptions = [
         "packed_bytes_* are measured numpy nbytes of the packed CSR arrays "
         "(int64 exact context keys, int32 token ids, uint32 counts, int64 offsets); "
@@ -1049,6 +1132,7 @@ def main() -> int:
         "results": results,
         "sanity": sanity,
         "projection": projection,
+        "byte_budget": byte_budget,
         "assumptions": assumptions,
     }
     if args.output:
@@ -1062,6 +1146,61 @@ def main() -> int:
     log("done in {:.1f}s, peak RSS {:.2f} GiB".format(
         time.time() - t_start, peak_rss_bytes() / GIB))
     return 0
+
+
+
+def fit_learning_curve(points: Sequence[Tuple[float, float]]) -> Optional[Dict[str, float]]:
+    """Fit NLL(N) = a + b * N**(-0.5) (the usual empirical LM learning curve).
+
+    ``a`` is the estimated asymptote, i.e. what the order could reach with
+    unlimited data of this distribution.  Three or more points are required.
+    """
+    pts = [(n, v) for n, v in points if n > 0]
+    if len(pts) < 3:
+        return None
+    x = np.array([n ** -0.5 for n, _ in pts], dtype=np.float64)
+    y = np.array([v for _, v in pts], dtype=np.float64)
+    A = np.vstack([np.ones_like(x), x]).T
+    coef, *_ = np.linalg.lstsq(A, y, rcond=None)
+    pred = A @ coef
+    ss_res = float(((y - pred) ** 2).sum())
+    ss_tot = float(((y - y.mean()) ** 2).sum())
+    return {"asymptote_nll": float(coef[0]), "slope": float(coef[1]),
+            "r2": 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0, "n_points": len(pts)}
+
+
+def quality_at_bytes(curve: Sequence[Dict[str, float]], target: float,
+                     asymptote: Optional[float]) -> Dict[str, object]:
+    """Read the measured NLL off the bytes axis, and say how far it is extrapolated."""
+    pts = [(c["bytes"], c["nll"]) for c in curve if c.get("bytes") and c.get("nll")]
+    if len(pts) < 2:
+        return {"available": False}
+    b = np.log(np.array([p[0] for p in pts], dtype=np.float64))
+    y = np.array([p[1] for p in pts], dtype=np.float64)
+    A = np.vstack([np.ones_like(b), b]).T
+    coef, *_ = np.linalg.lstsq(A, y, rcond=None)
+    pred = A @ coef
+    ss_res = float(((y - pred) ** 2).sum())
+    ss_tot = float(((y - y.mean()) ** 2).sum())
+    out = {
+        "available": True,
+        "fit": {"intercept": float(coef[0]), "slope_per_ln_byte": float(coef[1]),
+                "r2": 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0,
+                "n_points": len(pts)},
+        "measured_bytes_span": [float(min(p[0] for p in pts)), float(max(p[0] for p in pts))],
+        "target_bytes": float(target),
+        "extrapolation_factor_in_bytes": float(target / max(p[0] for p in pts)),
+        "nll_predicted_at_target": float(coef[0] + coef[1] * math.log(target)),
+        "caveat": ("log-linear fit of NLL on ln(bytes) over the measured span, "
+                   "extrapolated; a count table cannot actually reach this byte "
+                   "budget on a 1M-token corpus -- the corpus, not the format, is "
+                   "the binding constraint.  Read the asymptote column instead."),
+    }
+    if asymptote is not None:
+        out["asymptote_nll_from_learning_curve"] = float(asymptote)
+        out["nll_predicted_above_asymptote"] = (
+            float(coef[0] + coef[1] * math.log(target)) - float(asymptote))
+    return out
 
 
 def self_test() -> int:
@@ -1154,6 +1293,47 @@ def render_markdown(out: Dict[str, object]) -> str:
     lines.append("")
     lines.append("PLE-equivalent rows in the target: {:,.0f} rows @ {} bytes/row".format(
         out["projection"]["ple_rows_equivalent"], out["projection"]["ple_row_bytes"]))
+    lines.append("")
+    lines.append("## Quality at each byte budget (same eval stream and positions)")
+    lines.append("")
+    lines.append("| order | train tokens | table bytes | NLL | ppl | top-1 (full vocab) | "
+                 "bytes / stored n-gram | n-grams storable in the target |")
+    lines.append("|---|---|---|---|---|---|---|---|")
+    for row in out["byte_budget"]["per_order"]:
+        for c in row["curve"]:
+            bpn = out["byte_budget"]["measured_count_bytes_per_stored_ngram"][str(row["order"])]
+            lines.append("| {} | {:,} | {:,} | {:.4f} | {:.2f} | {} | {:.2f} | {:,.0f} |".format(
+                row["order"], c["train_tokens"], c["bytes"], c["nll"], c["perplexity"],
+                ("{:.4f}".format(c["top1_full_vocab"])
+                 if c.get("top1_full_vocab") is not None else "n/a"),
+                bpn, out["byte_budget"]["ngrams_storable_in_target_at_count_density"][str(row["order"])]))
+    lines.append("")
+    lines.append("| order | learning-curve asymptote NLL (a + b/sqrt(N)) | R2 | "
+                 "asymptote top-1 (same fit) | R2 | "
+                 "NLL predicted at the target byte budget (EXTRAPOLATION) | factor |")
+    lines.append("|---|---|---|---|---|---|---|")
+    for row in out["byte_budget"]["per_order"]:
+        f = row["learning_curve_fit"] or {}
+        fa = row.get("learning_curve_fit_top1") or {}
+        e = row["quality_at_target_bytes_extrapolated"]
+        lines.append("| {} | {} | {} | {} | {} | {} | {}x |".format(
+            row["order"],
+            "{:.4f}".format(f["asymptote_nll"]) if f else "n/a",
+            "{:.4f}".format(f["r2"]) if f else "n/a",
+            "{:.4f}".format(fa["asymptote_top1"]) if fa else "n/a",
+            "{:.4f}".format(fa["r2"]) if fa else "n/a",
+            "{:.4f}".format(e.get("nll_predicted_at_target", float("nan")))
+            if e.get("available") else "n/a",
+            "{:,.0f}".format(e.get("extrapolation_factor_in_bytes", float("nan")))
+            if e.get("available") else "n/a"))
+    lines.append("")
+    lines.append("Count tables need ~{:.1f} bytes per stored n-gram (order 4, measured), "
+                 "versus {} bytes per frozen PLE row: at equal bytes the count format "
+                 "holds ~{:.1f}x more n-grams.".format(
+                     out["byte_budget"]["measured_count_bytes_per_stored_ngram"].get("4", float("nan")),
+                     out["projection"]["ple_row_bytes"],
+                     (out["byte_budget"]["ngrams_storable_in_target_at_count_density"].get("4", 0)
+                      / max(1.0, out["projection"]["ple_rows_equivalent"]))))
     lines.append("")
     lines.append("sanity: `{}`".format(json.dumps(out["sanity"])))
     lines.append("")

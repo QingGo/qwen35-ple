@@ -870,6 +870,10 @@ def main() -> int:
         "--state-file", default="",
         help="prefix for the resumable .npz state (empty = no checkpointing)",
     )
+    ap.add_argument(
+        "--budget-tokens", type=int, default=1_000_000,
+        help="token budget of the PURE_WIKI split being reproduced (manifest: 1000000)",
+    )
     ap.add_argument("--resume", action="store_true", help="resume from --state-file")
     ap.add_argument("--checkpoint-every", type=int, default=5, help="chunks between state saves")
     ap.add_argument(
@@ -892,6 +896,9 @@ def main() -> int:
         args.chunk = min(args.chunk, 500)
         args.containment_sample = min(args.containment_sample, 40)
         args.max_source_records = args.max_source_records or 2_000
+        # the truncated source must be much larger than the budget, otherwise the
+        # reproduction selects every record and nothing is left held out
+        args.budget_tokens = min(args.budget_tokens, 20_000)
         args.checkpoint_every = 1
         if not args.out or args.out == "data/probe-table-next-token.json":
             args.out = "data/probe-table-next-token-smoke.json"
@@ -904,22 +911,30 @@ def main() -> int:
         "seed": args.seed,
         "warnings": [],
         "interpretation_rule_preregistered": [
-            "1. probe accuracy clearly above the explicit trigram baseline ==> the table "
-            "carries more than an explicit n-gram model, the read-out is the bottleneck.",
-            "2. probe ~ trigram and both clearly above majority ==> the rows carry a "
-            "faithful n-gram prior; the reader is failing to exploit it (supports the "
-            "round-157 argument's 'prior, not knowledge' reading, and points at the "
-            "read-out as the fixable part).",
-            "3. probe ~ shuffled control ~ majority ==> the raw rows carry NO recoverable "
-            "next-token signal; the premise fails at the source, independent of any reader.",
-            "structural caveat fixed in advance: e_t is a deterministic function of the "
-            "preceding trigram (8 bigram heads + 8 trigram heads, all causal), so "
-            "I(e_t; token[t+1]) <= I(trigram; token[t+1]).  'Above trigram' can therefore "
-            "only mean the table holds a better-estimated trigram posterior than this "
-            "corpus's explicit counts -- never information beyond an n-gram model.",
+            "1. probe ~ shuffled controls ~ floor  ==> NO_RECOVERABLE_SIGNAL; the rows "
+            "carry no recoverable next-token information and the premise dies at the source.",
+            "2. floor < probe <= count trigram     ==> the rows carry a trigram prior, "
+            "possibly degraded by the read-out; quantify the shortfall.",
+            "3. probe > count trigram              ==> the table holds a BETTER-ESTIMATED "
+            "trigram posterior than 1M-token counts (expected, Qwen3.8 saw vastly more "
+            "text).  It is NOT evidence of anything beyond an n-gram model, and must be "
+            "reported with that sentence attached.",
+            "NOTHING IN THIS EXPERIMENT CAN SUPPORT 'the table carries context-dependent "
+            "knowledge'.  e_t is a deterministic function of the preceding trigram "
+            "(8 bigram heads + 8 trigram heads, all causal: shifts 0/1/2 = token[t], "
+            "token[t-1], token[t-2]), so by the data-processing inequality "
+            "I(e_t; token[t+1]) <= I(tokens[t-2..t]; token[t+1]).  This is settled by "
+            "construction, not by measurement; no reader, however deep, can exceed it.",
             "the shuffled-rows control is mandatory: if it does not collapse to the "
             "trivial-predictor floor, the result is VOID regardless of the other numbers.",
         ],
+        "no_outcome_supports_context_knowledge": (
+            "Because e_t is a function of the preceding trigram alone, I(e_t; token[t+1]) "
+            "<= I(tokens[t-2..t]; token[t+1]).  The table can supply a continuation PRIOR "
+            "and nothing else, by construction.  No outcome of this experiment -- positive, "
+            "negative or ambiguous -- can support the claim that the raw rows carry "
+            "context-dependent knowledge."
+        ),
     }
 
     exp_records = exp_tokens = None
@@ -980,7 +995,7 @@ def main() -> int:
     # ---- EVAL stream (held out from PURE_WIKI) ---------------------------- #
     texts, heldout_idx, split_stats = build_heldout_indices(
         wikitext_path=Path(args.wikitext), tokenizer=tokenizer,
-        qa_exclude=Path(args.qa_exclude), budget=1_000_000, seed=0,
+        qa_exclude=Path(args.qa_exclude), budget=args.budget_tokens, seed=0,
         expected_records=exp_records, expected_tokens=exp_tokens,
         max_source_records=args.max_source_records or None,
     )
@@ -1551,29 +1566,39 @@ def main() -> int:
         verdict = "NO_RECOVERABLE_SIGNAL"
         text = ("the probe does not clear the trivial-predictor floor "
                 f"(majority / shuffled controls, best = {control_floor:.4f}) by 2 points: "
-                "the raw 2560-dim rows carry no linearly recoverable next-token signal.")
+                "the raw 2560-dim rows carry no linearly recoverable next-token signal. "
+                "The premise dies at the source, independent of any reader.")
     elif delta_tri > 0.02:
-        verdict = "ABOVE_EXPLICIT_TRIGRAM"
-        text = ("the probe beats the explicit trigram baseline.  e_t is by construction a "
-                "function of the preceding trigram, so this cannot mean information beyond "
-                "an n-gram model -- it means the table's row for an n-gram encodes a "
-                "better-estimated continuation distribution than this corpus's explicit "
-                "counts.  The raw rows do carry a recoverable n-gram prior, and the "
-                "read-out is where value is lost.")
+        verdict = "ABOVE_COUNT_TRIGRAM"
+        text = ("the probe beats the explicit trigram estimated from 1M tokens.  The table "
+                "therefore holds a BETTER-ESTIMATED trigram posterior than this corpus's "
+                "explicit counts -- expected, since Qwen3.8 saw vastly more text.  This is "
+                "NOT evidence of anything beyond an n-gram model: e_t is a function of the "
+                "preceding trigram alone, so it cannot be.  The read-out is where value "
+                "relative to the table's own information is lost.")
     else:
-        verdict = "FAITHFUL_NGRAM_PRIOR"
-        text = ("the probe is clearly above the majority floor and at or below the explicit "
-                "trigram: the rows carry a faithful n-gram continuation prior and nothing "
-                "more (which is all they can carry).  Round-157's claim is about the "
-                "READ-OUT, not about the table.")
+        verdict = "TRIGRAM_PRIOR"
+        text = (
+            "the probe is clearly above the trivial-predictor floor and at or below the "
+            "explicit trigram: the rows carry a trigram continuation prior"
+            + (" and the read-out recovers it essentially in full."
+               if delta_tri > -0.02 else
+               f", but the learned linear read-out recovers {(-delta_tri) * 100:.1f} points "
+               "less than explicit counts do (the shortfall is the read-out's loss).")
+            + "  Nothing beyond a trigram prior is possible, by construction."
+        )
     report["controls_collapsed"] = control_ok
     report["verdict"] = {
         "label": verdict, "text": text,
         "probe_minus_majority": delta_maj,
         "probe_minus_control_floor": delta_floor,
         "probe_minus_trigram": delta_tri,
+        "readout_shortfall_vs_trigram": -delta_tri,
         "probe_minus_bigram": p["top1"] - bi["top1"],
         "probe_minus_shuffled_eval": p["top1"] - sh_ev["top1"],
+        "no_outcome_supports_context_knowledge": report[
+            "no_outcome_supports_context_knowledge"
+        ],
     }
 
     report["positions"] = {"probe_train": n_tr, "probe_val": n_va, "eval": n_ev}
@@ -1601,11 +1626,8 @@ def main() -> int:
     for line in report["interpretation_rule_preregistered"]:
         print("  " + line)
     print(
-        "\n  structural ceiling: e_t is a deterministic function of the preceding\n"
-        "  trigram (rowids = hash(token[t], token[t-1]) / hash(+ token[t-2])), so\n"
-        "  I(e_t; token[t+1]) <= I(trigram; token[t+1]); a probe cannot exceed\n"
-        "  the optimal trigram predictor.  Causality check: "
-        f"{report['rowid']['causality']}"
+        "\n  UNCONDITIONAL: " + report["no_outcome_supports_context_knowledge"] + "\n"
+        "  Causality check (real PleSpec): " + str(report["rowid"]["causality"])
     )
     print("=" * 78)
     print("\n=== RESULTS: next-token prediction from raw PLE rows (held-out WikiText) ===")

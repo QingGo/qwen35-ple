@@ -598,6 +598,7 @@ def _qa_gold_nll(
     chat_enable_thinking: bool = False,
     head_mask: list[int] | None = None,
     batch_size: int = 8,
+    space_variant: bool = False,
 ) -> dict:
     """Teacher-forced gold-answer NLL for the format-matched QA prompt.
 
@@ -607,6 +608,13 @@ def _qa_gold_nll(
     answer tokenization, matching the QA-SFT convention and avoiding a
     leading-space tokenization mismatch between arms.
 
+    ``space_variant`` adds the ``" " + answer`` reading as a second row per item
+    (round-156): the raw reading scores token 9405 for ``yes`` while the model
+    actually emits 9542, the spaced token, so on a binary task the raw number
+    reaches 6-14 nats against a reported 0.88 EM.  The raw reading is kept as
+    ``gold_nll`` so earlier rounds stay comparable, and the spaced reading lands
+    beside it as ``gold_nll_spaced``.
+
     Items are scored in right-padded batches.  Right padding is safe because
     teacher forcing reads each continuation from its own positions, and the PLE
     rows keep one item per row so the reader's causal convolution stays within
@@ -615,6 +623,8 @@ def _qa_gold_nll(
     device = next(model.parameters()).device
     answers: list[dict[str, Any]] = []
     per_task_nll: dict[str, list[float]] = {}
+    per_task_nll_spaced: dict[str, list[float]] = {}
+    spaced_by_idx: dict[int, float] = {}
     total_tokens = 0
     total_loss = 0.0
 
@@ -629,22 +639,25 @@ def _qa_gold_nll(
             chat_enable_thinking=chat_enable_thinking,
         )
         answer = str(item.get("answer", ""))
-        continuation = answer
-        cont_ids = tokenizer.encode(continuation, add_special_tokens=False)
-        if not prompt_ids or not cont_ids:
-            continue
-        full_ids = list(prompt_ids) + list(cont_ids)
-        prepared.append(
-            {
-                "idx": idx,
-                "item": item,
-                "answer": answer,
-                "continuation": continuation,
-                "full_ids": full_ids,
-                "start": len(prompt_ids),
-                "end": len(full_ids),
-            }
-        )
+        # Each item contributes the raw reading, plus optionally the spaced one.
+        variants = [("raw", answer)] if not space_variant else [("raw", answer), ("spaced", " " + answer)]
+        for variant, continuation in variants:
+            cont_ids = tokenizer.encode(continuation, add_special_tokens=False)
+            if not prompt_ids or not cont_ids:
+                continue
+            full_ids = list(prompt_ids) + list(cont_ids)
+            prepared.append(
+                {
+                    "idx": idx,
+                    "variant": variant,
+                    "item": item,
+                    "answer": answer,
+                    "continuation": continuation,
+                    "full_ids": full_ids,
+                    "start": len(prompt_ids),
+                    "end": len(full_ids),
+                }
+            )
 
     chunk = max(1, int(batch_size))
     for offset in range(0, len(prepared), chunk):
@@ -691,8 +704,15 @@ def _qa_gold_nll(
             value = float(loss.item())
             n_tokens = int(end - start)
             task = str(entry["item"].get("task", "unknown"))
+            if entry.get("variant", "raw") == "spaced":
+                # Diagnostic reading only: recorded beside the raw NLL, never
+                # folded into the headline aggregates.
+                spaced_by_idx[entry["idx"]] = value
+                per_task_nll_spaced.setdefault(task, []).append(value)
+                continue
             answers.append(
                 {
+                    "_idx": entry["idx"],
                     "task": task,
                     "question": str(entry["item"].get("question", "")),
                     "answer": entry["answer"],
@@ -719,6 +739,19 @@ def _qa_gold_nll(
         float(total_loss / total_tokens) if total_tokens else float("nan")
     )
     metrics["qa_n"] = float(len(answers))
+    if space_variant:
+        for answer in answers:
+            value = spaced_by_idx.get(answer.get("_idx", -1))
+            if value is not None:
+                answer["gold_nll_spaced"] = value
+        for task, vals in sorted(per_task_nll_spaced.items()):
+            metrics[f"qa_{task}_nll_spaced"] = float(np.mean(vals))
+        spaced_all = [a["gold_nll_spaced"] for a in answers if "gold_nll_spaced" in a]
+        metrics["qa_mean_nll_spaced"] = (
+            float(np.mean(spaced_all)) if spaced_all else float("nan")
+        )
+    for answer in answers:
+        answer.pop("_idx", None)
     return {"metrics": metrics, "answers": answers}
 
 
@@ -1272,6 +1305,16 @@ def _qa_exact_match(
                 state["generated"], skip_special_tokens=True
             )
             hit = _normalize_answer(item["answer"]) in _normalize_answer(generated_text)
+            # Round-156 metric fix.  Substring matching is not comparable across
+            # arms that print different formats: a model that emits chat
+            # scaffolding glues "No" to the template's "user" role, and the
+            # decoded "Nouser" *contains* the substring "no", so the arm is
+            # credited with an answer it never gave in the requested format
+            # (measured: up to 33 points of inflation).  The token-level score
+            # concatenates decoded token pieces over a sliding window instead, so
+            # "No"+"user" no longer collapses into a false hit while a genuine
+            # multi-token answer such as "The Persistence of Memory" still counts.
+            hit_token = _token_level_hit(tokenizer, state["generated"], item["answer"])
             records.append(
                 (
                     state["idx"],
@@ -1281,8 +1324,11 @@ def _qa_exact_match(
                         "answer": item["answer"],
                         "generated": generated_text,
                         "correct": hit,
+                        "correct_token": hit_token,
+                        "n_generated": len(state["generated"]),
                     },
                     hit,
+                    hit_token,
                 )
             )
         if device.type == "cuda":
@@ -1291,16 +1337,85 @@ def _qa_exact_match(
     records.sort(key=lambda record: record[0])
     answers = [record[1] for record in records]
     per_task_correct: dict[str, list[bool]] = {}
-    for _, answer, hit in records:
+    per_task_correct_token: dict[str, list[bool]] = {}
+    for _, answer, hit, hit_token in records:
         per_task_correct.setdefault(answer["task"], []).append(hit)
+        per_task_correct_token.setdefault(answer["task"], []).append(hit_token)
 
     metrics: dict[str, float] = {}
     for task, hits in sorted(per_task_correct.items()):
         metrics[f"qa_{task}_em"] = float(np.mean(hits))
+    for task, hits in sorted(per_task_correct_token.items()):
+        metrics[f"qa_{task}_em_token"] = float(np.mean(hits))
     all_hits = [answer["correct"] for answer in answers]
+    all_token_hits = [answer["correct_token"] for answer in answers]
     metrics["qa_em_mean"] = float(np.mean(all_hits)) if all_hits else float("nan")
+    metrics["qa_em_token_mean"] = (
+        float(np.mean(all_token_hits)) if all_token_hits else float("nan")
+    )
     metrics["qa_n"] = float(len(all_hits))
+    metrics.update(_format_fingerprint(answers))
     return {"metrics": metrics, "answers": answers}
+
+
+def _token_level_hit(tokenizer, generated_ids, answer: str) -> bool:
+    """Match the gold answer against *decoded token windows*.
+
+    The plain substring test in :func:`_qa_exact_match` is not comparable across
+    arms whose generations differ in format (round-156: ``Nouser`` contains
+    ``no``).  Concatenating decoded pieces over a sliding window keeps
+    multi-token answers working while refusing to match across a token boundary
+    that the model never actually produced as a unit.
+    """
+    target = _normalize_answer(answer)
+    if not target or not generated_ids:
+        return False
+    n = len(generated_ids)
+    # A gold answer can span more tokens than its own tokenization when the
+    # model prints it with different spacing, so allow a small amount of slack.
+    max_window = min(n, len(tokenizer.encode(answer, add_special_tokens=False)) + 2)
+    for window in range(1, max(max_window, 1) + 1):
+        for start in range(0, n - window + 1):
+            piece = tokenizer.decode(
+                list(generated_ids[start : start + window]), skip_special_tokens=True
+            )
+            if _normalize_answer(piece) == target:
+                return True
+    return False
+
+
+# Role/thinking markers that mean the arm is not answering in the requested raw
+# format.  A high rate makes cross-arm EM comparison meaningless.
+_FORMAT_MARKERS = ("<think>", "</think>", "<|im_start|>", "<|im_end|>", "assistant\n", "user\n")
+
+
+def _format_fingerprint(answers: list[dict[str, Any]]) -> dict[str, float]:
+    """Per-arm degeneracy statistics that gate cross-arm comparison.
+
+    Round-156 showed an arm can look best on EM purely because its output format
+    changed (chat scaffolding inflated the substring score, and a shuffled-row
+    control emitted empty strings on 52.8% of TriviaQA).  Every arm therefore
+    carries these numbers, and a large deviation from its peers is a reason to
+    refuse the comparison rather than to report a delta.
+    """
+    if not answers:
+        return {}
+    n = len(answers)
+    texts = [str(a.get("generated", "")) for a in answers]
+    empty = sum(1 for t in texts if not t.strip())
+    scaffold = sum(1 for t in texts if any(m in t for m in _FORMAT_MARKERS))
+    distinct = len(set(texts))
+    out = {
+        "qa_fmt_n": float(n),
+        "qa_fmt_empty_rate": empty / n,
+        "qa_fmt_scaffold_rate": scaffold / n,
+        "qa_fmt_distinct_rate": distinct / n,
+    }
+    boolq = [a for a in answers if a.get("task") == "boolq"]
+    if boolq:
+        yes = sum(1 for a in boolq if str(a.get("generated", "")).strip().lower().startswith("yes"))
+        out["qa_fmt_boolq_yes_rate"] = yes / len(boolq)
+    return out
 
 
 def _format_reader_save_path(template: str, mode: str, seed: int) -> Path:
@@ -1399,6 +1514,7 @@ def _run_mode(
                     getattr(args, "qa_chat_enable_thinking", False)
                 ),
                 head_mask=head_mask,
+                space_variant=bool(getattr(args, "qa_gold_nll_spaced", False)),
                 batch_size=int(getattr(args, "qa_batch_size", 1) or 1),
             )
         return {
@@ -1600,6 +1716,7 @@ def _run_mode(
                 getattr(args, "qa_chat_enable_thinking", False)
             ),
             head_mask=head_mask,
+            space_variant=bool(getattr(args, "qa_gold_nll_spaced", False)),
             batch_size=int(getattr(args, "qa_batch_size", 1) or 1),
         )
 
@@ -1999,6 +2116,17 @@ def main() -> int:
             "entirely; unlike --modes no-reader this still trains the backbone "
             "and the reader, so it is the correct no-PLE cell of an adaptation "
             "2x2 (no reader store is loaded)"
+        ),
+    )
+    parser.add_argument(
+        "--qa-gold-nll-spaced",
+        action="store_true",
+        help=(
+            "additionally score the ' '+answer reading of the gold continuation "
+            "(round-156: the raw reading targets token 9405 for 'yes' while the "
+            "model emits 9542, the spaced token, so a binary task shows 6-14 "
+            "nats against 0.88 EM). Reported as *_nll_spaced; the raw reading "
+            "stays the headline number so earlier rounds remain comparable"
         ),
     )
     parser.add_argument(

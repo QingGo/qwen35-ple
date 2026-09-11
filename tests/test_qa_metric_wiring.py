@@ -29,9 +29,10 @@ def _calls(tree: ast.Module, name: str) -> list[ast.Call]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             func = node.func
-            if isinstance(func, ast.Name) and func.id == name:
-                found.append(node)
-            elif isinstance(func, ast.Attribute) and func.attr == name:
+            is_match = (isinstance(func, ast.Name) and func.id == name) or (
+                isinstance(func, ast.Attribute) and func.attr == name
+            )
+            if is_match:
                 found.append(node)
     return found
 

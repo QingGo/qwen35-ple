@@ -173,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
         if not torch.is_floating_point(t):
             continue
         kind = _classify(name)
-        row = f"{name:<27}{kind:<9}{str(tuple(t.shape)):>16}"
+        row = f"{name:<27}{kind:<9}{tuple(t.shape)!s:>16}"
         for c in cols:
             row += f"{_norm(arms[c][name]):>16.5f}"
         row += f"{float((arms[other_labels[0]][name].float() - t.float()).abs().max()) if other_labels else 0.0:>14.6g}"

@@ -79,7 +79,7 @@ def _percentiles(samples: list[float]) -> dict[str, float]:
     ordered = sorted(samples)
 
     def pick(q: float) -> float:
-        idx = min(len(ordered) - 1, max(0, int(round(q * (len(ordered) - 1)))))
+        idx = min(len(ordered) - 1, max(0, round(q * (len(ordered) - 1))))
         return ordered[idx]
 
     return {
@@ -114,9 +114,8 @@ def main() -> int:
     parser.add_argument("--target-decode-tok-s", type=float, default=20.0)
     args = parser.parse_args()
 
-    import numpy as np
-
     import engramdb
+    import numpy as np
 
     rows_dir = Path(args.rows_dir)
     label = args.label or str(rows_dir)
@@ -291,12 +290,14 @@ def main() -> int:
         if proj:
             lines += [
                 "",
-                f"Prefill projection: one token needs {args.num_heads} rows, so a "
-                f"2048-token prefill needs {proj['prefill_rows_2048']:,} rows.  At "
-                f"the measured p50 of the nearest measured batch that is "
-                f"{proj['prefill_seconds_2048'] * 1e3:.2f} ms of row fetching per "
-                f"2048-token forward, i.e. {proj['prefill_rows_per_s']:,.0f} rows/s "
-                f"= {proj['prefill_tokens_per_s_2048']:,.0f} tokens/s fetch-only.",
+                (
+                    f"Prefill projection: one token needs {args.num_heads} rows, so a "
+                    f"2048-token prefill needs {proj['prefill_rows_2048']:,} rows.  At "
+                    f"the measured p50 of the nearest measured batch that is "
+                    f"{proj['prefill_seconds_2048'] * 1e3:.2f} ms of row fetching per "
+                    f"2048-token forward, i.e. {proj['prefill_rows_per_s']:,.0f} rows/s "
+                    f"= {proj['prefill_tokens_per_s_2048']:,.0f} tokens/s fetch-only."
+                ),
             ]
         env = report.get("environment", {})
         if env:

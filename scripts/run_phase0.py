@@ -1447,7 +1447,7 @@ def _token_level_hit(tokenizer, generated_ids, answer: str) -> bool:
     # model prints it with different spacing, so allow a small amount of slack.
     max_window = min(n, len(tokenizer.encode(answer, add_special_tokens=False)) + 2)
     for window in range(1, max(max_window, 1) + 1):
-        for start in range(0, n - window + 1):
+        for start in range(n - window + 1):
             piece = tokenizer.decode(
                 list(generated_ids[start : start + window]), skip_special_tokens=True
             )
@@ -1602,6 +1602,8 @@ def _run_mode(
 
     torch.manual_seed(seed)
     random.seed(seed)
+    # Reset the injection counters so the reported stats describe THIS arm.
+    model._ple_stats = None
 
     if args.reader == "official":
         reader_name = OFFICIAL_SOURCE_QWEN_V1
@@ -1862,6 +1864,20 @@ def _run_mode(
         print(f"  [{mode}] saved LoRA adapter -> {adapter_path}")
 
     handle.remove()
+    injection = dict(getattr(model, "_ple_stats", None) or {})
+    # Round-161 audit: an injection that silently never happens makes every arm
+    # bit-identical, so a reported `real - control = 0` would hold by
+    # construction.  That is indistinguishable from a real null result in the
+    # output, so refuse to emit one: a reader is attached and not disabled, yet
+    # nothing was ever injected.
+    if injection and not injection.get("injected") and not getattr(args, "ple_off", False):
+        raise RuntimeError(
+            "the PLE reader is attached and not disabled, but the hook injected "
+            f"nothing ({injection}). Every arm would be identical and every "
+            "real-vs-control comparison would be zero by construction; check "
+            "_current_ple_e_t's shape against the hidden state before trusting "
+            "this run."
+        )
     return {
         "mode": mode,
         "seed": seed,
@@ -1875,6 +1891,7 @@ def _run_mode(
         "qa": qa,
         "qa_exact": qa_exact,
         "qa_gold": qa_gold,
+        "ple_injection": injection,
         "lora": lora_meta,
         "adapter_path": str(adapter_path) if adapter_path else None,
     }

@@ -188,7 +188,34 @@ def install_reader_hook(
                 return param.dtype
         return torch.float32
 
+    def _ple_stats_dict() -> dict:
+        """Counters for whether injection actually happened.
+
+        Round-161 audit finding: this hook has TWO silent early returns, so if
+        ``_current_ple_e_t`` ever fails the shape check the graft quietly becomes
+        a no-op and every arm becomes bit-identical.  ``real - control = 0`` then
+        holds by construction rather than by measurement, which is
+        indistinguishable from a real null result in the output.  These counters
+        make that failure visible; ``run_phase0`` hard-fails on ``injected == 0``
+        when a reader is attached and not disabled.
+        """
+        stats = getattr(model, "_ple_stats", None)
+        if stats is None:
+            stats = {
+                "injected": 0,
+                "skipped_disabled": 0,
+                "skipped_no_rows": 0,
+                "skipped_rank": 0,
+                "skipped_shape": 0,
+                "contrib_norm_sum": 0.0,
+                "contrib_norm_max": 0.0,
+                "hidden_norm_sum": 0.0,
+            }
+            model._ple_stats = stats
+        return stats
+
     def post_hook(module, input, output):
+        stats = _ple_stats_dict()
         if isinstance(output, tuple):
             hidden = output[0]
         else:
@@ -196,7 +223,12 @@ def install_reader_hook(
         current = getattr(model, "_current_ple_e_t", None)
         if getattr(model, "_ple_disabled", False):
             current = None
-        if current is None or current.dim() != 3 or hidden.dim() != 3:
+            stats["skipped_disabled"] += 1
+        if current is None:
+            stats["skipped_no_rows"] += 1
+            return output
+        if current.dim() != 3 or hidden.dim() != 3:
+            stats["skipped_rank"] += 1
             return output
         if current.shape[0] == hidden.shape[0] and current.shape[1] == hidden.shape[1]:
             # A bf16/fp16 backbone (used for the 2B/4B grafting path) feeds
@@ -208,6 +240,8 @@ def install_reader_hook(
             reader_e_t = current if current.dtype == target else current.to(target)
             contribution = reader(reader_hidden, reader_e_t)
         else:
+            # The silent path that would make every arm identical.
+            stats["skipped_shape"] += 1
             return output
         if short_conv is not None:
             contribution = short_conv(contribution)
@@ -216,6 +250,13 @@ def install_reader_hook(
         # Diagnostic hooks for contribution-norm analysis (no behavior change).
         model._last_reader_hidden = hidden.detach()
         model._last_reader_contribution = contribution.detach()
+        stats["injected"] += 1
+        with torch.no_grad():
+            c_norm = float(contribution.detach().float().norm())
+            h_norm = float(hidden.detach().float().norm())
+        stats["contrib_norm_sum"] += c_norm
+        stats["hidden_norm_sum"] += h_norm
+        stats["contrib_norm_max"] = max(c_norm, stats["contrib_norm_max"])
         new_hidden = hidden + contribution
         if isinstance(output, tuple):
             return (new_hidden,) + output[1:]

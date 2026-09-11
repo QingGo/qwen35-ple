@@ -3356,3 +3356,38 @@ lazy-window gate        ✅
   嵌入字体与远端产物**完全一致**（TeXGyreTermes Regular/Bold/Italic + NewCMMath-Book），
   内容用 pypdf 逐句核验。
 - **新增文档**：`docs/round-162-format-prior.md`（843 行，终版）。
+
+## Session 163c：远端重启后清点 —— 初稿的一处"已丢失"是错的
+
+- **触发**：用户说"看上去昨晚远端关机了，看看实验有没有跑完"。探端口发现 **40783 已恢复**
+  （07:50），于是能直接读日志与数据盘。
+- **两个更正，都推翻我上一轮写的东西**：
+  1. **关机不是崩溃，是 finisher 按设计执行**。日志：
+     `follow-up DONE marker seen after 142m`（01:46:46）→
+     `ARTIFACT CHECK FAILED` → `artifacts incomplete but no producer is alive;
+     shutting down anyway (recorded)` → `shutdown -h now`。
+     它判"缺件"是因为 **`0.8B-nosft` 只有 1/6 臂**（那组是主动砍掉的），
+     而 manifest 里 **4B 那行是 `6/6  none`**。
+  2. **4B 不是 4/6 臂，是 6/6 臂**。`wiki-shuf`（01:32）与 `ple-off`（01:46）一直在
+     `/root/autodl-tmp/.../round162-4B/`，只是**没拉回本地**。
+     → `/root/autodl-tmp` 在 AutoDL 上**跨关机保留**：**"实例断了" ≠ "产物丢了"**。
+     关机后第一件事该是**重启并清点**，而不是在报告里写"已丢失"。
+- **六臂齐全后的 4B 判决**（重跑 `analyze_round162.py`）：
+  * **P3（5≈6）在 4B 上逐位结算**：`ple-off` 与 `no-reader` 每个配对差恰好 0.0000，
+    TV 全 0 → 噪声地板 `F = 0`，与 0.8B 同形。
+  * **主判决 `PERTURBATION_ARTIFACT`**：`S_123 = 0.0017 < max(F=0, 3·SE=0.0051)`。
+  * ⚠️ **副判决按字面规则翻成 `CONTENT_DEPENDENT`** —— 因为 `F_tv = 0` 时门槛退化成
+    "任何非零都算"。**这 0.0017 是 600 条里的 1 条**，已定位到具体文本：
+    `wiki` idx473 `Mount Elbert`（raw）vs `stem` idx473
+    `Mount Eel\n\n<think>\n\n</think>\n\nThe highest peak in the Ozarks`（短暂退回脚手架）。
+    `wiki` vs `code` 差 **0 条**。
+  * 三个独立读数都说它是噪声：① 低于 `stem` 臂**自己的** split-half 地板 0.0033（2 倍）；
+    ② 首 token 0.1483 vs 地板 0.3755（2.5 倍）；③ **主**判决用同一条 0.0017 判出 ARTIFACT
+    （因为主算式带 `3·SE_123`）。§0.4b 的退化备注只写在主算式下，副算式没跟着写。
+  * **性质声明**：把同一退化处理一致地应用到副算式是**事后澄清**，已在 §3.6.1 单列，
+    给出具体文本与三个读数，**可被反驳**；不接受该澄清时的诚实表述是
+    "副判决由 600 条中的 1 条触发"，而不是"4B 上发现内容依赖"。
+- **连带修正**：§1.5、§3.6、§6.2、§8.2b、§9 里所有"四臂 / 已丢失"的表述。
+- **运维教训（写给下一条队列）**：这轮真正的兜底缺口不是"产物离机"本身，
+  而是**关机后我没有第一时间重启清点**。finisher 的 `ARTIFACT CHECK FAILED` 是**对的**，
+  它把"缺件"如实记进了 manifest —— 我读日志读晚了。

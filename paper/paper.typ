@@ -9,7 +9,7 @@
   abstract: [
     Small language models face a fundamental capacity bottleneck: they must either compress knowledge into parameters or retrieve it at inference time. Retrieval-augmented generation (RAG) is the dominant solution, but its behavior is opaque and its retrieved evidence is not fully auditable @rag2020. In this paper, we study a complementary mechanism: an #emph[auditable n-gram external memory] derived from the PLE / Engram line of sparse external-memory systems @engram2026. We attach this memory to a frozen Qwen3.5-0.8B model and introduce a small learned #emph[PLE Projector] that maps the backbone hidden state plus lexical memory features into per-token logit scale and bias corrections. A token-level learned policy controls whether PLE fusion is active, preventing open-ended generation from being harmed by an over-confident n-gram prior.
 
-    We evaluate the system across local-continuation tasks, real HumanEval @humaneval2021, real TriviaQA @triviaqa2017, and a joint system with RAG and parameter-efficient adapters @lora2022 @qlora2023 @mora2024. On 10k local-continuation data with five seeds, the learned projector improves teacher-forced NLL by $0.22$ over fixed PLE calibration with bootstrap 95% CI $[0.14, 0.33]$. On 50 HumanEval problems, greedy decoding shows that BM25+PLE recovers problem-level passes that the base model does not solve, while 10-problem #text("pass@k") sampling improves from $0.40$ to $0.70$. On 200 TriviaQA examples the 0.8B base model obtains only $0.005$ exact match, and raw PLE fusion can degrade open-ended generation @knnopen2023. Our conclusion is deliberately a #emph[boundary] result: n-gram external memory is valuable as a local low-entropy code memory, but it is not a substitute for RAG or parametric adapters on general tasks.
+    We evaluate the system across local-continuation tasks, real HumanEval @humaneval2021, real TriviaQA @triviaqa2017, and a joint system with RAG and parameter-efficient adapters @lora2022 @qlora2023 @mora2024. On 10k local-continuation data with five seeds, the learned projector improves teacher-forced NLL by $0.22$ over fixed PLE calibration with bootstrap 95% CI $[0.14, 0.33]$. On 50 HumanEval problems, greedy decoding shows that BM25+PLE recovers problem-level passes that the base model does not solve, while 10-problem #text("pass@k") sampling improves from $0.40$ to $0.70$. On 200 TriviaQA examples the 0.8B base model obtains only $0.005$ exact match, and raw PLE fusion can degrade open-ended generation @knnopen2023. We further prove a bound on the residual-injection variant of this family: because the row identifier is a deterministic function of a short addressing window, the retrieved vector can carry no more about the future than that window already determines, independently of the reader's capacity. The bound covers the Engram, Qwen3.8-Flash-Next and DeepSeek-V4.1-Flash designs alike. It explains why context-conditioned recall is out of reach for this channel, why the measurable effect of such memory is a *format* prior, and why the regime where n-gram memory is genuinely worth its storage lies at continuation lengths the window cannot address. Our conclusion is deliberately a #emph[boundary] result: n-gram external memory is valuable as a local low-entropy code memory, but it is not a substitute for RAG or parametric adapters on general tasks.
   ],
   bibliography: bibliography("refs.bib"),
   accepted: none,
@@ -91,6 +91,24 @@ Let a context be a token sequence $c = (c_1, ..., c_t)$. We maintain sparse coun
 $ p_m(y | c) = "count"(c, y) / sum_y "count"(c, y). $
 
 The memory also returns the longest matched order and an external value index that can be audited. This memory is non-parametric, transparent, and can be rebuilt from any corpus.
+
+== What a Token-Keyed Residual Memory Can Carry
+
+The Engram / PLE line injects a retrieved vector into the residual stream. It is worth stating precisely what such a channel can carry, because the answer does not depend on the reader.
+
+Let $w_t$ denote the addressing window, that is, the last $n - 1$ tokens ending at position $t$, and let the row identifier be a deterministic function of it, $a_t = A(w_t)$, so that the retrieved memory is $e_t = E(a_t)$. The contribution to the residual stream is $c_t = F(h_t, e_t)$, where the backbone hidden state $h_t$ enters through the gate as the query. Because $e_t$ is a deterministic function of the window, the data-processing inequality gives
+
+$ I("future" ; e_t | h_t) <= I("future" ; w_t | h_t). $
+
+Three consequences follow.
+
+First, the bound is independent of the reader. Depth, width, linearity and training budget do not appear in it, so no reader, however expressive, can exceed it. This turns our earlier failures with hidden-state readers and direct residual injection from an empirical observation into a necessary one.
+
+Second, it constrains addressing rather than capacity. The memory can only supply what the window already determines and the hidden state has not retained, so no context-conditioned recall is possible when the determining information lies outside the window. For a question answered from a passage, the window at the answer position carries the prompt's format, not its content; the memory may still sharpen *how* the answer is emitted, which is the format effect we measure, but not *which* answer is correct.
+
+Third, it does not say the memory is useless. Backbone weights are a lossy compression of the training corpus, and rare n-gram statistics are among what is compressed away. The bound leaves room for precisely that, and it predicts where: gains should concentrate on rare n-grams and on continuations the window determines, and should vanish elsewhere. Our measurements agree --- knowledge probes that require the passage return zero, the measurable residual is a format prior, and on code the addressable and memorisable probability mass sits at continuation lengths of eight tokens and beyond, which a window of three cannot reach.
+
+The scope is the family, not one implementation. DeepSeek Engram and Qwen3.8-Flash-Next address with 2- and 3-grams, and DeepSeek-V4.1-Flash with 2-, 3- and 4-grams, so all three satisfy the bound with $n <= 4$. Enlarging the table does not relax it; only a query-dependent address, as in retrieval, would.
 
 == Real versus Control
 
@@ -355,7 +373,7 @@ PLE helps when the true next token is highly predictable from local n-grams. Thi
 
 == When Does PLE Fail?
 
-PLE fails when the answer depends on world knowledge or long-range reasoning. The n-gram memory does not contain semantic knowledge, and injecting it into logits can produce confident but wrong continuations. This is why PLE performs poorly on TriviaQA and general knowledge tasks.
+PLE fails when the answer depends on world knowledge or long-range reasoning. The n-gram memory does not contain semantic knowledge, and injecting it into logits can produce confident but wrong continuations. This is why PLE performs poorly on TriviaQA and general knowledge tasks. For token-keyed memory this failure is not contingent but necessary: the bound above shows the channel cannot carry what the addressing window does not already determine.
 
 == Why a Learned Projector Matters
 
@@ -367,7 +385,7 @@ Our joint experiments show that PLE, RAG, and adapters are not substitutes. RAG 
 
 == Historical Negative Results
 
-Earlier in this project we attempted hidden-state readers, MLP readers, and direct residual injection. These approaches often improved loss-like metrics but failed the real-vs-control test @blackwell1951. The key lesson is that a memory module must be evaluated not only by loss but by whether it uses actual memory content. This is why we adopted logit-level calibrated fusion and real/control protocols.
+Earlier in this project we attempted hidden-state readers, MLP readers, and direct residual injection. These approaches often improved loss-like metrics but failed the real-vs-control test @blackwell1951. The bound above explains why they had to: a reader translating a token-keyed row into the residual stream cannot carry context the window does not determine, so the real and control arms converge once the reader is well trained. The lesson is twofold --- a memory module must be evaluated by whether it uses actual memory content rather than by loss alone, and a channel must be checked against its information-theoretic ceiling before its capacity is scaled. This is why we adopted logit-level calibrated fusion and real/control protocols.
 
 = Limitations
 

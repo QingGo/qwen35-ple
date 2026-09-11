@@ -800,6 +800,8 @@ def main() -> int:
     if positions_all.shape[0] <= 0:
         raise SystemExit("evaluation stream shorter than the largest order")
 
+    positions_unfiltered = positions_all.copy()   # pre-decontamination robustness view
+
     # ---- optional per-position decontamination ---------------------------
     decon_info = {"applied": False}
     if args.position_decon_against:
@@ -1048,6 +1050,10 @@ def main() -> int:
             analysis_cache = {"lp": lp, "pos": pos, "order": M,
                               "acc_pos": acc_pos, "acc_masks": acc_masks,
                               "model": model, "levels": levels}
+            if decon_info.get("applied") and (args.tail_analysis or args.verbatim_ks):
+                lp_raw, _tl, pos_raw, _nz = model.stream_logprob(
+                    eval_stream, positions_unfiltered)
+                analysis_cache["raw"] = {"lp": lp_raw, "pos": pos_raw}
         for name, a in acc.items():
             log("  acc[{}]: top1={:.4f} top5={:.4f} (coverage={:.4f}, outside={:,})".format(
                 name, a["top1"], a["top5"], a["candidate_coverage"],
@@ -1290,6 +1296,53 @@ def main() -> int:
                 "per_k": verb,
                 "per_k_by_bucket": joint,
             }
+        raw = am.get("raw")
+        if raw is not None:
+            cnt_raw = trigram_context_counts(eval_stream, raw["pos"], raw3, am["model"])
+            bidx_raw = bucket_index(cnt_raw, buckets)
+            nll_raw = -raw["lp"]
+            tot_raw = float(nll_raw.sum())
+            rows_raw = []
+            for b, (lo, hi, label) in enumerate(buckets):
+                m = bidx_raw == b
+                nb = int(m.sum())
+                nllb = float(nll_raw[m].sum()) if nb else 0.0
+                rows_raw.append({"bucket": label, "count_min": lo, "count_max": hi,
+                                 "n_positions": nb,
+                                 "share_positions": nb / max(1, raw["pos"].shape[0]),
+                                 "nll_sum": nllb,
+                                 "share_nll": nllb / tot_raw if tot_raw > 0 else 0.0,
+                                 "nll_mean": (nllb / nb) if nb else None})
+            no_decon = {
+                "reason": ("the position filter removes exactly the spans that repeat in "
+                           "the training stream, which for high-redundancy corpora is the "
+                           "phenomenon under study; this variant keeps every position"),
+                "positions_scored": int(raw["pos"].shape[0]),
+                "nll_mean": float(nll_raw.mean()),
+                "buckets": rows_raw,
+                "tail_share_nll_count_le_10": float(sum(
+                    r["share_nll"] for r in rows_raw if r["count_min"] <= 10
+                    and (r["count_max"] is None or r["count_max"] <= 10))),
+                "tail_share_positions_count_le_10": float(sum(
+                    r["share_positions"] for r in rows_raw if r["count_min"] <= 10
+                    and (r["count_max"] is None or r["count_max"] <= 10))),
+            }
+            if args.verbatim_ks:
+                mults_r = np.random.default_rng(args.seed).integers(
+                    1, 2 ** 63, size=512, dtype=np.uint64) | np.uint64(1)
+                per_k_raw = {}
+                for k in [int(x) for x in args.verbatim_ks.split(",") if x.strip()]:
+                    hit, usable = ngram_present_mask(train, eval_stream, raw["pos"],
+                                                     k + 1, vocab, mults_r)
+                    n_use = int(usable.sum())
+                    per_k_raw[str(k)] = {
+                        "n_positions_with_full_context": n_use,
+                        "hit_rate": float(hit[usable].mean()) if n_use else None}
+                    del hit, usable
+                    gc.collect()
+                no_decon["verbatim_per_k"] = per_k_raw
+            analysis["no_decontamination"] = no_decon
+
     if args.source_text:
         src = Path(args.source_text)
         if not src.exists():

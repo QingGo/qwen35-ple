@@ -96,7 +96,7 @@ The memory also returns the longest matched order and an external value index th
 
 The Engram / PLE line injects a retrieved vector into the residual stream. It is worth stating precisely what such a channel can carry, because the answer does not depend on the reader.
 
-Let $w_t$ denote the addressing window, that is, the last $n - 1$ tokens ending at position $t$, and let the row identifier be a deterministic function of it, $a_t = A(w_t)$, so that the retrieved memory is $e_t = E(a_t)$. The contribution to the residual stream is $c_t = F(h_t, e_t)$, where the backbone hidden state $h_t$ enters through the gate as the query. Because $e_t$ is a deterministic function of the window, the data-processing inequality gives
+Let $w_t$ denote the addressing window ending at position $t$, and let the row identifier be a deterministic function of it, $a_t = A(w_t)$, so that the retrieved memory is $e_t = E(a_t)$. The contribution to the residual stream is $c_t = F(h_t, e_{t-r..t})$, where the backbone hidden state $h_t$ enters through the gate as the query and $r$ is the reach of the short causal convolution that follows the gate. In the Engram and Qwen3.8 designs the row id reads the last $n - 1$ tokens and the convolution has kernel 4 with dilation 3, so $r = 9$ and the window spans $n - 1 + r$ tokens --- eleven, not the two that $n = 3$ alone would suggest. Because $e_t$ is a deterministic function of the window, the data-processing inequality gives
 
 $ I("future" ; e_t | h_t) <= I("future" ; w_t | h_t). $
 
@@ -108,7 +108,7 @@ Second, it constrains addressing rather than capacity. The memory can only suppl
 
 Third, it does not say the memory is useless. Backbone weights are a lossy compression of the training corpus, and rare n-gram statistics are among what is compressed away. The bound leaves room for precisely that, and it predicts where: gains should concentrate on rare n-grams and on continuations the window determines, and should vanish elsewhere. Our measurements agree --- knowledge probes that require the passage return zero, the measurable residual is a format prior, and code is markedly more predictable and more memorisable than prose. We also tested the obvious repair --- lengthening the key --- and it does not pay: at matched bytes a 4-gram ties or beats 8-token, 16-token and longest-suffix memories at every budget and training size on both corpora, so the short window costs nothing measurable and is not the constraint that binds.
 
-The scope is the family, not one implementation. DeepSeek Engram and Qwen3.8-Flash-Next address with 2- and 3-grams, and DeepSeek-V4.1-Flash with 2-, 3- and 4-grams, so all three satisfy the bound with $n <= 4$. Enlarging the table does not relax it; only a query-dependent address, as in retrieval, would.
+The scope is the family, not one implementation. DeepSeek Engram and Qwen3.8-Flash-Next address with 2- and 3-grams and keep the convolution, giving a window of roughly eleven tokens; DeepSeek-V4.1-Flash uses 2-, 3- and 4-grams but removed the convolution, so its window is exactly four tokens and is in that respect the tightest of the three. Enlarging the table does not relax the bound; only a query-dependent address, as in retrieval, would. We also tested the obvious repair of lengthening the key and it does not pay at matched storage, so the short window is not the constraint that binds.
 
 == Real versus Control
 

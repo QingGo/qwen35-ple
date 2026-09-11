@@ -1,0 +1,30 @@
+{
+  "_provenance": {
+    "source": "Qwen3.8-Flash-Next config.json (text_config excerpt)",
+    "source_sha256": "99c11efba4012d0f760f4e4831a8d6cafd845044e21d0aa9e6d9e70a15a90a8d",
+    "note": "Load-bearing PLE geometry for OfficialSourceQwenReader goldens."
+  },
+  "hidden_size": 2560,
+  "hc_count": 4,
+  "heads_per_ngram": 8,
+  "ngram_size": 3,
+  "ple_embed_dim": 2560,
+  "ple_conv_kernel_size": 4,
+  "rms_norm_eps": 1e-06,
+  "vocab_size": 248320,
+  "ngram_vocab_size_base": 20000000,
+  "make_ngram_vocab_size_divisible_by": 128,
+  "eos_token_id": 248044,
+  "bos_token_id": 248044,
+  "hc_lowrank": 320,
+  "ple_layer_ids": [
+    2
+  ],
+  "split_ngram_parts": 128,
+  "linear_conv_kernel_dim": 4,
+  "head_dim": 256,
+  "num_hidden_layers": 48,
+  "full_attention_interval": 4,
+  "dtype": "bfloat16",
+  "model_type": "qwen4_exp_text"
+}

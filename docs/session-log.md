@@ -3283,3 +3283,34 @@ lazy-window gate        ✅
 - **新增 P0 债**：gold NLL 空格主口径尚未设为默认；跨分布扫描的窗口对照（round 160）进行中。
 - **新增文档**：`docs/round-157-*`（含 §7 更正）、`docs/round-158-*`、`docs/round-159-*`；
   README 全量重写（769→408 行，以结论开头 + 新增「评测协议与纪律」）。
+
+## Session 163：读出实现的对拍（第三轮审计收尾）
+
+- **第三次审计问题的答案**：以上所有否证，有没有建立在**错误实现**上？
+  → **前两次是"结论稳"（好消息），这一次找到了唯一一处真的没检查过的地方。**
+- **缺口**：`OfficialSourceQwenReader` 全仓库只被**实例化**过
+  （`test_reader_registry.py`），它的 `forward` **从未**与它声称复用的官方数学比对。
+  三处提到官方 PLE 的测试与那个 4096-token npz golden 覆盖的都是别的东西，
+  且几何是 `hc=1, k=2, d=2` —— **没有一个跑过嫁接真正用的多分支 + 膨胀卷积读出**。
+- **补齐**：`tests/test_official_reader_forward_golden.py`（16 项全跑，含反空转守卫）。
+  把 `query_bridge`/`out_proj` 换成 `Identity` 后，我们的读出与官方**位级相等**
+  （`atol=0, rtol=0`），包括**生产几何 + 官方真实权重**那一条。
+  → "**这个设计**不能注入内容"现在有实测支撑，不再只是"我们的实现不能"。
+- **config 权威值固化**：官方 Qwen3.8-Flash-Next `text_config` 摘录 +
+  源文件 sha256 进 `tests/golden/qwen38_flash_next_text_config.json`，测试直接断言。
+  `ngram_size = 3` 是**最值得固定**的一个：它同时决定卷积膨胀与头数，
+  而 `conv1d.weight` 的 `(10240,1,4)` 形状**对任何 dilation 都一样** ——
+  膨胀是唯一无法从权重形状反推的读出参数，也是 12-token 窗口的来源。
+- **第十次同形错误（已捕获）**：第一次跑失败在 `norm_key` 分叉，原因**在我的测试里** ——
+  我抄了别处的 `rms_norm_eps=1e-5`，官方是 `1e-06`（**正好等于 reader 的默认值**）。
+  reader 是对的，测试是错的。bisect 一次定位。
+- **【新】保真度偏差**：`refs/qwen4_exp_modeling.py:1276` 的
+  `config.ple_layer_ids.index(layer_idx + 1)` 说明 `ple_layer_ids` 是 **1-based**；
+  官方 `[2]` → 0-based **第 1 层**，与 checkpoint 前缀 `layers.1.ple.` 一致。
+  而我们的主线（149/152/156/162）**全是 `--layer 2`**（已核对产物）。
+  → round-157 的界**与挂载层无关**，不受影响；但"第 1 层的版本"属于
+  **未验证**而非被否证，措辞改为"我们复现了官方的**读出**，不是官方的**挂载点**"。
+- **运维**：round-162 的 0.8B 判决与后续队列（贡献相似度 → 交叉评测 →
+  no-SFT 变体 → 4B 复现 → gold-NLL 重跑）正在远端推进，finisher 的
+  存活性检查已确认能看见生产者进程，跑完自动关机。
+- **新增文档**：`docs/round-163-reader-forward-golden.md`。

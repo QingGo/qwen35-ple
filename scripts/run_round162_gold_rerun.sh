@@ -117,12 +117,12 @@ PYEOF
 }
 
 WIKI_CKPT="$OUT/reader-wiki-seed0.pt"
-run_one wiki "data/phase1/PURE_WIKI/tokens.npy" real --load-reader "$WIKI_CKPT" || exit 1
-run_one code "data/phase1/PURE_CODE/tokens.npy" real --load-reader "$OUT/reader-code-seed0.pt" || exit 1
-run_one stem "data/phase1/PURE_STEM/tokens.npy" real --load-reader "$OUT/reader-stem-seed0.pt" || exit 1
-run_one no-reader "-" no-reader || exit 1
-run_one wiki-shuf "data/phase1/PURE_WIKI/tokens.npy" control --load-reader "$WIKI_CKPT" || exit 1
-run_one ple-off "-" real --ple-off --load-reader "$WIKI_CKPT" || exit 1
+run_one wiki real "data/phase1/PURE_WIKI/tokens.npy" --load-reader "$WIKI_CKPT" || exit 1
+run_one code real "data/phase1/PURE_CODE/tokens.npy" --load-reader "$OUT/reader-code-seed0.pt" || exit 1
+run_one stem real "data/phase1/PURE_STEM/tokens.npy" --load-reader "$OUT/reader-stem-seed0.pt" || exit 1
+run_one no-reader no-reader "-" || exit 1
+run_one wiki-shuf control "data/phase1/PURE_WIKI/tokens.npy" --load-reader "$WIKI_CKPT" || exit 1
+run_one ple-off real "-" --ple-off --load-reader "$WIKI_CKPT" || exit 1
 
 log "gold re-run DONE"
 exec 9>&-

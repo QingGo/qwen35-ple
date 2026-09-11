@@ -44,6 +44,19 @@ e_t = f(token[t-2], token[t-1], token[t])              （确定性函数）
 **我们此前所有知识探针都只用了第一行那一格 —— 理论说必然为零的那一格。**
 详见 `docs/round-157-why-the-graft-is-a-prior-not-a-knowledge-channel.md`。
 
+**这个推论的实验确认（round 162，0.8B，n=1500/臂，六臂）**：预注册检验「格式迁移是
+内容相关的先验，还是扰动伪影」。三个**只在语料上不同**的 reader（WIKI / CODE / STEM，
+同超参、同层、同提示）给出**完全相同的格式分布** —— label TV = 0.0000、
+前导面 TV = 0.0000、联合 TV = 0.0000，方向性词法预测全部落空（code 标记率恒为 0，
+**零个不一致对**）；机械判决 **PERTURBATION_ARTIFACT**，主口径与副口径一致。
+
+**但这不是"没生效"，而是"生效了但与内容无关"**：相对零注入，格式迁移**巨大且真实** ——
+chat_scaffold 0.195 → 0.000，首个生成 token 在 1500 条上**没有一条相同**（TV = 1.000，
+McNemar p = 1.3e-88）；`ple-off` 与 `no-reader` **逐条位级相同**，噪声地板**恰好为 0**。
+且操纵确实送达：三个 reader 在答案位置注入的向量两两 cosine 仅 **0.730–0.758**。
+→ **换语料改变的正是"权重里已经隐含的那部分"，所以它对输出不产生可分辨的影响。**
+详见 `docs/round-162-format-prior.md`。
+
 **2. Round 159：限制属于分布而非方法，且值钱的区间在 k≥8（可用性口径）。**
 
 四语料跨分布实测（WIKI / CODE / FINEWEB / STEM，阈值先于数据固定）：
@@ -353,13 +366,15 @@ paper/             paper.typ + figures（编译产物 paper.pdf）
 
 ## 文档索引
 
-`docs/` 共 158 篇。**不要通读**，按主题进入：
+`docs/` 共 163 篇。**不要通读**，按主题进入：
 
 **起点（想快速了解现状）**
 
 | 文档 | 内容 |
 |---|---|
 | `round-157-why-the-graft-is-a-prior-not-a-knowledge-channel.md` | **可证明的天花板 + 为何它只能承载先验**（建议先读） |
+| `round-162-format-prior.md` | **决定性的否证：格式迁移真实但内容无关**（六臂，预注册 + 机械判决） |
+| `round-163-reader-forward-golden.md` | **读出实现与官方数学位级对拍**；官方 config 权威值；官方挂载点在第 1 层 |
 | `round-158-ngram-reference-frame.md` | **计数参照系：这张表必须打败的数字** |
 | `round-156-g0-nople-format-vs-content-and-metric-bugs.md` | 格式 vs 知识；两个指标 bug；关机事故复盘 |
 | `round-154-session-consolidation-and-handoff.md` | 会话交接总览 |

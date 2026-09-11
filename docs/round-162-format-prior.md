@@ -839,6 +839,17 @@ bash scripts/pull_round162_results.sh
   ```
   预注册的读数方式：只跑 §3.4/§6 的同一套机械判决（1/2/3 内部 spread vs 臂内 split-half 地板），
   **不新增指标**。
+
+  > ⚠️ **上面两条重跑命令的输入文件不在本仓库**（`data/` 被 gitignore），
+  > 而 `data/qa-standard/` **本地不存在** —— 它是在远端构建的。
+  > 因此 `eval-600b.jsonl`（600 条平衡子集）与 `eval.jsonl`（1500 条）
+  > **都必须先重建**，不能假定还在：
+  > ```bash
+  > python scripts/build_qa_standard_split.py --output-dir data/qa-standard --eval-per-task 200
+  > ```
+  > （1500 条那版是 `--eval-per-task 500`；两者用的是同一 `--seed` 与同一 `--exclude` 列表，
+  > 这正是"子集与全集同源"的前提。重建后须核对条数与任务配比再跑。）
+  > **没有核对过这条命令能跑通** —— 它写在实例已经死掉之后，是本轮无法验证的一条。
 * ⚠️ **实例停机没有自动兜底**：round-156 §5 修的是"finisher 脱离 session"，
   但没修"产物离机"——每一步之后自动 `pull_round162_results.sh` 才是真正的兜底。
   这是本轮给下一条队列的直接建议。

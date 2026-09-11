@@ -1160,8 +1160,14 @@ def render_sweep_markdown(out: Dict[str, object]) -> str:
                 m = se["matched"].get(str(b), {}).get(a)
                 if not m:
                     continue
+                if m.get("interpolated"):
+                    extra = "interp {:,}-{:,} (tau {}..{})".format(
+                        m["bracket_bytes"][0], m["bracket_bytes"][1],
+                        m["bracket_min_count"][0], m["bracket_min_count"][1])
+                else:
+                    extra = "tau {}".format(m.get("min_count"))
                 lines.append("| {:,} | {} | {:,} | {} | {:.4f} | {:.4f} |".format(
-                    b, a, m["bytes"], m["min_count"], m["nll"], m["top1"]))
+                    b, a, int(m["bytes"]), extra, m["nll"], m["top1"]))
         lines.append("")
         lines.append("### gaps vs the 4-gram arm (positive NLL gap = longer window better)")
         lines.append("")

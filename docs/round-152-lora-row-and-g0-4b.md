@@ -118,11 +118,42 @@ is already measured (overall gold NLL 8.7429).
 
 ### 2.2 Results
 
-<!-- RESULTS:G0 -->
+Raw prompt, standard 1500. `--ple-off`（注入恒为零）这一臂当时被脚本删掉了，
+因此下表只有 real/control 两列 —— 这正是 round-155 得以推翻该结果的缺口。
+
+| Run | BoolQ EM | TriviaQA EM | NQ EM | Mean EM | n | Gold NLL |
+|---|---:|---:|---:|---:|---:|---:|
+| g0-real | 0.874 | 0.390 | 0.112 | **0.4587** | 1500 | 4.1624 |
+| g0-control | 0.814 | 0.178 | 0.084 | **0.3587** | 1500 | 4.5569 |
+
+Pair | Metric | n | Mean Δ | SEM | Win rate
+---|---|---:|---:|---:|---:|---:
+g0-real vs g0-control | em | 1486 | +0.1003 | 0.0098 | 0.126
+g0-real vs g0-control | nll | 1486 | +0.3835 | 0.0530 | 0.462
+
+按预注册判据（≥2 点 或 ≥0.05 nat）表面显著通过。
+
+> **⚠️ 此结果已被 round-155 推翻。** 那 +10.03 点 EM 是 control 臂的解码崩塌
+> （TriviaQA 上 52.8% 输出空串、BoolQ 系统性偏向 `Yes`）造成的假象，不是 PLE 内容效应；
+> 在 control 吐空串的 264 条上，其 teacher-forced gold NLL 反而**低于** real（2.95 vs 3.10）。
+> 完整拆解见 `docs/round-155-g0-contrast-is-a-decoding-artifact.md`。
+> 判决性对照臂 `g0-nople` 已补跑，结论见该文 §7。
 
 ## 3. What this changes
 
 <!-- RESULTS:CONCLUSION -->
+1. **G1（LoRA 行）判定不通过**：LoRA 共适应把切点从"崩塌"救回到"正常"（+2.8–3.5 点），
+   但 real vs control 的内容效应仍为 **+0.0000±0.0049 EM / −0.0180±0.0068 NLL**。
+   "reader/适应不够好"这最后一个解释被排除。
+2. **G0（4B，hidden 精确对齐源空间）表面通过、实为假阳性**，机制上不是内容迁移而是
+   control 臂的解码崩塌；详见 round-155。
+3. **方法论层面的净收获**（这才是本轮真正的资产）：
+   * `control`（乱序行）**不能**替代 `no-PLE` 对照 —— 前者是主动扰动，
+     只回答"内容是否匹配"，不回答"有 PLE 是否比没有好"。缺 `--ple-off` 臂
+     会让假阳性无法被内部证伪。
+   * 任一臂偏离分布时，**生成 EM 不是有效的内容探针**（它测解码稳定性）。
+     内容效应必须同时报 teacher-forced NLL，并在两者矛盾时给出解释。
+   * 每个 arm 都要记录**退化统计**（空串率 / distinct 数 / 标签分布偏移）作为有效性断言。
 
 ## 4. Engineering notes for the next session
 

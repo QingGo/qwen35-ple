@@ -3163,3 +3163,46 @@ lazy-window gate        ✅
   `docs/round-153-goal-tech-debt-and-development-plan.md`、本文档。
 - 目标精确化：从"证明外部记忆能提升 0.8B"改为
   **"找出外部 n-gram 记忆优于同预算纯参数方案的区间"**。
+
+## Session 155：机器为何没关机、G0 假阳性拆解、无效臂审计工具
+
+- **机器没关机的三连环**（G0 实验 08:55 就已成功）：
+  1. `run_round152_g0_4b.sh` 把 baseline 追加进了**死变量 `ARGS`** 而非
+     `GOLD_ARGS` → `summarize_gold_nll.py` 报 `baseline ... is not one of the
+     runs` 并 `SystemExit`，`gold-nll-raw.md` 永不生成；
+  2. 该脚本的产物校验把它列为必需 → **成功的实验被 `exit 1` 判失败**，`DONE` 不写；
+  3. finisher 只在 `sleep 60` 里等 `DONE`，**没有生产者存活检测**（预算 12h）
+     → 在死掉的生产者旁空转 ~3.5 小时并持续计费。
+  * 修复：baseline 并入 `GOLD_ARGS`；finisher 收进版本库（`scripts/round152_finish.sh`）
+    + `producer_alive()` + 等待预算降到 90min + `SHUTDOWN_ON_FAILURE=1`
+    （产物不全且生产者已死时**仍然关机**并留 `FINISH_BLOCKED`，而不是拒绝关机空转）。
+  * 教训：**给自动化流程加"拒绝继续"的保护，必须同时回答"那谁付费"。**
+- **G0 的"首个正结果"被推翻**：real vs control EM +10.03±0.98 点、NLL +0.38±0.05 nat，
+  看似通过预注册判据（≥2 点或 ≥0.05 nat），实为 **control 臂解码崩塌**：
+  * TriviaQA 上 control 有 **264/500 (52.8%) 输出空串**（real 仅 2/500），distinct 224 vs 476；
+  * NQ 空串 29 条、混入 BoolQ 式 `yes` 11 条；
+  * BoolQ 上 control 系统性偏向 `Yes`（gold=`no` 时误答 39.8% vs real 22.9%）；
+  * **关键 dissociation**：在 control 吐空串的 264 条上，其 teacher-forced gold NLL
+    反而**低于** real（2.9548 vs 3.1033）→ 扰动小到不影响似然、大到把贪心解码推入
+    立即 EOS，是 exposure bias 而非知识差异。
+- **逐任务分解**：Δ=real−control，NLL 整体均值 −0.3945 但**中位数 +0.0801**；
+  优势 100% 来自 BoolQ（−2.0443），TriviaQA **+0.2943**、NQ **+0.5665** 均为 control 更好。
+- **新工具 `scripts/audit_reader_checkpoints.py`**（round-153 纪律 #1 的落地）：
+  审计冻结源张量跨臂一致性 / adapter 是否真的移动 / 跨臂范数比。
+  4B：6 个冻结张量跨臂 Δ=0，adapter 范数比 **0.988–1.014×** → **排除"注入量"混淆**。
+  0.8B（LoRA 行）：real 的 `out_proj.2` 范数反而比 control 大 **1.28×**，而指标零效应
+  → 注入幅度与指标效应无单调关系。
+- **方法论修正（进纪律）**：
+  * `control`（乱序行）**不能**替代 `no-PLE` 对照——前者是主动扰动，只回答"内容是否匹配"；
+    缺 `--ple-off` 臂会让假阳性无法被内部证伪；
+  * 任一臂偏离分布时**生成 EM 不是有效的内容探针**（它测解码稳定性）；必须同时报
+    teacher-forced NLL，矛盾时以 NLL 为准并解释分歧；
+  * 每个 arm 需记录**退化统计**（空串率 / distinct 数 / 标签分布偏移）作为有效性断言。
+- **新增坑**：`data/qa-standard/eval.jsonl` 按任务顺序排列（500 boolq→500 triviaqa→500 nq），
+  故 `--qa-max-items N` 在 N≤500 时**只覆盖 BoolQ**，不能当多任务子集用。
+  日志里 `QA {idx}/1500` 是**原始 item 下标**（批次按 prompt 长度排序）→ **乱序、不可用于估进度**。
+  共享宿主机 GPU 利用率可长期停在 31%/88W，同一 job 吞吐在 0.22–1.4 item/s 间波动 6 倍。
+- **新增文档**：`docs/round-155-g0-contrast-is-a-decoding-artifact.md`；
+  填掉 round-152 §2.2 / §3 的 RESULTS 占位符并加推翻批注。
+- **进行中**：判决性对照臂 `g0-nople`（同 real reader + `--ple-off`，注入恒零）已跑，
+  预注册预测已写入 round-155 §7；跑完自动关机。

@@ -37,8 +37,10 @@ check_rows() {
 }
 
 run_arm() {
-  # run_arm <name> <mode> <gate_override_or_empty>
-  local name="$1" mode="$2" gate="$3"
+  # run_arm <name> <mode> <extra flags...>
+  local name="$1" mode="$2"
+  shift 2
+  local extra=("$@")
   local out="$OUT/$name.json"
   if [[ -f "$out" ]] && grep -q '"qa_gold"' "$out" 2>/dev/null; then
     log "skip $name (complete)"
@@ -63,9 +65,9 @@ run_arm() {
     --qa-file data/qa-standard/eval.jsonl
     --save-reader "$OUT/adapter-$name-seed{seed}"
   )
-  if [[ -n "$gate" ]]; then args+=(--gate-override "$gate"); fi
+  if (( ${#extra[@]} )); then args+=("${extra[@]}"); fi
   args+=(--output "$out")
-  log "run $name mode=$mode gate=${gate:-none}"
+  log "run $name mode=$mode extra=${extra[*]:-none}"
   "$PY" -u scripts/run_phase0.py "${args[@]}" >>"$LOG" 2>&1
   local rc=$?
   if [[ $rc -ne 0 ]]; then
@@ -77,23 +79,34 @@ run_arm() {
 
 check_rows
 
-# no-PLE first: if the gentle adaptation cannot keep open QA alive either, the
-# recipe (not PLE) is the problem and the interaction test must not be run.
-run_arm "lora-nople" "no-reader" "0.0"
-run_arm "lora-real" "real" ""
-run_arm "lora-control" "control" ""
+# All three cells must actually adapt the backbone, otherwise the row is not a
+# 2x2: --modes no-reader returns before training, so the no-PLE cell uses mode
+# "real" with --ple-off (reader present but contribution suppressed).
+run_arm "lora-nople" "real" --ple-off
+run_arm "lora-real" "real"
+run_arm "lora-control" "control"
 
 ARGS=()
 for name in lora-nople lora-real lora-control; do
   [[ -f "$OUT/$name.json" ]] && ARGS+=("--run" "$name=$OUT/$name.json")
 done
+GEN_ARGS=()
+for name in lora-nople lora-real lora-control; do
+  [[ -f "$OUT/$name.json" ]] && GEN_ARGS+=("--run" "$name=$OUT/$name.json")
+done
+"$PY" scripts/summarize_arms.py "${GEN_ARGS[@]}" \
+  --pair lora-real=lora-control \
+  --pair lora-real=lora-nople \
+  --title "LoRA row: backbone LoRA x frozen PLE (generation + gold NLL)" \
+  --output "$OUT/arms-summary.md" --json-output "$OUT/arms-summary.json" >>"$LOG" 2>&1
+
 "$PY" scripts/summarize_gold_nll.py "${ARGS[@]}" \
   --baseline lora-nople \
   --pair lora-real=lora-control \
   --output "$OUT/gold-nll-raw.md" \
   --title "LoRA row: backbone LoRA x frozen PLE (gold-answer NLL, raw)" >>"$LOG" 2>&1
 
-for artifact in lora-nople.json lora-real.json lora-control.json gold-nll-raw.md; do
+for artifact in lora-nople.json lora-real.json lora-control.json gold-nll-raw.md arms-summary.md; do
   if [[ ! -s "$OUT/$artifact" ]]; then
     log "ERROR: missing artifact $artifact"
     exit 1

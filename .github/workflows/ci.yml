@@ -71,6 +71,11 @@ jobs:
           bash -n scripts/round162_finish.sh
 
       - name: Test
+        env:
+          # The sibling repos are checked out above precisely so the cross-repo
+          # golden tests can run; without this they would silently skip and a
+          # green run would be indistinguishable from an unchecked contract.
+          QWEN35_REQUIRE_GOLDEN: "1"
         run: uv run pytest -q
 
       - name: Access-order synthetic gate

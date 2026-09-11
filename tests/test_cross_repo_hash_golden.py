@@ -25,9 +25,26 @@ ENGRAM_PEFT_HASHING = (
 )
 
 
+def _require_or_skip(message: str) -> None:
+    """Skip locally, FAIL when CI says the fixture must be present.
+
+    See the twin helper in test_hash_golden.py: these fixtures ARE the
+    cross-repository contract, and a skip that nobody reads is how the contract
+    went unchecked on the machine that produced round 161's results.
+    """
+    import os
+
+    if os.environ.get("QWEN35_REQUIRE_GOLDEN") == "1":
+        raise AssertionError(
+            f"{message} -- and QWEN35_REQUIRE_GOLDEN=1, so a missing cross-repo "
+            "golden fixture is a failure rather than a skip"
+        )
+    pytest.skip(message)
+
+
 def _load_engram_peft_hashing():
     if not ENGRAM_PEFT_HASHING.exists():
-        pytest.skip(f"engram-peft hashing source not found: {ENGRAM_PEFT_HASHING}")
+        _require_or_skip(f"engram-peft hashing source not found: {ENGRAM_PEFT_HASHING}")
     # hashing.py only needs torch for type annotations in the hash methods;
     # the QwenPleHashMapping path is pure NumPy, so a tiny stub keeps this
     # cross-repo contract test runnable without a multi-GB torch install.

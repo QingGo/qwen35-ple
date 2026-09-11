@@ -22,7 +22,7 @@ GOLDEN_PATH = ENGRAMDB_ROOT / "crates" / "engramdb-keygen" / "tests" / "golden.j
 
 def _load_golden() -> dict:
     if not GOLDEN_PATH.exists():
-        pytest.skip(f"golden not found: {GOLDEN_PATH}")
+        _require_or_skip(f"golden not found: {GOLDEN_PATH}")
     return json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
 
 
@@ -50,3 +50,27 @@ def test_rowids_are_in_padded_table_space():
     assert len(rows) == 3
     for row in rows:
         assert all(0 <= r < spec.padded for r in row)
+
+
+def _require_or_skip(message: str) -> None:
+    """Skip locally, FAIL when the environment says the fixture must be present.
+
+    These golden fixtures are the cross-repository contract: they pin
+    ``real_spec()`` to EngramDB's Rust keygen output and to engram-peft's
+    production mapping.  They skip when the sibling repos are not checked out,
+    which is correct for a laptop and dangerous in CI -- a green run then cannot
+    be told apart from a run where the contract was never checked.  Round 161 hit
+    exactly that: the experiments ran on a box where all four skipped, and
+    "171 passed, 7 skipped" looked healthy.  CI sets QWEN35_REQUIRE_GOLDEN=1 so
+    a missing fixture is an error there.
+    """
+    import os
+
+    if os.environ.get("QWEN35_REQUIRE_GOLDEN") == "1":
+        raise AssertionError(
+            f"{message} -- and QWEN35_REQUIRE_GOLDEN=1, so a missing cross-repo "
+            "golden fixture is a failure rather than a skip"
+        )
+    import pytest
+
+    pytest.skip(message)

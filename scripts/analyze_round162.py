@@ -122,6 +122,59 @@ def _norm_counts(values: list[str]) -> dict[str, float]:
     return {k: v / n for k, v in out.items()} if n else {}
 
 
+def _split_half_tv(
+    labels: list[str],
+    prefixes: list[str],
+    first_tokens: list[str],
+    n_splits: int = 50,
+    seed: int = 162,
+) -> dict[str, float]:
+    """Sampling noise floor for each TV statistic, from within one arm.
+
+    The between-arm TV distances are only interpretable next to how much TV the
+    *same* arm produces against itself when its n items are halved.  That number
+    is a lower bound on any TV statistic at this n and needs no second arm, so a
+    between-arm TV that sits inside it is sampling noise, not a distribution
+    shift.  Fifty random half-splits with a fixed seed keep it reproducible.
+    """
+    n = len(labels)
+    if n < 4:
+        return {}
+    rng = np.random.default_rng(seed)
+    acc = {"label": [], "prefix": [], "joint": [], "first_token": []}
+    idx = np.arange(n)
+    for _ in range(n_splits):
+        perm = rng.permutation(n)
+        a, b = perm[: n // 2], perm[n // 2 :]
+        acc["label"].append(
+            _tv_generic(
+                _norm_counts([labels[i] for i in a]),
+                _norm_counts([labels[i] for i in b]),
+            )
+        )
+        acc["prefix"].append(
+            _tv_generic(
+                _norm_counts([prefixes[i] for i in a]),
+                _norm_counts([prefixes[i] for i in b]),
+            )
+        )
+        acc["joint"].append(
+            _tv_generic(
+                _joint([labels[i] for i in a], [prefixes[i] for i in a]),
+                _joint([labels[i] for i in b], [prefixes[i] for i in b]),
+            )
+        )
+        acc["first_token"].append(
+            _tv_generic(
+                _norm_counts([first_tokens[i] for i in a]),
+                _norm_counts([first_tokens[i] for i in b]),
+            )
+        )
+    out = {f"split_half_tv_{k}": float(np.mean(v)) for k, v in acc.items()}
+    out["_raw"] = {k: v for k, v in acc.items()}
+    return out
+
+
 def _joint(labels: list[str], prefixes: list[str]) -> dict[str, float]:
     """Normalised joint distribution over (label, prefix) pairs."""
     out: dict[str, float] = {}
@@ -204,6 +257,7 @@ def build(name_to_path: dict[str, Path]) -> dict[str, Any]:
                 ),
             }
         fp = arm["fp"]
+        split = _split_half_tv(arm["labels"], arm["prefixes"], arm["first_tokens"])
         out["arms"][name] = {
             "source": arm["source"],
             "mode": arm["mode"],
@@ -234,6 +288,7 @@ def build(name_to_path: dict[str, Path]) -> dict[str, Any]:
                 k: float(np.mean([f[k] for f in fp])) if fp else float("nan")
                 for k in ("code", "math", "prose")
             },
+            "split_half_tv": {k: v for k, v in split.items() if not k.startswith("_")},
             "run_phase0": arm["metrics"],
             "run_phase0_gold": arm["gold_metrics"],
         }
@@ -388,15 +443,36 @@ def build(name_to_path: dict[str, Path]) -> dict[str, Any]:
                 }
             )
 
+    # Noise floor from within-arm split halves: bounds how large a TV statistic
+    # of this kind can be at this n with no distribution shift at all.
+    split_floor = {}
+    for key, arm_key in (
+        ("tv_label_dist", "split_half_tv_label"),
+        ("tv_prefix_dist", "split_half_tv_prefix"),
+        ("tv_joint_dist", "split_half_tv_joint"),
+        ("tv_first_token_dist", "split_half_tv_first_token"),
+    ):
+        vals = [
+            out["arms"][n]["split_half_tv"][arm_key]
+            for n in TRAINED
+            if n in out["arms"] and arm_key in out["arms"][n].get("split_half_tv", {})
+        ]
+        split_floor[key] = float(max(vals)) if vals else float("nan")
+
     co_primary = {}
     for metric in ("tv_label_dist", "tv_prefix_dist", "tv_joint_dist", "tv_first_token_dist"):
         floor_v, _ = _spread_metric(ZERO_INJECTION, metric)
         spread_v, spread_pair = _spread_metric(TRAINED, metric)
         co_primary[metric] = {
             "noise_floor": floor_v,
+            "split_half_noise_floor": split_floor.get(metric, float("nan")),
             "trained_123_spread": spread_v,
             "trained_123_spread_pair": spread_pair,
             "ratio": (spread_v / floor_v) if floor_v and math.isfinite(floor_v) and floor_v > 0 else None,
+            "within_split_half": bool(
+                math.isfinite(split_floor.get(metric, float("nan")))
+                and spread_v <= split_floor[metric]
+            ),
         }
     # Item-level prefix contrast: the concrete round-156 shape is
     # "newline_lead" (zero injection) vs "space_lead" (injection).
@@ -535,6 +611,18 @@ def render_markdown(res: dict[str, Any]) -> str:
             f"{dr if dr is not None else float('nan'):.4f} |"
         )
     lines.append("")
+    lines.append("| arm | split-half TV(label) | TV(prefix) | TV(joint) | TV(first token) |")
+    lines.append("|---|---|---|---|---|")
+    for name in order:
+        a = res["arms"][name]
+        sh = a.get("split_half_tv", {})
+        lines.append(
+            f"| `{name}` | {sh.get('split_half_tv_label', float('nan')):.4f} | "
+            f"{sh.get('split_half_tv_prefix', float('nan')):.4f} | "
+            f"{sh.get('split_half_tv_joint', float('nan')):.4f} | "
+            f"{sh.get('split_half_tv_first_token', float('nan')):.4f} |"
+        )
+    lines.append("")
     lines.append("### 判决量\n")
     v = res["verdict"]
     lines.append(
@@ -547,13 +635,13 @@ def render_markdown(res: dict[str, Any]) -> str:
     )
     lines.append(f"* 主判决（粗分类法）: **{v['decision']}**")
     lines.append("")
-    lines.append("| co-primary 指标 | 5/6 噪声地板 | 1/2/3 最大 | 最大所在对 | 倍数 |")
-    lines.append("|---|---|---|---|---|")
+    lines.append("| co-primary 指标 | 5/6 噪声地板 | 臂内 split-half 地板 | 1/2/3 最大 | 最大所在对 | 落在 split-half 内 |")
+    lines.append("|---|---|---|---|---|---|")
     for metric, e in v["co_primary"].items():
-        ratio = f"{e['ratio']:.2f}x" if e.get("ratio") else "n/a"
+        sh = e.get("split_half_noise_floor", float("nan"))
         lines.append(
-            f"| {metric} | {e['noise_floor']:.4f} | {e['trained_123_spread']:.4f} | "
-            f"{e.get('trained_123_spread_pair', '')} | {ratio} |"
+            f"| {metric} | {e['noise_floor']:.4f} | {sh:.4f} | {e['trained_123_spread']:.4f} | "
+            f"{e.get('trained_123_spread_pair', '')} | {e.get('within_split_half', 'n/a')} |"
         )
     lines.append(f"\n* 副判决（label×前导面 联合 TV）: **{v['decision_co_primary']}**")
     lines.append("")

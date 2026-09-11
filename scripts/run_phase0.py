@@ -156,13 +156,16 @@ def _load_model(model_path: str, device: str = "cpu", dtype: str = "float32"):
 
     target_dtype = _resolve_backbone_dtype(dtype)
     tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
+    # Load straight into the requested dtype.  Loading float32 first and casting
+    # afterwards (round-157 CPU pre-check) doubles the load-time peak: an fp32
+    # copy of the 0.8B checkpoint is 3.4GiB, which the ~2GiB CPU container kills
+    # outright, so the documented --backbone-dtype bfloat16 escape hatch could
+    # not run at all.  bf16->fp32->bf16 is a lossless round trip, so weights are
+    # unchanged for arms that previously loaded fp32 and cast down; the cast
+    # below stays as a guard for Transformers releases that override the request.
     model = AutoModelForCausalLM.from_pretrained(
-        model_path, local_files_only=True, dtype=torch.float32
+        model_path, local_files_only=True, dtype=target_dtype
     )
-    # Newer Transformers releases may still load the checkpoint in its original
-    # bf16 dtype even when dtype=float32 is requested.  The default research path
-    # assumes float32 on CPU/GPU; --backbone-dtype bfloat16 is the escape hatch
-    # for 2B/4B backbones that do not fit in float32 on one GPU.
     if next(model.parameters()).dtype != target_dtype:
         model = model.to(target_dtype)
     model.eval()
@@ -660,16 +663,32 @@ def _qa_gold_nll(
             )
 
     chunk = max(1, int(batch_size))
-    for offset in range(0, len(prepared), chunk):
-        batch = prepared[offset : offset + chunk]
-        max_len = max(len(entry["full_ids"]) for entry in batch)
-        ids_np = np.zeros((len(batch), max_len), dtype=np.int64)
-        mask_np = np.zeros((len(batch), max_len), dtype=np.int64)
-        for row, entry in enumerate(batch):
-            length = len(entry["full_ids"])
-            ids_np[row, :length] = entry["full_ids"]
-            mask_np[row, :length] = 1
-        ids = torch.from_numpy(ids_np).long().to(device)
+    # Chunk each variant separately.  Interleaving raw and spaced rows in one
+    # list would change how the raw rows are grouped and right-padded whenever
+    # batch_size > 1, so the "strictly additive" promise would only hold at
+    # batch 1: bf16 reductions over different batch shapes can move the last
+    # bits.  Scoring the raw group first, alone, keeps the flag-off chunking
+    # exactly, so enabling the flag cannot perturb the headline number.
+    if space_variant:
+        groups = [
+            [e for e in prepared if e["variant"] == "raw"],
+            [e for e in prepared if e["variant"] == "spaced"],
+        ]
+    else:
+        groups = [prepared]
+    done = 0
+    n_prepared = len(prepared)
+    for group in groups:
+        for offset in range(0, len(group), chunk):
+            batch = group[offset : offset + chunk]
+            max_len = max(len(entry["full_ids"]) for entry in batch)
+            ids_np = np.zeros((len(batch), max_len), dtype=np.int64)
+            mask_np = np.zeros((len(batch), max_len), dtype=np.int64)
+            for row, entry in enumerate(batch):
+                length = len(entry["full_ids"])
+                ids_np[row, :length] = entry["full_ids"]
+                mask_np[row, :length] = 1
+            ids = torch.from_numpy(ids_np).long().to(device)
         attention_mask = torch.from_numpy(mask_np).long().to(device)
 
         if qa_store is not None:
@@ -704,6 +723,9 @@ def _qa_gold_nll(
             value = float(loss.item())
             n_tokens = int(end - start)
             task = str(entry["item"].get("task", "unknown"))
+            done += 1
+            if done % 200 == 0 or done == n_prepared:
+                print(f"    gold-NLL {done}/{n_prepared}", flush=True)
             if entry.get("variant", "raw") == "spaced":
                 # Diagnostic reading only: recorded beside the raw NLL, never
                 # folded into the headline aggregates.
@@ -724,9 +746,6 @@ def _qa_gold_nll(
             per_task_nll.setdefault(task, []).append(value)
             total_loss += value * n_tokens
             total_tokens += n_tokens
-        done = offset + len(batch)
-        if done % 200 == 0 or done == len(prepared):
-            print(f"    gold-NLL {done}/{len(prepared)}", flush=True)
 
     metrics = {
         f"qa_{task}_nll": float(np.mean(vals))
@@ -1230,7 +1249,7 @@ def _qa_exact_match(
     if current:
         batches.append(current)
 
-    records: list[tuple[int, dict, bool]] = []
+    records: list[tuple[int, dict[str, Any], bool, bool]] = []
     for batch in batches:
         states = []
         for idx, item in batch:
@@ -1306,14 +1325,13 @@ def _qa_exact_match(
             )
             hit = _normalize_answer(item["answer"]) in _normalize_answer(generated_text)
             # Round-156 metric fix.  Substring matching is not comparable across
-            # arms that print different formats: a model that emits chat
-            # scaffolding glues "No" to the template's "user" role, and the
-            # decoded "Nouser" *contains* the substring "no", so the arm is
-            # credited with an answer it never gave in the requested format
-            # (measured: up to 33 points of inflation).  The token-level score
-            # concatenates decoded token pieces over a sliding window instead, so
-            # "No"+"user" no longer collapses into a false hit while a genuine
-            # multi-token answer such as "The Persistence of Memory" still counts.
+            # arms that print different formats: the scaffolding arm emits
+            # "Nouser", tokenised as 'Nous'+'er', whose decoded text *contains*
+            # the substring "no", so the arm is credited with an answer it never
+            # produced as a unit (measured: up to 33 points of inflation on the
+            # g0-nople arm).  The token-level score concatenates decoded token
+            # pieces over a sliding window instead, while a genuine multi-token
+            # answer such as "The Persistence of Memory" still counts.
             hit_token = _token_level_hit(tokenizer, state["generated"], item["answer"])
             records.append(
                 (
@@ -1323,6 +1341,10 @@ def _qa_exact_match(
                         "question": item["question"],
                         "answer": item["answer"],
                         "generated": generated_text,
+                        # Stored so `correct_token` can be re-derived from the
+                        # artifact alone; a score nobody can recompute is a score
+                        # nobody can audit.
+                        "generated_ids": list(state["generated"]),
                         "correct": hit,
                         "correct_token": hit_token,
                         "n_generated": len(state["generated"]),
@@ -1362,10 +1384,20 @@ def _token_level_hit(tokenizer, generated_ids, answer: str) -> bool:
     """Match the gold answer against *decoded token windows*.
 
     The plain substring test in :func:`_qa_exact_match` is not comparable across
-    arms whose generations differ in format (round-156: ``Nouser`` contains
-    ``no``).  Concatenating decoded pieces over a sliding window keeps
-    multi-token answers working while refusing to match across a token boundary
-    that the model never actually produced as a unit.
+    arms whose generations differ in format (round-156).  The measured failure
+    is that an answer gets *fused into a larger token*: the scaffolding arm
+    emits ``Nouser``, which Qwen3.5 tokenises as ``'Nous'+'er'`` (ids
+    [63611, 261], verified against the real tokenizer), and the decoded string
+    then *contains* the substring ``no`` even though the model never produced
+    ``no`` as a unit.  Concatenating decoded pieces over a sliding window keeps
+    genuine multi-token answers working while refusing to match an answer that
+    only exists inside a bigger token.
+
+    Deliberately NOT claimed: that this also rejects a model which emits ``No``
+    and ``user`` as two separate tokens.  That decodes to the same string and
+    both rules accept it.  The token-level rule is strictly the tighter of the
+    two, not a complete format detector -- pair it with the ``qa_fmt_*``
+    fingerprint when comparing arms.
     """
     target = _normalize_answer(answer)
     if not target or not generated_ids:
@@ -1802,18 +1834,43 @@ def _run_mode(
 
 def _summarize(results: list[dict], modes: list[str]) -> dict:
     summary = {}
+    # Round-156 metrics must actually reach the summary, not just the raw JSON:
+    # every downstream reporter (summarize_arms / summarize_mix_results /
+    # summarize_unseen_kb / export_phase0_metrics) reads only this block, so a
+    # metric that stops here is invisible to every table we publish.  The old
+    # substring `qa_em_mean` stays for comparability with earlier rounds; the
+    # token-level EM, the spaced gold NLL and the format fingerprint ride
+    # alongside it.  A row without the fingerprint is not comparable to one
+    # with it, which is the whole point of carrying it.
+    carried = (
+        "qa_em_mean",
+        "qa_em_token_mean",
+        "qa_mean_nll",
+        "qa_mean_nll_spaced",
+        "qa_fmt_empty_rate",
+        "qa_fmt_scaffold_rate",
+        "qa_fmt_distinct_rate",
+        "qa_fmt_boolq_yes_rate",
+    )
     for mode in modes:
         vals = [
             r["val_loss"]
             for r in results
             if r["mode"] == mode and np.isfinite(r["val_loss"])
         ]
-        qa_vals = [
-            r["qa_exact"]["metrics"]["qa_em_mean"]
+        qa_metrics = [
+            r["qa_exact"]["metrics"]
             for r in results
             if r["mode"] == mode
             and r.get("qa_exact") is not None
-            and np.isfinite(r["qa_exact"]["metrics"]["qa_em_mean"])
+            and r["qa_exact"].get("metrics")
+        ]
+        gold_metrics = [
+            r["qa_gold"]["metrics"]
+            for r in results
+            if r["mode"] == mode
+            and r.get("qa_gold") is not None
+            and r["qa_gold"].get("metrics")
         ]
         entry: dict[str, Any] = {
             "n_seeds": len(vals),
@@ -1822,9 +1879,12 @@ def _summarize(results: list[dict], modes: list[str]) -> dict:
             "val_ppl_mean": float(np.exp(np.mean(vals))) if vals else None,
             "details": [r for r in results if r["mode"] == mode],
         }
-        if qa_vals:
-            entry["qa_em_mean"] = float(np.mean(qa_vals))
-            entry["qa_em_std"] = float(np.std(qa_vals))
+        for key in carried:
+            sources = gold_metrics if "nll" in key else qa_metrics
+            series = [m[key] for m in sources if key in m and np.isfinite(m[key])]
+            if series:
+                entry[key] = float(np.mean(series))
+                entry[f"{key}_std"] = float(np.std(series))
         summary[mode] = entry
     return summary
 

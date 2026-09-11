@@ -1,0 +1,1116 @@
+#!/usr/bin/env python3
+"""Count-based n-gram LM reference frame for the PLE graft (Round 158).
+
+Why this script exists
+----------------------
+Every round so far compared "a hashed n-gram memory table is grafted" against
+"no table".  The honest control -- spending the *same storage* on a plain
+count-based n-gram model -- was never built (see
+``docs/round-153-goal-tech-debt-and-development-plan.md`` and
+``docs/round-157-why-the-graft-is-a-prior-not-a-knowledge-channel.md``).
+This script produces that reference frame: explicit count-based n-gram language
+models (unigram / bigram / trigram / 4-gram) with interpolated (Modified)
+Kneser-Ney smoothing, evaluated on held-out token positions, together with a
+*measured* storage account so the frozen 48 GiB PLE table can be placed on the
+same accuracy-vs-bytes axis.
+
+Environment constraint
+----------------------
+The AutoDL container is capped at **2 GiB RSS and 0.5 CPU** (cgroup
+memory.max / cpu.max -- ``nproc`` and ``free`` report host values and lie).
+So this implementation is deliberately frugal and fully vectorised:
+
+* no Python dict of n-grams anywhere -- counting is ``np.lexsort`` over integer
+  windows, lookup is ``np.searchsorted`` plus a vectorised ragged binary search;
+* every scoring pass is numpy over the whole held-out stream (no Python loop
+  over positions);
+* accuracy is accumulated in position chunks so the (chunk x candidates) dense
+  score matrix stays a few tens of MB;
+* peak RSS (``VmHWM``) is reported in the JSON; wrap the run in
+  ``flock /tmp/qwen35_heavy.lock`` when siblings share the box.
+
+Model
+-----
+Interpolated Kneser-Ney with per-count absolute discounts.  For a model whose
+highest order is ``M``:
+
+    p_1(w)     = disc_1(c_1(w)) + Lambda_1 / V_uni
+    p_k(w|h)   = disc_k(c_k(h w)) + gamma_k(h) * p_{k-1}(w | h[1:])      2 <= k <= M
+    disc_k(c)  = max(c - D_k(min(c, 3)), 0) / Z_k(h)
+    gamma_k(h) = 1 - sum_w disc_k(c_k(h w))              (= backoff mass)
+
+where ``c_k`` is the **raw** count of the k-gram when k == M (the highest
+order) and the **continuation count** N1+(. u) = number of distinct left
+extensions when k < M (the usual Kneser-Ney lower-order redefinition);
+``Z_k(h)`` is the total of those counts for context h; and ``Lambda_1`` is the
+discounted unigram mass spread uniformly over a fixed vocabulary of size
+``V_uni``.  The uniform floor is what gives tokens never seen in training a
+finite probability; it is called out explicitly because OOV positions dominate
+inter-model NLL differences.
+
+``--smoothing`` selects the discounts:
+
+* ``mkn`` (default) -- Modified Kneser-Ney, Chen & Goodman (1999):
+  Y = n1/(n1+2 n2), D1 = 1 - 2Y n2/n1, D2 = 2 - 3Y n3/n2, D3 = 3 - 4Y n4/n3,
+  with D(c>=3) = D3.  Discounting singletons hard is what stops higher orders
+  from over-trusting count-1 contexts.
+* ``kn``  -- single absolute discount D = n1/(n1+2 n2) for all counts.
+* ``addk`` -- interpolated add-k: disc = c/(Z + k V_uni), gamma = k V_uni/(Z + k V_uni)
+  (handled by the same code path with a zero discount table and a shifted Z).
+
+If the three-discount estimator would leave some context with zero backoff mass
+(possible when the count-of-counts degenerates), the level falls back to the
+single discount, then to a generic half count; the fallback is logged and
+recorded in the JSON.  Unseen contexts back off by dropping the oldest token;
+the scorer walks levels down in one pass, so a position that misses the 4-gram
+context still gets the full trigram/bigram/unigram mixture.
+
+Evaluation
+----------
+* Every model is scored on exactly the same held-out positions: indices
+  ``i >= max(orders) - 1`` of the evaluation stream.  That count is
+  ``n_scored_positions_per_model``.
+* ``NLL`` = mean over those positions of ``-ln p(target)`` (natural log),
+  ``ppl`` = ``exp(NLL)``, ``bits/token`` = ``NLL / ln 2``.  No candidate
+  restriction, no subsampling.
+* Accuracy uses argmax, so it needs the candidate distribution; it runs on a
+  deterministic random subsample (``--acc-positions``) and is reported for two
+  candidate sets: ``top{K}`` (K most frequent *training* tokens, the set a
+  sibling experiment uses) and ``full_vocab``.  ``full_vocab`` is taken to be
+  the *training* vocabulary: tokens never seen in training all score exactly the
+  uniform floor, which is strictly below the score of any seen token, so the
+  argmax/top-5 ranking is identical to the one over all ``V_uni`` tokens (the
+  full 248k-token argmax would need a 2 GB score matrix).  For the restricted
+  set, positions whose target is outside the candidate set are counted in
+  ``n_targets_outside_candidates`` and EXCLUDED from that accuracy; coverage is
+  reported so the exclusion is visible.
+
+Storage accounting
+------------------
+Each level is packed the way a serving table would be: a CSR layout of
+``contexts -> (next_token, count)`` sorted lexicographically, i.e. exactly
+
+    ctx_sorted  (C,)     int64    distinct (k-1)-gram contexts, exact mixed-radix
+    starts      (C+1,)   int64    row offsets into the value arrays
+    next_tokens (N_k,)   int32    distinct next tokens, sorted per context
+    counts      (N_k,)   uint32   stored count of each (context, next)
+
+No hashing (context keys up to 3 tokens x 18 bits fit exactly in int64), no
+compression, no Python objects.  ``packed_bytes_total`` is the measured
+``nbytes`` of exactly those arrays.  The per-context ``zeff``/``discsum`` arrays
+that scoring keeps resident are reported separately as ``scoring_side_bytes``:
+they are recomputable from the table and are not part of the shipped bytes.
+
+Projection onto the frozen PLE table (default 48 GiB): (a) a linear "constant
+bytes per training token" projection and (b) a fit of ``bytes(N) ~ N**b`` over
+corpus prefixes (Heaps-like).  Both extrapolate far outside the fitted range;
+see ``assumptions`` in the JSON.  Accuracy is never extrapolated.
+
+Usage
+-----
+    flock /tmp/qwen35_heavy.lock python scripts/bench_ngram_reference.py \
+        --train-npy data/phase1/PURE_WIKI/tokens.npy \
+        --eval-npy  data/phase1/wikitext-heldout/tokens.npy \
+        --orders 1,2,3,4 --smoothing mkn --uniform-vocab 248047 \
+        --candidate-from data/phase1/PURE_WIKI/tokens.npy \
+        --acc-positions 20000 --acc-candidates 5000 --acc-positions-full 2000 \
+        --scaling-prefixes 0.25,0.5,1.0 \
+        --output outputs/ngram-reference-PURE_WIKI-heldout.json \
+        --markdown outputs/ngram-reference-PURE_WIKI-heldout.md
+
+Use ``--holdout-tail N`` for the in-stream split (train on ``tokens[:-N]``,
+evaluate on ``tokens[-N:]``) instead of ``--eval-npy``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import gc
+import hashlib
+import json
+import math
+import platform
+import sys
+import time
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+
+GIB = 1 << 30
+COUNT_CAP = 3      # discounts are bucketed as count 1, 2, >=3
+COUNT_CLIP = 5     # count-of-counts tracked exactly up to 4, then clipped
+LOG_MIN = math.log(1e-300)
+
+
+def log(msg: str) -> None:
+    print("[ngram-ref] {}".format(msg), flush=True)
+
+
+def peak_rss_bytes() -> int:
+    """Measured high-water RSS of this process (VmHWM on Linux), in bytes."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmHWM:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    try:
+        import resource
+        rss = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        # Linux reports KiB, macOS reports bytes
+        return rss * 1024 if sys.platform.startswith("linux") else rss
+    except Exception:  # noqa: BLE001
+        return -1
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def load_tokens(path: Path) -> np.ndarray:
+    if path.suffix == ".npy":
+        arr = np.load(path)
+    else:
+        arr = np.loadtxt(path, dtype=np.int64)
+    arr = np.asarray(arr).reshape(-1)
+    if not np.issubdtype(arr.dtype, np.integer):
+        raise SystemExit("token array must be integer typed, got {}".format(arr.dtype))
+    if arr.size and int(arr.max()) >= 2 ** 31:
+        raise SystemExit("token ids must fit in int32")
+    return arr.astype(np.int32, copy=False)
+
+
+# --------------------------------------------------------------------------
+# counting (sort based, no Python dicts)
+# --------------------------------------------------------------------------
+def unique_rows(a: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Lexicographically sort rows of ``a``; return (unique_rows, counts).
+
+    Column 0 is the primary key, which is what makes context = ``row[:-1]``
+    contiguous in the CSR packing below.
+    """
+    n, k = a.shape
+    if n == 0:
+        return np.zeros((0, k), dtype=np.int32), np.zeros((0,), dtype=np.int64)
+    if k == 1:
+        flat = np.ascontiguousarray(a[:, 0])
+        order = np.argsort(flat, kind="stable")
+        sa = flat[order]
+        new = np.empty(n, dtype=bool)
+        new[0] = True
+        new[1:] = sa[1:] != sa[:-1]
+        idx = np.flatnonzero(new)
+        counts = np.diff(np.append(idx, n)).astype(np.int64)
+        return sa[idx].reshape(-1, 1).astype(np.int32), counts
+    order = np.lexsort(a.T[::-1])
+    sa = a[order]
+    del order
+    new = np.empty(n, dtype=bool)
+    new[0] = True
+    new[1:] = np.any(sa[1:] != sa[:-1], axis=1)
+    idx = np.flatnonzero(new)
+    del new
+    counts = np.diff(np.append(idx, n)).astype(np.int64)
+    return sa[idx].astype(np.int32), counts
+
+
+def pack_contexts(rows: np.ndarray, vocab: int) -> np.ndarray:
+    """Pack each row of ``rows`` into one exact int64 (mixed radix, base vocab).
+
+    The most recent token is the least significant digit, so for a k-gram the
+    context key is ``key // vocab`` and the joint key would be ``key * vocab + w``.
+    """
+    n, k = rows.shape
+    if k == 0:
+        return np.zeros(n, dtype=np.int64)
+    bits = max(1, int(vocab - 1).bit_length())
+    if k * bits > 62:
+        raise SystemExit("context of {} tokens does not fit in int64 for V={}".format(
+            k, vocab))
+    acc = np.zeros(n, dtype=np.int64)
+    for j in range(k):
+        acc *= vocab
+        acc += rows[:, j].astype(np.int64)
+    return acc
+
+
+def context_keys_at(stream: np.ndarray, positions: np.ndarray, ctx_len: int,
+                    vocab: int) -> np.ndarray:
+    """Packed key of the ``ctx_len`` tokens preceding each position."""
+    if ctx_len == 0:
+        return np.zeros(positions.shape[0], dtype=np.int64)
+    acc = np.zeros(positions.shape[0], dtype=np.int64)
+    base = positions - ctx_len
+    for j in range(ctx_len):
+        acc *= vocab
+        acc += stream[base + j].astype(np.int64)
+    return acc
+
+
+class LevelTable:
+    """Packed CSR table for one n-gram order (k = number of tokens)."""
+
+    __slots__ = ("k", "ctx_sorted", "starts", "next_tokens", "counts",
+                 "count_of_counts", "zeff", "discsum", "sub_table", "D",
+                 "nbytes", "scoring_side_bytes", "norm_dev")
+
+    def __init__(self, k, ctx_sorted, starts, next_tokens, counts):
+        self.k = k
+        self.ctx_sorted = ctx_sorted
+        self.starts = starts
+        self.next_tokens = next_tokens
+        self.counts = counts
+        self.count_of_counts = None
+        self.zeff = None
+        self.discsum = None
+        self.sub_table = None
+        self.D = None
+        self.nbytes = int(ctx_sorted.nbytes + starts.nbytes
+                          + next_tokens.nbytes + counts.nbytes)
+        self.scoring_side_bytes = 0
+        self.norm_dev = None
+
+    @property
+    def n_contexts(self) -> int:
+        return int(self.ctx_sorted.shape[0])
+
+    @property
+    def n_entries(self) -> int:
+        return int(self.next_tokens.shape[0])
+
+    def storage_breakdown(self) -> Dict[str, object]:
+        return {
+            "order": self.k,
+            "distinct_contexts": self.n_contexts,
+            "distinct_ngrams": self.n_entries,
+            "ctx_sorted_dtype": str(self.ctx_sorted.dtype),
+            "starts_dtype": str(self.starts.dtype),
+            "next_tokens_dtype": str(self.next_tokens.dtype),
+            "counts_dtype": str(self.counts.dtype),
+            "bytes_ctx_sorted": int(self.ctx_sorted.nbytes),
+            "bytes_starts": int(self.starts.nbytes),
+            "bytes_next_tokens": int(self.next_tokens.nbytes),
+            "bytes_counts": int(self.counts.nbytes),
+            "bytes_total": int(self.nbytes),
+            "row_normalization_deviation": self.norm_dev,
+        }
+
+
+def build_level(rows: np.ndarray, counts: np.ndarray, vocab: int) -> LevelTable:
+    """Build a packed CSR level from lexicographically sorted unique n-grams."""
+    n, k = rows.shape
+    if k == 1:
+        ctx_sorted = np.zeros(1, dtype=np.int64)
+        starts = np.array([0, n], dtype=np.int64)
+        next_tokens = rows[:, 0].astype(np.int32)
+    else:
+        ctx_keys = pack_contexts(rows[:, :-1], vocab)
+        new = np.empty(n, dtype=bool)
+        new[0] = True
+        new[1:] = ctx_keys[1:] != ctx_keys[:-1]
+        row_start = np.flatnonzero(new)
+        del new
+        ctx_sorted = ctx_keys[row_start]
+        starts = np.append(row_start, n).astype(np.int64)
+        next_tokens = rows[:, -1].astype(np.int32)
+        del ctx_keys, row_start
+    if n and int(counts.max()) < 2 ** 32:
+        counts_small = counts.astype(np.uint32)
+    else:
+        counts_small = counts.astype(np.uint64)
+    return LevelTable(k, ctx_sorted, starts, next_tokens, counts_small)
+
+
+def discounts_from_coc(coc: Dict[str, int], smoothing: str) -> Dict[str, object]:
+    """Return the discount triple and the single-discount fallback Y.
+
+    ``kn`` uses one absolute discount D = n1/(n1+2 n2) for every count; ``mkn``
+    (Modified Kneser-Ney, Chen & Goodman 1999) uses Y = n1/(n1+2 n2),
+    D1 = 1 - 2Y n2/n1, D2 = 2 - 3Y n3/n2, D3 = 3 - 4Y n4/n3.
+    """
+    n1, n2, n3, n4 = coc["n1"], coc["n2"], coc["n3"], coc["n4"]
+    if smoothing == "addk":
+        return {"D": [0.0, 0.0, 0.0], "Y": 0.0}
+    if n1 == 0 and n2 == 0:
+        # No count-of-counts signal (every stored n-gram occurs >= 3 times):
+        # both estimators would give D = 0, which leaves no smoothing mass at
+        # all.  Use a generic half count instead of silently producing -inf.
+        return {"D": [0.5, 0.5, 0.5], "Y": 0.5}
+    Y = n1 / (n1 + 2.0 * n2) if (n1 + 2 * n2) > 0 else 0.5
+    Y = min(max(Y, 1e-3), 0.99)
+    if smoothing == "kn":
+        return {"D": [Y, Y, Y], "Y": Y}
+    D1 = 1.0 - 2.0 * Y * n2 / n1 if n1 > 0 else Y
+    D2 = 2.0 - 3.0 * Y * n3 / n2 if n2 > 0 else Y
+    D3 = 3.0 - 4.0 * Y * n4 / n3 if n3 > 0 else Y
+    D1 = min(max(D1, 0.0), 1.0 - 1e-6)
+    D2 = min(max(D2, 0.0), 2.0 - 1e-6)
+    D3 = min(max(D3, 0.0), 3.0 - 1e-6)
+    if D1 <= 0.0:
+        D1 = Y
+    return {"D": [D1, D2, D3], "Y": Y}
+
+
+def finalize_level(lvl: LevelTable, smoothing: str, addk: float, vocab: int,
+                   notes: List[str]) -> None:
+    """Attach discounts, Z, retained mass and the per-row invariant check."""
+    counts = lvl.counts.astype(np.int64)
+    coc = np.bincount(np.minimum(counts, COUNT_CLIP), minlength=COUNT_CLIP + 1) \
+        if counts.size else np.zeros(COUNT_CLIP + 1, dtype=np.int64)
+    n_total = int(counts.shape[0])
+    lvl.count_of_counts = {
+        "n1": int(coc[1]), "n2": int(coc[2]), "n3": int(coc[3]), "n4": int(coc[4]),
+        "n_ge3": int(n_total - coc[1] - coc[2]), "n_total": n_total,
+    }
+    zeff = (np.add.reduceat(counts, lvl.starts[:-1]).astype(np.float64)
+            if counts.size else np.zeros((0,), dtype=np.float64))
+    if smoothing == "addk":
+        lvl.sub_table = np.zeros(COUNT_CAP + 1, dtype=np.float64)
+        lvl.zeff = zeff + addk * vocab
+        lvl.D = [None, None, None]
+    else:
+        info = discounts_from_coc(lvl.count_of_counts, smoothing)
+        D, Y = info["D"], info["Y"]  # type: ignore
+        # A context whose stored continuations all fall in a zero-discount
+        # bucket would get gamma = 0, hence p = 0 for an unseen continuation and
+        # an -inf NLL.  Accept the three-discount estimator only if every row
+        # keeps a strictly positive backoff weight; else fall back to the single
+        # discount, then to a generic half count.
+        chosen = None
+        for cand in (D, [Y, Y, Y], [0.5, 0.5, 0.5]):
+            sub = np.array([0.0, cand[0], cand[1], cand[2]], dtype=np.float64)
+            retained = np.maximum(counts - sub[np.minimum(counts, COUNT_CAP)], 0.0)
+            per_ctx = np.add.reduceat(retained, lvl.starts[:-1]) if counts.size \
+                else np.zeros((0,), dtype=np.float64)
+            if not counts.size or not bool((per_ctx >= zeff).any()):
+                chosen = (cand, retained, per_ctx)
+                break
+        cand, retained, per_ctx = chosen  # type: ignore
+        lvl.sub_table = np.array([0.0, cand[0], cand[1], cand[2]], dtype=np.float64)
+        lvl.zeff = zeff
+        lvl.D = [float(x) for x in cand]
+        if cand is not D:
+            notes.append("order {}: discounts {} degenerate -> {}".format(
+                lvl.k, [round(float(x), 4) for x in D],
+                [round(float(x), 4) for x in cand]))
+    if smoothing == "addk":
+        retained = counts.astype(np.float64)
+    # retained mass per row, recomputed independently of discsum below
+    lvl.discsum = np.add.reduceat(retained, lvl.starts[:-1]) if counts.size \
+        else np.zeros((0,), dtype=np.float64)
+    lvl.scoring_side_bytes = int(lvl.zeff.nbytes + lvl.discsum.nbytes)
+    # invariant: per row, sum_w disc_w + gamma == 1 (this is what catches a
+    # mismatch between the per-entry discount and the stored retained mass)
+    if counts.size:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            per_entry = retained / np.repeat(lvl.zeff, np.diff(lvl.starts))
+            row_sum = np.add.reduceat(per_entry, lvl.starts[:-1])
+            gamma = 1.0 - lvl.discsum / lvl.zeff
+            worst = float(np.abs(row_sum + gamma - 1.0).max())
+        lvl.norm_dev = worst
+        if not (worst < 1e-9):
+            notes.append("order {}: row normalization deviation {:.2e}".format(
+                lvl.k, worst))
+    else:
+        lvl.norm_dev = 0.0
+    del counts, retained
+
+
+def build_counts(train: np.ndarray, orders: Sequence[int], vocab: int):
+    """Raw n-gram counts for every needed order plus KN continuation counts."""
+    raw: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+    cont: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+    max_order = max(orders)
+    needed = sorted(set(list(orders) + [o + 1 for o in orders if o < max_order]))
+    for k in needed:
+        win = np.lib.stride_tricks.sliding_window_view(train, k)
+        uq, ct = unique_rows(win)
+        del win
+        raw[k] = (uq, ct)
+        log("  order {}: {:,} distinct n-grams (raw)".format(k, uq.shape[0]))
+        gc.collect()
+    for k in orders:
+        if k < max_order:
+            uq, ct = cont_counts(raw[k + 1][0])
+            cont[k] = (uq, ct)
+            log("  order {}: {:,} distinct n-grams (continuation)".format(k, uq.shape[0]))
+            gc.collect()
+    return raw, cont
+
+
+def cont_counts(rows: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """KN continuation counts of k-grams from the distinct (k+1)-grams.
+
+    A k-gram's continuation count is the number of distinct left extensions it
+    has, i.e. the multiplicity of its suffix among distinct (k+1)-grams.
+    """
+    return unique_rows(np.ascontiguousarray(rows[:, 1:]))
+
+
+# --------------------------------------------------------------------------
+# model
+# --------------------------------------------------------------------------
+class NgramModel:
+    """Interpolated KN / add-k model assembled from prebuilt level tables."""
+
+    def __init__(self, order: int, levels: Dict[int, LevelTable], vocab: int,
+                 smoothing: str, addk: float, notes: List[str]):
+        self.order = order
+        self.levels = levels
+        self.vocab = vocab
+        self.smoothing = smoothing
+        self.addk = addk
+        lvl1 = levels[1]
+        zeff1 = float(lvl1.zeff[0]) if lvl1.zeff.size else 1.0
+        zeff1 = zeff1 if zeff1 > 0 else 1.0
+        self.floor = max(0.0, 1.0 - float(lvl1.discsum[0]) / zeff1) / vocab
+        seen = lvl1.next_tokens.astype(np.int64)
+        c1 = lvl1.counts.astype(np.float64)
+        sub = lvl1.sub_table[np.minimum(lvl1.counts.astype(np.int64), COUNT_CAP)]
+        p1 = np.full(vocab, self.floor, dtype=np.float64)
+        p1[seen] = np.maximum(c1 - sub, 0.0) / zeff1 + self.floor
+        self.p1_dense = p1
+        self.vocab_seen = int(seen.shape[0])
+
+    # -- lookups -----------------------------------------------------------
+    def row_index(self, lvl: LevelTable, ctx_keys: np.ndarray):
+        C = lvl.ctx_sorted.shape[0]
+        idx = np.searchsorted(lvl.ctx_sorted, ctx_keys)
+        np.clip(idx, 0, C - 1, out=idx)
+        valid = lvl.ctx_sorted[idx] == ctx_keys
+        return idx, valid
+
+    def row_counts(self, lvl: LevelTable, idx: np.ndarray, valid: np.ndarray,
+                   w: np.ndarray) -> np.ndarray:
+        """Vectorised ragged binary search: count of token ``w`` inside each row."""
+        n_tok = lvl.next_tokens.shape[0]
+        s = lvl.starts[idx]
+        e = lvl.starts[idx + 1]
+        lo = np.where(valid, s, 0)
+        hi = np.where(valid, e, 0)
+        while True:
+            act = hi > lo
+            if not act.any():
+                break
+            mid = (lo + hi) >> 1
+            right = lvl.next_tokens[mid] < w
+            hi = np.where(act & ~right, mid, hi)
+            lo = np.where(act & right, mid + 1, lo)
+        probe = np.minimum(lo, n_tok - 1) if n_tok else lo
+        found = valid & (lo < e) & (lvl.next_tokens[probe] == w)
+        return np.where(found, lvl.counts[probe].astype(np.int64), 0)
+
+    # -- scoring -----------------------------------------------------------
+    def stream_logprob(self, stream: np.ndarray):
+        """Per-position ln p(target) over every position with a full context."""
+        M = self.order
+        pos = np.arange(M - 1, stream.shape[0], dtype=np.int64)
+        w = stream[pos].astype(np.int64)
+        p = self.p1_dense[w]
+        top_level = np.ones(pos.shape[0], dtype=np.int8)
+        for k in range(2, M + 1):
+            lvl = self.levels[k]
+            ck = context_keys_at(stream, pos, k - 1, self.vocab)
+            idx, valid = self.row_index(lvl, ck)
+            del ck
+            if valid.any():
+                c = self.row_counts(lvl, idx, valid, w)
+                zeff = lvl.zeff[idx]
+                disc = np.where(valid, np.maximum(
+                    c - lvl.sub_table[np.minimum(c, COUNT_CAP)], 0.0) / zeff, 0.0)
+                gamma = np.where(valid, 1.0 - lvl.discsum[idx] / zeff, 1.0)
+                p = disc + gamma * p
+                top_level[valid] = k
+                del c, zeff, disc, gamma
+            del idx, valid
+        n_zero = int(np.count_nonzero(p <= 0.0))
+        with np.errstate(divide="ignore"):
+            lp = np.log(np.maximum(p, 1e-300))
+        return lp, top_level, pos, n_zero
+
+    def accuracy(self, stream: np.ndarray, positions: np.ndarray,
+                 candidates: np.ndarray, chunk: int) -> Dict[str, object]:
+        """Exact top-1/top-5 over ``candidates`` on the given positions."""
+        V = self.vocab
+        C = candidates.shape[0]
+        cand_col = np.full(V, -1, dtype=np.int32)
+        cand_col[candidates] = np.arange(C, dtype=np.int32)
+        top1 = np.zeros(positions.shape[0], dtype=bool)
+        top5 = np.zeros(positions.shape[0], dtype=bool)
+        for start in range(0, positions.shape[0], chunk):
+            pos = positions[start : start + chunk]
+            w = stream[pos].astype(np.int64)
+            scores = np.tile(self.p1_dense[candidates].astype(np.float32), (pos.shape[0], 1))
+            for k in range(2, self.order + 1):
+                lvl = self.levels[k]
+                ck = context_keys_at(stream, pos, k - 1, V)
+                idx, valid = self.row_index(lvl, ck)
+                del ck
+                if not valid.any():
+                    del idx, valid
+                    continue
+                zeff_all = lvl.zeff[idx]
+                gamma = np.where(valid, 1.0 - lvl.discsum[idx] / zeff_all, 1.0)
+                s = lvl.starts[idx]
+                e = lvl.starts[idx + 1]
+                lens = np.where(valid, e - s, 0).astype(np.int64)
+                total = int(lens.sum())
+                scores *= gamma[:, None].astype(np.float32)
+                if total:
+                    keep = lens > 0
+                    # position index inside the chunk for every row entry
+                    pos_rep = np.repeat(np.flatnonzero(keep), lens[keep])
+                    offs = np.repeat(s[keep] - np.concatenate(
+                        ([0], np.cumsum(lens[keep])[:-1])), lens[keep])
+                    flat = np.arange(total, dtype=np.int64) + offs
+                    col = cand_col[lvl.next_tokens[flat]]
+                    ok = col >= 0
+                    if ok.any():
+                        zeff_rep = np.repeat(zeff_all[keep], lens[keep])
+                        cnt = lvl.counts[flat].astype(np.int64)
+                        val = np.maximum(
+                            cnt - lvl.sub_table[np.minimum(cnt, COUNT_CAP)], 0.0)
+                        val = (val / zeff_rep).astype(np.float32)
+                        np.add.at(scores, (pos_rep[ok], col[ok].astype(np.int64)), val[ok])
+                    del pos_rep, offs, flat, col, ok
+                del idx, valid, zeff_all, gamma, s, e, lens
+            tcol = cand_col[w].astype(np.int64)
+            inside = tcol >= 0
+            if scores.shape[1]:
+                top1[start : start + pos.shape[0]] = (np.argmax(scores, axis=1) == tcol)
+                part = np.argpartition(-scores, min(5, C) - 1, axis=1)[:, :5]
+                top5[start : start + pos.shape[0]] = np.any(part == tcol[:, None], axis=1)
+            del scores
+            gc.collect()
+        n_out = int(np.count_nonzero(cand_col[stream[positions].astype(np.int64)] < 0))
+        inside = cand_col[stream[positions].astype(np.int64)] >= 0
+        return {
+            "n_positions": int(positions.shape[0]),
+            "n_candidates": int(C),
+            "n_targets_outside_candidates": n_out,
+            "candidate_coverage": float(inside.mean()) if positions.shape[0] else 0.0,
+            "top1": float(top1[inside].mean()) if inside.any() else 0.0,
+            "top5": float(top5[inside].mean()) if inside.any() else 0.0,
+            "top1_all_positions": float(top1.mean()) if positions.shape[0] else 0.0,
+            "top5_all_positions": float(top5.mean()) if positions.shape[0] else 0.0,
+        }
+
+
+def candidate_set(train: np.ndarray, k: int, vocab: int) -> np.ndarray:
+    """Top-``k`` most frequent training tokens (ties broken by token id)."""
+    counts = np.bincount(train.astype(np.int64), minlength=vocab)
+    order = np.lexsort((np.arange(vocab), -counts))
+    keep = order[:k]
+    keep = keep[counts[keep] > 0]
+    return np.sort(keep.astype(np.int64))
+
+
+# --------------------------------------------------------------------------
+# storage projection
+# --------------------------------------------------------------------------
+def fit_power_law(xs: Sequence[float], ys: Sequence[float]) -> Dict[str, float]:
+    lx = np.log(np.asarray(xs, dtype=np.float64))
+    ly = np.log(np.asarray(ys, dtype=np.float64))
+    A = np.vstack([np.ones_like(lx), lx]).T
+    coef, *_ = np.linalg.lstsq(A, ly, rcond=None)
+    pred = A @ coef
+    ss_res = float(((ly - pred) ** 2).sum())
+    ss_tot = float(((ly - ly.mean()) ** 2).sum())
+    return {"a": float(coef[0]), "b": float(coef[1]),
+            "r2": 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0}
+
+
+def invert_power_law(fit: Dict[str, float], y_target: float) -> Optional[float]:
+    if fit["b"] <= 1e-9:
+        return None
+    try:
+        return float(math.exp((math.log(y_target) - fit["a"]) / fit["b"]))
+    except OverflowError:
+        return None
+
+
+def saturation_note(order: int, fit_distinct: Optional[Dict[str, float]],
+                    scaling: Sequence[Dict[str, object]], vocab: int) -> str:
+    """Flag orders whose distinct-n-gram count cannot grow (so the fit is void).
+
+    The unigram table is bounded by the vocabulary and the bigram table by
+    V**2; when the measured growth is already flat the power-law projection is
+    an artifact of the fit, not a statement about corpora.
+    """
+    if fit_distinct is None:
+        return "no fit (fewer than two usable prefixes)"
+    b = fit_distinct["b"]
+    last = scaling[-1]["per_model_order"][order]["distinct_ngrams"]  # type: ignore
+    if order == 1 and last >= 0.9 * vocab:
+        return ("unigram table saturated ({} of {} vocabulary types): the "
+                "power-law projection is meaningless, use the linear one".format(last, vocab))
+    if b < 0.2:
+        return ("fitted exponent b={:.3f} is near-flat: the table is saturating, "
+                "the power-law projection is not meaningful".format(b))
+    if b > 1.0:
+        return ("fitted exponent b={:.3f} > 1 (sub-linear growth of distinct "
+                "n-grams is expected); treat the projection as an upper bound".format(b))
+    return "ok (b={:.3f}, assumes the power law holds far outside the fitted range)".format(b)
+
+
+# --------------------------------------------------------------------------
+# main
+# --------------------------------------------------------------------------
+def parse_orders(raw: str) -> List[int]:
+    orders = sorted({int(p) for p in raw.split(",") if p.strip()})
+    if not orders or orders[0] < 1:
+        raise SystemExit("--orders must be >= 1")
+    return orders
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--train-npy", required=True, help="training token stream (.npy int array)")
+    ap.add_argument("--eval-npy", default=None, help="held-out token stream (.npy)")
+    ap.add_argument("--holdout-tail", type=int, default=0,
+                    help="instead of --eval-npy: hold out the last N tokens of --train-npy")
+    ap.add_argument("--orders", default="1,2,3,4")
+    ap.add_argument("--smoothing", choices=["mkn", "kn", "addk"], default="mkn")
+    ap.add_argument("--addk", type=float, default=0.1, help="k for add-k smoothing")
+    ap.add_argument("--uniform-vocab", default="auto",
+                    help="'auto' or an int: size of the uniform floor vocabulary")
+    ap.add_argument("--candidate-from", default=None,
+                    help="token stream defining the top-K candidate set (default: train)")
+    ap.add_argument("--acc-candidates", type=int, default=5000,
+                    help="K for the restricted candidate set (0 = skip)")
+    ap.add_argument("--acc-positions", type=int, default=20000,
+                    help="positions subsampled for the top-K accuracy")
+    ap.add_argument("--acc-positions-full", type=int, default=2000,
+                    help="positions subsampled for the full-vocab accuracy (0 = skip)")
+    ap.add_argument("--acc-chunk", type=int, default=1000,
+                    help="position chunk for the dense score matrix")
+    ap.add_argument("--scaling-prefixes", default="0.25,0.5,1.0",
+                    help="corpus prefixes used for the bytes-vs-tokens power-law fit")
+    ap.add_argument("--target-bytes", type=float, default=48 * GIB,
+                    help="storage budget to project onto (default 48 GiB = PLE table)")
+    ap.add_argument("--ple-row-bytes", type=int, default=160,
+                    help="bytes per frozen PLE row (fp8, 160 dims)")
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--output", default=None, help="JSON result path")
+    ap.add_argument("--markdown", default=None, help="optional markdown table path")
+    args = ap.parse_args()
+
+    t_start = time.time()
+    train_path = Path(args.train_npy)
+    if not train_path.exists():
+        raise SystemExit("train stream not found: {}".format(train_path))
+    orders = parse_orders(args.orders)
+    max_order = max(orders)
+
+    train_full = load_tokens(train_path)
+    if args.holdout_tail:
+        if args.holdout_tail >= train_full.shape[0]:
+            raise SystemExit("--holdout-tail larger than the training stream")
+        train = np.ascontiguousarray(train_full[: -args.holdout_tail])
+        eval_stream = np.ascontiguousarray(train_full[-args.holdout_tail :])
+        split = {
+            "kind": "in-stream tail",
+            "train_tokens": int(train.shape[0]),
+            "eval_tokens": int(eval_stream.shape[0]),
+            "train_dropped_tail_tokens": int(args.holdout_tail),
+            "note": "train = first {} tokens, eval = last {} tokens of {}".format(
+                train.shape[0], eval_stream.shape[0], train_path),
+        }
+    else:
+        if not args.eval_npy:
+            raise SystemExit("provide --eval-npy or --holdout-tail")
+        eval_path = Path(args.eval_npy)
+        if not eval_path.exists():
+            raise SystemExit("eval stream not found: {}".format(eval_path))
+        train = np.ascontiguousarray(train_full)
+        eval_stream = np.ascontiguousarray(load_tokens(eval_path))
+        split = {"kind": "disjoint stream", "train_tokens": int(train.shape[0]),
+                 "eval_tokens": int(eval_stream.shape[0]), "eval_stream": str(eval_path)}
+    del train_full
+    cand_src = load_tokens(Path(args.candidate_from)) if args.candidate_from else train
+    if args.candidate_from:
+        split["candidate_source"] = args.candidate_from
+
+    if args.uniform_vocab == "auto":
+        vocab = int(max(int(train.max()), int(eval_stream.max())) + 1)
+    else:
+        vocab = int(args.uniform_vocab)
+        if vocab <= int(train.max()):
+            raise SystemExit("--uniform-vocab must exceed the largest training token id")
+    log("train={:,} tokens, eval={:,} tokens, V_uni={:,}".format(
+        int(train.shape[0]), int(eval_stream.shape[0]), vocab))
+
+    prefixes = sorted({float(p) for p in args.scaling_prefixes.split(",") if p.strip()})
+    positions_all = np.arange(max_order - 1, eval_stream.shape[0], dtype=np.int64)
+    n_positions = int(positions_all.shape[0])
+    if n_positions <= 0:
+        raise SystemExit("evaluation stream shorter than the largest order")
+
+    def subsample(n: int):
+        if n and n < n_positions:
+            rng = np.random.default_rng(args.seed)
+            return np.sort(rng.choice(positions_all, size=n, replace=False))
+        return positions_all
+
+    acc_pos = subsample(args.acc_positions)
+    if args.acc_positions_full:
+        # nested: the full-vocab subsample is a prefix of the top-K subsample so
+        # the two are computed on the same positions where possible
+        acc_pos_full = acc_pos[: args.acc_positions_full] \
+            if args.acc_positions_full <= acc_pos.shape[0] else subsample(args.acc_positions_full)
+    else:
+        acc_pos_full = None
+    log("scoring positions={:,} (identical for all orders); top-K accuracy positions={:,}; "
+        "full-vocab accuracy positions={:,}".format(
+            n_positions, int(acc_pos.shape[0]),
+            int(acc_pos_full.shape[0]) if acc_pos_full is not None else 0))
+
+    cand_topk = candidate_set(cand_src, args.acc_candidates, vocab) \
+        if args.acc_candidates else None
+    if cand_topk is not None:
+        log("candidate set: top-{} train tokens -> {:,} usable".format(
+            args.acc_candidates, int(cand_topk.shape[0])))
+
+    notes: List[str] = []
+    peak_rss_build_start = peak_rss_bytes()
+
+    # ---- full-size count tables (built once, shared by all orders) --------
+    log("counting n-grams at the full training size ...")
+    raw, cont = build_counts(train, orders, vocab)
+    full_levels: Dict[str, LevelTable] = {}
+    for k in sorted(raw):
+        if k in orders:  # raw counts: the top level of the order-k model
+            lvl = build_level(raw[k][0], raw[k][1], vocab)
+            finalize_level(lvl, args.smoothing, args.addk, vocab, notes)
+            full_levels["raw{}".format(k)] = lvl
+        del raw[k]
+        gc.collect()
+    for k in orders:
+        if k < max_order:  # continuation counts: lower levels of higher orders
+            uq, ct = cont[k]
+            lvl = build_level(uq, ct, vocab)
+            finalize_level(lvl, args.smoothing, args.addk, vocab, notes)
+            full_levels["cont{}".format(k)] = lvl
+            del cont[k]
+            gc.collect()
+    del raw, cont
+    gc.collect()
+    log("count tables built; peak RSS = {:.2f} GiB".format(peak_rss_bytes() / GIB))
+
+    # cand_full = training vocabulary: every unseen token scores exactly the
+    # uniform floor, strictly below any seen token, so the ranking over this set
+    # equals the ranking over all V_uni tokens.
+    seen_vocab = full_levels["raw1"].next_tokens.astype(np.int64)
+
+    # ---- prefix measurements for the scaling fit --------------------------
+    log("measuring storage growth over corpus prefixes ...")
+    scaling = []
+    full_bytes_per_model = {}
+    for M in orders:
+        full_bytes_per_model[M] = {
+            "bytes": int(sum(full_levels["cont{}".format(k) if k < M else "raw{}".format(k)].nbytes
+                             for k in range(1, M + 1))),
+            "distinct_ngrams": int(sum(
+                full_levels["cont{}".format(k) if k < M else "raw{}".format(k)].n_entries
+                for k in range(1, M + 1))),
+        }
+    for frac in prefixes:
+        if frac >= 0.999:
+            scaling.append({
+                "fraction": 1.0, "train_tokens": int(train.shape[0]),
+                "per_model_order": {M: dict(full_bytes_per_model[M]) for M in orders},
+                "note": "full-size tables reused (not rebuilt)",
+            })
+            continue
+        n = min(train.shape[0], max(max_order + 1, int(round(train.shape[0] * frac))))
+        sub = np.ascontiguousarray(train[:n])
+        r2, c2 = build_counts(sub, orders, vocab)
+        lvls: Dict[int, LevelTable] = {}
+        for k in orders:
+            lvls[k] = build_level(r2[k][0], r2[k][1], vocab)
+            del r2[k]
+        for k in orders:
+            if k < max_order:
+                lvls[k] = build_level(c2[k][0], c2[k][1], vocab)
+                del c2[k]
+        del r2, c2
+        gc.collect()
+        per_model = {}
+        for M in orders:
+            tot_b = sum(lvls[k].nbytes for k in range(1, M + 1))
+            tot_d = sum(lvls[k].n_entries for k in range(1, M + 1))
+            per_model[M] = {"bytes": int(tot_b), "distinct_ngrams": int(tot_d),
+                            "levels": {k: {"distinct_ngrams": lvls[k].n_entries,
+                                           "bytes": lvls[k].nbytes}
+                                       for k in range(1, M + 1)}}
+        scaling.append({"fraction": frac, "train_tokens": int(n),
+                        "per_model_order": per_model})
+        log("  prefix {:.3f} ({:,} tokens): order-{} bytes={:,} distinct={:,}".format(
+            frac, n, max_order, per_model[max_order]["bytes"],
+            per_model[max_order]["distinct_ngrams"]))
+        del lvls, sub
+        gc.collect()
+        gc.collect()
+
+    # ---- per-order models -------------------------------------------------
+    majority = int(np.argmax(np.bincount(cand_src.astype(np.int64), minlength=vocab)))
+    majority_rate = float((eval_stream[positions_all] == majority).mean())
+
+    results = []
+    for M in orders:
+        levels = {k: full_levels["cont{}".format(k) if k < M else "raw{}".format(k)]
+                  for k in range(1, M + 1)}
+        model = NgramModel(M, levels, vocab, args.smoothing, args.addk, notes)
+        packed_bytes = int(sum(levels[k].nbytes for k in levels))
+        scoring_side = int(sum(levels[k].scoring_side_bytes for k in levels))
+        lp, top_level, pos, n_zero = model.stream_logprob(eval_stream)
+        nll = float(-lp.mean())
+        hist = {}
+        for k in range(1, M + 1):
+            hist[str(k)] = float((top_level == k).mean())
+        target_seen = float((model.p1_dense[eval_stream[pos].astype(np.int64)]
+                             > model.floor).mean())
+        metrics = {
+            "n_positions": int(pos.shape[0]),
+            "nll_nats": nll,
+            "perplexity": float(math.exp(nll)) if nll < 700 else float("inf"),
+            "bits_per_token": nll / math.log(2.0),
+            "target_in_unigram_vocab_rate": target_seen,
+            "highest_context_found_rate": hist,
+            "n_zero_probability_positions": n_zero,
+            "discounts_per_level": {str(k): levels[k].D for k in sorted(levels)},
+            "count_of_counts_per_level": {
+                str(k): levels[k].count_of_counts for k in sorted(levels)},
+        }
+        log("order {}: NLL={:.4f} nats ppl={:.2f} ctx-hit[top]={:.3f} "
+            "target-in-train-vocab={:.4f} zero-prob={}".format(
+                M, nll, metrics["perplexity"], hist[str(M)], target_seen, n_zero))
+        del lp, top_level, pos
+        gc.collect()
+
+        acc = {}
+        if acc_pos_full is not None:
+            acc["full_vocab"] = model.accuracy(
+                eval_stream, acc_pos_full, seen_vocab, args.acc_chunk)
+        if cand_topk is not None:
+            acc["top{}".format(args.acc_candidates)] = model.accuracy(
+                eval_stream, acc_pos, cand_topk, args.acc_chunk)
+        metrics["accuracy"] = acc
+        for name, a in acc.items():
+            log("  acc[{}]: top1={:.4f} top5={:.4f} (coverage={:.4f}, outside={:,})".format(
+                name, a["top1"], a["top5"], a["candidate_coverage"],
+                a["n_targets_outside_candidates"]))
+
+        storage = {
+            "packed_bytes_total": packed_bytes,
+            "packed_bytes_per_train_token": packed_bytes / max(1, int(train.shape[0])),
+            "scoring_side_bytes_total": scoring_side,
+            "per_order": [levels[k].storage_breakdown() for k in sorted(levels)],
+        }
+        results.append({"order": M, "metrics": metrics, "storage": storage,
+                        "peak_rss_bytes_after_model": peak_rss_bytes()})
+        del model, levels
+        gc.collect()
+
+    # ---- sanity checks ----------------------------------------------------
+    nlls = [r["metrics"]["nll_nats"] for r in results]
+    accs = [r["metrics"]["accuracy"]["full_vocab"]["top1"]
+            for r in results if "full_vocab" in r["metrics"]["accuracy"]]
+    monotone_nll = all(nlls[i] > nlls[i + 1] for i in range(len(nlls) - 1))
+    monotone_acc = all(accs[i] <= accs[i + 1] for i in range(len(accs) - 1)) if accs else None
+    worst_norm = None
+    norm_devs = [l["row_normalization_deviation"] for r in results
+                 for l in r["storage"]["per_order"]
+                 if l.get("row_normalization_deviation") is not None]
+    if norm_devs:
+        worst_norm = float(max(norm_devs))
+    sanity = {
+        "nll_strictly_decreasing_with_order": bool(monotone_nll),
+        "nll_sequence": nlls,
+        "full_vocab_top1_nondecreasing_with_order": monotone_acc,
+        "full_vocab_top1_sequence": accs,
+        "majority_token_id": majority,
+        "majority_token_rate": majority_rate,
+        "max_level_normalization_deviation": worst_norm,
+        "n_zero_probability_positions": sum(
+            r["metrics"]["n_zero_probability_positions"] for r in results),
+        "notes": notes,
+        "warning": None if (monotone_nll and (monotone_acc is None or monotone_acc)) else
+                   "MONOTONICITY VIOLATED -- investigate the backoff before reporting",
+    }
+    if sanity["warning"]:
+        log("WARNING: " + sanity["warning"])
+    for n in notes:
+        log("note: " + n)
+
+    # ---- 48 GiB projection -------------------------------------------------
+    target = float(args.target_bytes)
+    ple_rows = target / args.ple_row_bytes
+    projection = {"target_bytes": target, "target_gib": target / GIB,
+                  "ple_row_bytes": args.ple_row_bytes,
+                  "ple_rows_equivalent": ple_rows, "per_order": []}
+    for r in results:
+        M = r["order"]
+        b = r["storage"]["packed_bytes_total"]
+        per_tok = b / max(1, int(train.shape[0]))
+        pts = [(s["train_tokens"], s["per_model_order"][M]["bytes"]) for s in scaling]
+        pts = [(x, y) for x, y in pts if y > 0]
+        fit_bytes = fit_power_law([x for x, _ in pts], [y for _, y in pts]) \
+            if len(pts) >= 2 else None
+        dpts = [(s["train_tokens"], s["per_model_order"][M]["distinct_ngrams"])
+                for s in scaling if s["per_model_order"][M]["distinct_ngrams"] > 0]
+        fit_distinct = fit_power_law([x for x, _ in dpts], [y for _, y in dpts]) \
+            if len(dpts) >= 2 else None
+        projection["per_order"].append({
+            "order": M,
+            "stored_ngrams_at_train_size": int(sum(
+                l["distinct_ngrams"] for l in r["storage"]["per_order"])),
+            "packed_bytes_at_train_tokens": int(b),
+            "train_tokens": int(train.shape[0]),
+            "bytes_per_train_token": per_tok,
+            "train_tokens_to_fill_target_linear": target / per_tok,
+            "copies_of_this_table_in_target": target / b,
+            "bytes_power_law_fit": fit_bytes,
+            "train_tokens_to_fill_target_power_law": (
+                invert_power_law(fit_bytes, target) if fit_bytes else None),
+            "distinct_ngrams_power_law_fit": fit_distinct,
+            "train_tokens_for_ple_row_count_power_law": (
+                invert_power_law(fit_distinct, ple_rows) if fit_distinct else None),
+            "saturation_note": saturation_note(M, fit_distinct, scaling, vocab),
+        })
+
+    assumptions = [
+        "packed_bytes_* are measured numpy nbytes of the packed CSR arrays "
+        "(int64 exact context keys, int32 token ids, uint32 counts, int64 offsets); "
+        "no compression, no hash index, no Python object overhead.",
+        "scoring-side arrays (zeff, discsum per context) are reported separately as "
+        "scoring_side_bytes_total; they are recomputable from the table and are not "
+        "part of the shipped bytes.",
+        "the linear projection assumes bytes/token stays constant, which "
+        "over-estimates growth (distinct n-grams grow sublinearly), so it "
+        "UNDER-estimates the corpus needed to fill the target.",
+        "the power-law projection assumes bytes(N) ~ N**b fitted on a handful of "
+        "prefixes inside one order of magnitude; ~1M tokens is far too little to "
+        "estimate a corpus-level Heaps exponent, so those token counts are "
+        "order-of-magnitude only.",
+        "accuracy and NLL are measured at one training size only; nothing here "
+        "justifies extrapolating them to the target storage.",
+        "PLE rows are assumed to cost {} bytes each (fp8, 160 dims); {} bytes "
+        "therefore equals {:,.0f} rows.".format(args.ple_row_bytes, int(target), ple_rows),
+        "NLL covers the whole evaluation stream at identical positions for every "
+        "order; accuracy is argmax over a candidate set on a position subsample.",
+        "full_vocab accuracy ranks over the training vocabulary only; tokens never "
+        "seen in training all score exactly the uniform floor, which is below any "
+        "seen token's score, so the ranking is unchanged.",
+        "the uniform floor is spread over V_uni={:,} tokens, so OOV targets get "
+        "Lambda_1/V_uni.".format(vocab),
+    ]
+
+    out = {
+        "schema": "qwen35-ple-ngram-reference-v1",
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "host": platform.node(),
+        "python": sys.version.split()[0],
+        "numpy": np.__version__,
+        "command": " ".join(sys.argv),
+        "elapsed_sec": time.time() - t_start,
+        "split": split,
+        "train_path": str(train_path),
+        "train_sha256": sha256_file(train_path),
+        "uniform_vocab": vocab,
+        "uniform_vocab_source": args.uniform_vocab,
+        "smoothing": args.smoothing,
+        "orders": orders,
+        "max_order": max_order,
+        "n_scored_positions_per_model": n_positions,
+        "n_accuracy_positions": int(acc_pos.shape[0]),
+        "n_accuracy_positions_full": int(acc_pos_full.shape[0]) if acc_pos_full is not None else 0,
+        "acc_candidates": args.acc_candidates,
+        "peak_rss_bytes": peak_rss_bytes(),
+        "peak_rss_bytes_before_tables": peak_rss_build_start,
+        "scaling": scaling,
+        "results": results,
+        "sanity": sanity,
+        "projection": projection,
+        "assumptions": assumptions,
+    }
+    if args.output:
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.output).write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
+        log("wrote {}".format(args.output))
+    if args.markdown:
+        Path(args.markdown).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.markdown).write_text(render_markdown(out), encoding="utf-8")
+        log("wrote {}".format(args.markdown))
+    log("done in {:.1f}s, peak RSS {:.2f} GiB".format(
+        time.time() - t_start, peak_rss_bytes() / GIB))
+    return 0
+
+
+def render_markdown(out: Dict[str, object]) -> str:
+    K = out["acc_candidates"]
+    lines = ["# Count-based n-gram reference ({})".format(out["schema"]), ""]
+    lines.append("split: {} | train {:,} tokens | eval {:,} tokens | V_uni={:,}".format(
+        out["split"]["kind"], out["split"]["train_tokens"], out["split"]["eval_tokens"],
+        out["uniform_vocab"]))
+    lines.append("")
+    lines.append("smoothing: {} | positions scored: {:,} (identical for all orders) | "
+                 "top-K accuracy positions: {:,} | full-vocab accuracy positions: {:,} | "
+                 "peak RSS {:.2f} GiB".format(
+                     out["smoothing"], out["n_scored_positions_per_model"],
+                     out["n_accuracy_positions"], out["n_accuracy_positions_full"],
+                     out["peak_rss_bytes"] / GIB))
+    lines.append("")
+    lines.append("| order | NLL (nats) | ppl | bits/tok | top-1 | top-5 | top-1 (top{}) | "
+                 "top-5 (top{}) | distinct n-grams | bytes | bytes/tok |".format(K, K))
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
+    for r in out["results"]:
+        m = r["metrics"]
+        a_full = m["accuracy"].get("full_vocab", {})
+        a_top = m["accuracy"].get("top{}".format(K), {})
+        distinct = sum(l["distinct_ngrams"] for l in r["storage"]["per_order"])
+        lines.append("| {} | {:.4f} | {:.2f} | {:.4f} | {:.4f} | {:.4f} | {:.4f} | {:.4f} | "
+                     "{:,} | {:,} | {:.2f} |".format(
+                         r["order"], m["nll_nats"], m["perplexity"], m["bits_per_token"],
+                         a_full.get("top1", float("nan")), a_full.get("top5", float("nan")),
+                         a_top.get("top1", float("nan")), a_top.get("top5", float("nan")),
+                         distinct, r["storage"]["packed_bytes_total"],
+                         r["storage"]["packed_bytes_per_train_token"]))
+    lines.append("")
+    lines.append("majority-class (unigram) rate: {:.4f} (token id {})".format(
+        out["sanity"]["majority_token_rate"], out["sanity"]["majority_token_id"]))
+    lines.append("")
+    lines.append("## Projection onto {:.0f} GiB ({} bytes)".format(
+        out["projection"]["target_gib"], int(out["projection"]["target_bytes"])))
+    lines.append("")
+    lines.append("| order | bytes @ {:,} tok | linear tok -> target | power-law b (R2) | "
+                 "power-law tok -> target | copies of table in target |".format(
+                     out["split"]["train_tokens"]))
+    lines.append("|---|---|---|---|---|---|")
+    for row in out["projection"]["per_order"]:
+        fb = row["bytes_power_law_fit"] or {}
+        pl = row["train_tokens_to_fill_target_power_law"]
+        lines.append("| {} | {:,} | {:,.0f} | {:.3f} ({:.3f}) | {} | {:,.0f} |".format(
+            row["order"], row["packed_bytes_at_train_tokens"],
+            row["train_tokens_to_fill_target_linear"],
+            fb.get("b", float("nan")), fb.get("r2", float("nan")),
+            "{:,.0f}".format(pl) if pl else "n/a",
+            row["copies_of_this_table_in_target"]))
+    lines.append("")
+    lines.append("PLE-equivalent rows in the target: {:,.0f} rows @ {} bytes/row".format(
+        out["projection"]["ple_rows_equivalent"], out["projection"]["ple_row_bytes"]))
+    lines.append("")
+    lines.append("sanity: `{}`".format(json.dumps(out["sanity"])))
+    lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

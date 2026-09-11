@@ -22,8 +22,13 @@
 #   QWEN35_EXTRA_OPTS  extra flags inserted before the destination (word-split)
 set -euo pipefail
 
+# The host/port pair belongs to ONE rented instance and changes whenever the
+# instance is replaced.  Round 156 moved from :19236 (a 2 GiB / 0.5-core no-GPU
+# slice that cannot run even a 0.8B model in fp32) to :40783 (120 GiB / 16 CPU).
+# Override with QWEN35_PORT instead of editing this line when the console shows
+# a different port.
 HOST="${QWEN35_HOST:-connect.nmb1.seetacloud.com}"
-PORT="${QWEN35_PORT:-19236}"
+PORT="${QWEN35_PORT:-40783}"
 USER_NAME="${QWEN35_USER:-root}"
 
 SSH_OPTS=(

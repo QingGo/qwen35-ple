@@ -3130,3 +3130,36 @@ lazy-window gate        ✅
   已修正并加入 CI shell 语法检查。
 - 下一步（未启动）：LoRA 行 2×2（先 smoke 确认 baseline 不崩，再解释
   real vs control）→ G0 Qwen3.5-4B frozen graft → G3 EngramDB 磁盘微基准。
+
+## Session 151–154：LoRA 行落地、六个关键 bug、G3 磁盘基准与目标精确化
+
+- **LoRA 路径**：接入 peft 0.20.0，新增 `--lora*`、`--load-lora-adapter`、
+  `--backbone-dtype`、`--ple-off`、`--qa-max-items`；adapter-only 落盘
+  （`<save-reader>.lora/adapter.pt`），不写整份 backbone。
+- **六个关键 bug**（其中两个会让实验静默失效）：
+  1. LoRA 权重从未进入 optimizer（`train_backbone` 门控）→ 500 步后 96/96
+     `lora_B` 全 0、载入后 logits 与基座 max diff 0.0、gold NLL 与 frozen
+     1500 条 bit-identical；已修并加 adaptation 不变量守卫。
+  2. reader dtype 只转输出不转输入 → 4B bf16 秒崩；已修并实测通过。
+  3. finisher 只看 DONE 标记不看退出码 → G0 失败仍关机（01:15），浪费约 6 小时；
+     已改为产物存在性判据，并实际拦下一次误关机。
+  4. `chain/*.status` 的 `$?` 在 helper 之后读取 → 失败记成 rc=0。
+  5. `--ple-off` 顺带跳过 QA SFT cache → no-PLE 格与 PLE 格差两个变量。
+  6. `mode=no-reader` 训练前 return → 2×2 的 no-PLE 格必须用 `--ple-off`。
+- **修正后的 LoRA 行（有效）**：lora-nople 0.3220 / lora-real 0.3153 /
+  lora-control 0.3153（mean EM，standard 1500 raw）；gold NLL 2.4025 / 2.4025 /
+  2.3845。LoRA 比 frozen reader 行 +2.8～3.5 点且不崩塌，但
+  real vs control = +0.0000 EM / −0.0180 nat → **G1 不通过：PLE 仍无内容效应**。
+- **G3 磁盘基准**：NVMe 热缓存 462K rows/s（≈28.9K tokens/s，2048-token 预填充
+  约 71 ms），冷缓存 ~70K rows/s，`/dev/shm` 276–673K rows/s，RSS ~400 MB
+  → NVMe 行通过；USB SSD/SD 未测。
+- **性能工程**：gold NLL 分批重写，数值等价（max diff 2.9e-5）且 3× 加速；
+  中途踩坑——把多 item 打包成一条序列会改变短卷积语义（bs1 0.751 vs bs8 12.07），
+  必须每 item 一行。
+- **CI 恢复绿色**：修掉自 round 148 起失败的 stratified-folds 测试；
+  远程全量 143 passed / 7 skipped。
+- **新增文档**：`docs/round-152-lora-row-and-g0-4b.md`、
+  `docs/round-152-g3-engram-edge-storage-benchmark.md`、
+  `docs/round-153-goal-tech-debt-and-development-plan.md`、本文档。
+- 目标精确化：从"证明外部记忆能提升 0.8B"改为
+  **"找出外部 n-gram 记忆优于同预算纯参数方案的区间"**。

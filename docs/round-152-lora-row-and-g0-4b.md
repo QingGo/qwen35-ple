@@ -51,7 +51,51 @@ Three bugs had to be fixed before this row was valid:
 
 ### 1.2 Results
 
-<!-- RESULTS:G1 -->
+### 1.2 Results (standard 1500, raw prompt)
+
+| Arm | BoolQ | TriviaQA | NQ | Mean EM | Gold NLL |
+|---|---:|---:|---:|---:|---:|
+| frozen no-reader (R148-A ref) | 0.672 | 0.128 | 0.062 | 0.2873 | 8.7429 |
+| lora-nople (PLE off) | 0.770 | 0.144 | 0.052 | **0.3220** | 2.4025 |
+| lora-real | 0.764 | 0.128 | 0.054 | 0.3153 | 2.4025 |
+| lora-control | 0.758 | 0.140 | 0.048 | 0.3153 | **2.3845** |
+
+Paired item-level (positive = first run better):
+
+```text
+lora-real vs lora-control   EM  +0.0000 ± 0.0049   NLL −0.0180 ± 0.0068
+lora-real vs lora-nople     EM  −0.0074 ± 0.0055   NLL +0.0008 ± 0.0088
+```
+
+Reading:
+
+* **LoRA co-adaptation works**: +2.8 to +3.5 points over the frozen reader row
+  (0.2873 → 0.3153–0.3220) and, unlike the full-FT recipe, it does not collapse
+  open QA. This makes LoRA the usable adaptation path for the edge story.
+* **The PLE content effect is still absent**: `lora-real` and `lora-control`
+  generate *identical* task accuracies, gold NLL slightly favours the shuffled
+  control (−0.018 nat), and the no-PLE arm is numerically the best of the three.
+  Against the pre-registered threshold (≥2 points or ≥0.05 nat) **the LoRA row of
+  G1 fails**.
+* Consequence: this removes the last "the reader/adaptation just is not good
+  enough" explanation. See `docs/round-153-...` section 2 for the consolidated
+  falsification list.
+
+### 1.3 Secondary protocol (chat template) — caveat
+
+The chat re-evaluation reuses the **raw-trained** readers and adapters
+(`--load-lora-adapter`) rather than retraining per protocol, because adapters
+are cheap to keep but a second full training row costs hours.  Consequence: the
+chat numbers are **protocol-mismatched** (trained on the raw prompt, evaluated
+with the chat template), so only the `real` vs `control` **delta** is
+interpretable; absolute chat values are not comparable to R148-A's chat row,
+which did train per protocol.
+
+`lora-nople` (chat, mismatched): BoolQ 0.802 / TriviaQA 0.188 / NQ 0.088 /
+mean EM 0.3593; gold NLL overall 5.0249 (vs 2.4025 raw).  The gap between raw
+and chat gold NLL (2.40 vs 5.02) quantifies the mismatch cost, and is a useful
+caution for the next session: **always train and evaluate with the same prompt
+protocol**.
 
 ## 2. G0: frozen 4B graft (scale/space test)
 

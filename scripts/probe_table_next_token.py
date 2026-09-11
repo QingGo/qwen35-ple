@@ -162,6 +162,7 @@ def _norm(text: str) -> str:
 # --------------------------------------------------------------------------- #
 DEFAULT_EXPECTED_SHARDS = 128
 DEFAULT_EXPECTED_SHARD_BYTES = 400_001_920
+SHARD_RE = re.compile(r"^shard_(\d{3})\.bin$")
 
 
 def verify_rows_dir(
@@ -183,9 +184,11 @@ def verify_rows_dir(
     root = Path(rows_dir)
     if not root.is_dir():
         raise SystemExit(f"row table directory does not exist: {rows_dir}")
-    shards = sorted(root.glob("shard_*.bin"))
+    all_files = [p for p in root.iterdir() if p.is_file()]
+    shards = sorted(p for p in all_files if SHARD_RE.match(p.name))
     sizes = [p.stat().st_size for p in shards]
     wrong = [p.name for p, s in zip(shards, sizes) if s != expected_shard_bytes]
+    unnamed = sorted(p.name for p in all_files if p.suffix == ".bin" and not SHARD_RE.match(p.name))
     info: dict[str, Any] = {
         "dir": str(root),
         "shard_files_found": len(shards),
@@ -193,6 +196,8 @@ def verify_rows_dir(
         "expected_shard_bytes": expected_shard_bytes,
         "n_shards_wrong_size": len(wrong),
         "shards_wrong_size_examples": wrong[:5],
+        "total_files_in_dir": len(all_files),
+        "unrecognised_bin_files": unnamed[:5],
         "total_bytes": int(sum(sizes)),
         "allow_partial": bool(allow_partial),
     }
@@ -203,6 +208,8 @@ def verify_rows_dir(
         problems.append(
             f"{len(wrong)} shard files are not {expected_shard_bytes} bytes (e.g. {wrong[0]})"
         )
+    if unnamed:
+        problems.append(f"unrecognised .bin files present (e.g. {unnamed[0]})")
     info["problems"] = problems
     if problems and not allow_partial:
         raise SystemExit(
@@ -256,10 +263,14 @@ def build_heldout_indices(
     log(f"wikitext records loaded: {len(texts)}")
 
     excluded_counts = 0
+    qa_applied = False
     if qa_exclude is not None and qa_exclude.exists():
         needles = build_mix._load_qa_needles(str(qa_exclude))
         texts, excluded_counts = build_mix._filter_contaminated(texts, needles)
+        qa_applied = True
         log(f"QA contamination filter removed {excluded_counts} records; kept {len(texts)}")
+    else:
+        log(f"WARNING: QA exclusion file not found ({qa_exclude}); split differs from manifest")
 
     rng = random.Random(seed)
     order = list(range(len(texts)))
@@ -292,6 +303,7 @@ def build_heldout_indices(
         "records_heldout": int(heldout.size),
         "tokens_selected_reproduced": int(total),
         "qa_filtered_records": int(excluded_counts),
+        "qa_filter_applied": bool(qa_applied),
         "reproduction_matches_manifest": bool(
             (expected_records is None or len(selected) == expected_records)
             and (expected_tokens is None or total == expected_tokens)
@@ -315,7 +327,7 @@ def containment_check(
     A hit means the record *is* in the graft's training corpus, i.e. the
     held-out split is contaminated for that record.
     """
-    if not corpus_txt.exists():
+    if not corpus_txt.is_file():
         return {"skipped": True}
     norm_corpus = _norm(corpus_txt.read_text(encoding="utf-8", errors="ignore"))
     idx = heldout if heldout.size <= sample else rng.choice(heldout, sample, replace=False)
@@ -415,12 +427,13 @@ def make_fetcher(rows_dir: str, scale: float, block: int):
         rows_dir, shards=spec.shards, rows_per_shard=spec.rows_per_shard, width=160
     )
     dim = 16 * 160
-    stats = {"rows": 0, "zero_rows": 0, "finite": True}
+    stats = {"rows": 0, "zero_rows": 0, "finite": True, "seconds": 0.0}
 
     def fetch(rowids_sel: np.ndarray) -> np.ndarray:
         n = rowids_sel.shape[0]
         guard(n * dim * 4, f"e_t block ({n} rows)")
         out = np.empty((n, dim), dtype=np.float32)
+        t0 = time.time()
         for s in range(0, n, block):
             e = min(n, s + block)
             arr = engramdb.fetch_e_t_tensor(
@@ -432,6 +445,7 @@ def make_fetcher(rows_dir: str, scale: float, block: int):
             out[s:e] = chunk.numpy() if hasattr(chunk, "numpy") else np.asarray(chunk)
         stats["rows"] += int(n)
         stats["zero_rows"] += int((~out.any(axis=1)).sum())
+        stats["seconds"] += time.time() - t0
         if not np.isfinite(out).all():
             stats["finite"] = False
         return out
@@ -461,12 +475,19 @@ class CountModel:
 
     def __init__(
         self, tokens: np.ndarray, vocab: np.ndarray, *,
+        vocab_size: int | None = None,
         discount: float = 0.75, lam_bi: float = 0.7, lam_tri: float = 0.8,
     ) -> None:
         self.d = float(discount)
         self.lam_bi, self.lam_tri = float(lam_bi), float(lam_tri)
         self.K = int(len(vocab))
-        self.V = int(tokens.max()) + 2
+        # Context ids come from the *eval* stream too, so the context space must
+        # cover the whole tokenizer vocabulary -- not just the ids seen in the
+        # count slice, which can be smaller.
+        self.V = (
+            int(vocab_size) + 2 if vocab_size is not None
+            else int(max(int(tokens.max()), int(vocab.max()))) + 2
+        )
 
         remap = np.full(self.V, -1, dtype=np.int64)
         remap[vocab] = np.arange(self.K, dtype=np.int64)
@@ -863,14 +884,14 @@ def main() -> int:
     if args.smoke:
         # Deliberately small: the point is to exercise every stage and the
         # controls, not to measure anything.  Accuracy at this scale is noise.
-        args.topk = min(args.topk, 200)
-        args.n_probe_train = min(args.n_probe_train, 600)
-        args.n_probe_val = min(args.n_probe_val, 200)
-        args.n_eval = min(args.n_eval, 400)
-        args.n_dev = min(args.n_dev, 200)
-        args.chunk = min(args.chunk, 200)
+        args.topk = min(args.topk, 500)
+        args.n_probe_train = min(args.n_probe_train, 2_000)
+        args.n_probe_val = min(args.n_probe_val, 500)
+        args.n_eval = min(args.n_eval, 1_500)
+        args.n_dev = min(args.n_dev, 500)
+        args.chunk = min(args.chunk, 500)
         args.containment_sample = min(args.containment_sample, 40)
-        args.max_source_records = args.max_source_records or 400
+        args.max_source_records = args.max_source_records or 2_000
         args.checkpoint_every = 1
         if not args.out or args.out == "data/probe-table-next-token.json":
             args.out = "data/probe-table-next-token-smoke.json"
@@ -883,20 +904,64 @@ def main() -> int:
         "seed": args.seed,
         "warnings": [],
         "interpretation_rule_preregistered": [
-            "probe ~ shuffled control ~ majority  -> NO recoverable signal in the raw rows",
-            "probe ~ trigram, both >> majority    -> faithful n-gram prior; read-out is the loss",
-            "probe >> trigram                    -> rows beat explicit corpus counts; read-out is the bottleneck",
+            "1. probe accuracy clearly above the explicit trigram baseline ==> the table "
+            "carries more than an explicit n-gram model, the read-out is the bottleneck.",
+            "2. probe ~ trigram and both clearly above majority ==> the rows carry a "
+            "faithful n-gram prior; the reader is failing to exploit it (supports the "
+            "round-157 argument's 'prior, not knowledge' reading, and points at the "
+            "read-out as the fixable part).",
+            "3. probe ~ shuffled control ~ majority ==> the raw rows carry NO recoverable "
+            "next-token signal; the premise fails at the source, independent of any reader.",
+            "structural caveat fixed in advance: e_t is a deterministic function of the "
+            "preceding trigram (8 bigram heads + 8 trigram heads, all causal), so "
+            "I(e_t; token[t+1]) <= I(trigram; token[t+1]).  'Above trigram' can therefore "
+            "only mean the table holds a better-estimated trigram posterior than this "
+            "corpus's explicit counts -- never information beyond an n-gram model.",
+            "the shuffled-rows control is mandatory: if it does not collapse to the "
+            "trivial-predictor floor, the result is VOID regardless of the other numbers.",
         ],
     }
 
     exp_records = exp_tokens = None
     manifest_path = Path(args.manifest)
-    if manifest_path.exists():
+    if manifest_path.is_file():
         man = json.loads(manifest_path.read_text(encoding="utf-8"))
         cat = man.get("per_category", {}).get("wiki", {})
         exp_records, exp_tokens = cat.get("records"), cat.get("tokens")
     report["manifest_expected"] = {"records": exp_records, "tokens": exp_tokens}
     log(f"peak RSS at start: {rss_mb():.0f} MiB; alloc budget {args.max_alloc_mb} MiB")
+
+    # ---- row table pre-flight (must happen before any data work) ---------- #
+    report["row_table"] = verify_rows_dir(
+        args.rows_dir,
+        expected_shards=args.expected_shards,
+        expected_shard_bytes=args.expected_shard_bytes,
+        allow_partial=args.allow_partial_shards,
+    )
+
+    # ---- input pre-flight -------------------------------------------------- #
+    required = {
+        "train tokens": Path(args.train_tokens),
+        "wikitext source": Path(args.wikitext),
+        "tokenizer dir": Path(args.tokenizer),
+    }
+    missing = {k: str(v) for k, v in required.items() if not v.exists()}
+    report["inputs"] = {
+        **{k: str(v) for k, v in required.items()},
+        "missing": missing,
+        "qa_exclude_present": Path(args.qa_exclude).exists(),
+        "reader_ckpt_present": Path(args.reader_ckpt).exists(),
+    }
+    if missing:
+        raise SystemExit(
+            "MISSING INPUTS: "
+            + "; ".join(f"{k}={v}" for k, v in missing.items())
+            + "\n  On a fresh remote instance the wikitext source has to be copied "
+              "in, e.g.:\n"
+              "  QWEN35_RSYNC=1 bash scripts/ssh_autodl.sh -avz "
+              "data/sources/wikitext.jsonl root@<host>:/root/autodl-tmp/qwen35-ple/repo/data/sources/"
+        )
+    log(f"inputs OK: {report['inputs']}")
 
     # ---- tokenizer -------------------------------------------------------- #
     from transformers import AutoTokenizer
@@ -965,8 +1030,15 @@ def main() -> int:
     del counts
     n_tr, n_va, n_ev = len(probe_train_pos), len(probe_val_pos), len(eval_pos)
     log(f"positions: probe-train={n_tr} probe-val={n_va} eval={n_ev}")
-    if min(n_tr, n_va, n_ev) < 500:
-        raise SystemExit("too few positions; check corpus paths")
+    if min(n_tr, n_va, n_ev) < 100:
+        raise SystemExit(
+            f"too few positions (train={n_tr} val={n_va} eval={n_ev}); "
+            "check the corpus paths and the top-K coverage"
+        )
+    if n_ev < 2_000:
+        report["warnings"].append(
+            f"only {n_ev} eval positions: accuracies are noisy at this scale"
+        )
 
     t0 = time.time()
     rd_tr = rowids_at_positions(train_tokens, probe_train_pos, window=args.rowid_window)
@@ -1033,7 +1105,7 @@ def main() -> int:
     del maj_val, maj_ev
 
     # ---- count models ----------------------------------------------------- #
-    cnt = CountModel(train_tokens[:train_usable], vocab)
+    cnt = CountModel(train_tokens[:train_usable], vocab, vocab_size=cls_size)
     dev_pos = sample_positions(
         train_tokens, n=args.n_dev, lo=train_usable, hi=T_train - 1,
         keep_targets=vocab, rng=rng,
@@ -1082,7 +1154,7 @@ def main() -> int:
     write_json(Path(args.out), report)
 
     # ---- probe scaffolding ------------------------------------------------- #
-    fetch, store = make_fetcher(args.rows_dir, args.scale, block=args.chunk)
+    fetch, store, fetch_stats = make_fetcher(args.rows_dir, args.scale, block=args.chunk)
     try:
         D = 2560 + 1
         mu = sd = vp_mu = vp_sd = None
@@ -1158,8 +1230,9 @@ def main() -> int:
             log(f"feature standardisation: mean|mu|={np.abs(mu).mean():.3g} sd={sd:.3g}")
 
             sel_filled = 0
+            n_chunks = (n_tr + args.chunk - 1) // args.chunk
             t0 = time.time()
-            for s, e in chunks(n_tr, args.chunk):
+            for ci, (s, e) in enumerate(chunks(n_tr, args.chunk), start=1):
                 E = fetch(rd_tr[s:e])
                 X = design(E)
                 y, ys = l_tr[s:e], l_tr_shuf[s:e]
@@ -1172,7 +1245,14 @@ def main() -> int:
                     sel_X[sel_filled : sel_filled + len(gsel)] = X[gsel]
                     sel_filled += len(gsel)
                 del E, X
-                if (s // args.chunk) % 10 == 0:
+                # small-JSON per-chunk checkpoint: a crash costs at most one chunk
+                report["progress"] = {
+                    "stage": "pass1", "chunks_done": ci, "chunks_total": n_chunks,
+                    "positions_done": e, "positions_total": n_tr,
+                    "peak_rss_mb": rss_mb(), "elapsed_seconds": time.time() - t_start,
+                }
+                if ci % max(1, args.json_every) == 0 or ci == n_chunks:
+                    write_json(Path(args.out), report)
                     log(f"  pass1 {e}/{n_tr}  peak RSS {rss_mb():.0f} MiB")
             log(f"pass 1 done in {time.time() - t0:.0f}s; peak RSS {rss_mb():.0f} MiB")
 
@@ -1298,6 +1378,7 @@ def main() -> int:
              (sc_ev_real, sc_ev_shuftr, sc_ev_vp)),
         ):
             s_real, s_shuftr, s_vp = accs
+            n_chunks = (npos + args.chunk - 1) // args.chunk
             ci = 0
             for s, e in chunks(npos, args.chunk):
                 ci += 1
@@ -1313,8 +1394,32 @@ def main() -> int:
                 progress[tag] = ci
                 if ci % args.checkpoint_every == 0:
                     dump_pass2("pass2_partial")
+                if ci % max(1, args.json_every) == 0 or ci == n_chunks:
+                    # partial metrics over whatever is filled so far
+                    report["progress"] = {
+                        "stage": f"pass2_{tag}", "chunks_done": ci, "chunks_total": n_chunks,
+                        "peak_rss_mb": rss_mb(), "elapsed_seconds": time.time() - t_start,
+                    }
+                    if sc_ev_real.filled:
+                        f = sc_ev_real.filled
+                        report["partial_results"] = {
+                            "eval_positions_scored": f,
+                            "probe_raw_rows": sc_ev_real.metrics(l_ev, temperature=T_probe, limit=f),
+                            "count_trigram": cnt_ev["trigram"].metrics(
+                                l_ev, temperature=results["count_trigram"]["eval"]["temperature"],
+                                limit=f,
+                            ),
+                            "majority_train_prior": results["majority_train_prior"]["eval"],
+                        }
+                    write_json(Path(args.out), report)
                     log(f"  pass2[{tag}] {e}/{npos}  peak RSS {rss_mb():.0f} MiB")
             progress[tag] = ci
+            if tag == "val":
+                # the eval pass needs the probe temperature, so fit it as soon as
+                # the validation stream is complete
+                T_probe, _ = sc_va_real.fit_temperature(l_va)
+                T_vp = sc_va_vp.fit_temperature(l_va)[0] if sc_va_vp is not None else None
+                log(f"probe temperature fitted on val: T_raw={T_probe:.4g} T_vp={T_vp}")
         log(f"pass 2 done in {time.time() - t0:.0f}s; peak RSS {rss_mb():.0f} MiB")
         if state_path is not None:
             dump_pass2("pass2_done")
@@ -1322,6 +1427,30 @@ def main() -> int:
         close = getattr(store, "close", None)
         if callable(close):
             close()
+
+    report["row_fetch"] = {
+        **fetch_stats,
+        "rows_per_second": (
+            fetch_stats["rows"] / fetch_stats["seconds"] if fetch_stats["seconds"] else None
+        ),
+        "zero_row_fraction": (
+            fetch_stats["zero_rows"] / fetch_stats["rows"] if fetch_stats["rows"] else None
+        ),
+    }
+    if fetch_stats["zero_rows"]:
+        log(
+            f"WARNING: {fetch_stats['zero_rows']}/{fetch_stats['rows']} fetched rows are "
+            "all-zero -- possible truncated/unwritten shard"
+        )
+        if fetch_stats["zero_rows"] / max(1, fetch_stats["rows"]) > 0.01:
+            report["warnings"].append(
+                f"{fetch_stats['zero_rows']} all-zero e_t rows fetched "
+                f"({fetch_stats['zero_rows'] / fetch_stats['rows']:.2%}) -- the row table "
+                "may be incomplete"
+            )
+    if not fetch_stats["finite"]:
+        report["warnings"].append("non-finite values in fetched e_t rows")
+    log(f"row fetch stats: {report['row_fetch']}")
 
     T_probe, _ = sc_va_real.fit_temperature(l_va)
     add_result(
@@ -1464,8 +1593,36 @@ def main() -> int:
         "majority_train_prior", "count_bigram", "count_trigram", "probe_raw_rows",
         "probe_frozen_value_proj", "control_shuffled_train_rows", "control_shuffled_eval_rows",
     ]
-    print("\n=== next-token prediction from raw PLE rows (held-out WikiText) ===")
-    print(f"eval positions {n_ev} | probe train {n_tr} | probe val {n_va} | K={args.topk}\n")
+    # The pre-registered rule is printed BEFORE any number, so the result cannot
+    # be read as post-hoc.
+    print("\n" + "=" * 78)
+    print("PRE-REGISTERED INTERPRETATION RULE (fixed before any number was seen)")
+    print("=" * 78)
+    for line in report["interpretation_rule_preregistered"]:
+        print("  " + line)
+    print(
+        "\n  structural ceiling: e_t is a deterministic function of the preceding\n"
+        "  trigram (rowids = hash(token[t], token[t-1]) / hash(+ token[t-2])), so\n"
+        "  I(e_t; token[t+1]) <= I(trigram; token[t+1]); a probe cannot exceed\n"
+        "  the optimal trigram predictor.  Causality check: "
+        f"{report['rowid']['causality']}"
+    )
+    print("=" * 78)
+    print("\n=== RESULTS: next-token prediction from raw PLE rows (held-out WikiText) ===")
+    print(f"eval positions {n_ev} | probe train {n_tr} | probe val {n_va} | K={args.topk}")
+    _rf = report["row_fetch"]
+    _rps = _rf.get("rows_per_second")
+    _rt = report["row_table"]
+    print(
+        f"row table: {_rt['shard_files_found']} shards, "
+        f"{_rt['total_bytes'] / 2**30:.1f} GiB, pre-flight "
+        f"{'OK' if not _rt.get('problems') else _rt['problems']}"
+    )
+    print(
+        f"row fetch: {_rf['rows']} rows in {_rf['seconds']:.1f}s"
+        + (f" ({_rps:.0f} rows/s)" if _rps else "")
+        + f", all-zero rows {_rf['zero_rows']}"
+    )
     print(f"{'method':<34}{'top1':>9}{'top5':>9}{'nll':>9}")
     print("-" * 61)
     for name in order_names:
@@ -1475,8 +1632,17 @@ def main() -> int:
         if "top1" not in e:
             continue
         print(f"{name:<34}{e['top1']:>9.4f}{e['top5']:>9.4f}{e['nll']:>9.4f}")
-    print(f"\ncontrols_collapsed = {control_ok}   peak_rss_mb = {report['peak_rss_mb']:.0f}")
-    print(f"verdict = {verdict}\n{text}")
+    if breakdown:
+        print("\nbreakdown by whether the trigram context was seen in train:")
+        print(f"{'subset':<34}{'n':>8}{'majority':>10}{'probe':>9}{'trigram':>9}")
+        for label, b in breakdown.items():
+            print(
+                f"{label:<34}{b['n']:>8}{b['majority_rate']:>10.4f}"
+                f"{b['probe_raw_rows']['top1']:>9.4f}{b['count_trigram']['top1']:>9.4f}"
+            )
+    print(f"\ncontrols_collapsed = {control_ok}   control_floor = {control_floor:.4f}")
+    print(f"peak_rss_mb = {report['peak_rss_mb']:.0f}   total {report['elapsed_seconds']:.0f}s")
+    print(f"\nverdict = {verdict}\n{text}")
     return 0
 
 

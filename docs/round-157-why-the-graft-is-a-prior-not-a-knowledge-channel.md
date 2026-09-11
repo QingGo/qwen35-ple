@@ -12,6 +12,10 @@
 **给定最近 2–3 个 token 的续写先验**，承载不了**以全上下文为条件的知识**。
 我们一直在用"知识"的尺子量一个"先验"器件。
 
+> **§1.1 补记：这条后来被证明是硬上界，不是经验观察。**
+> `e_t` 是前三个 token 的确定性函数，故 `I(e_t ; token[t+1]) ≤ I(trigram ; token[t+1])`，
+> 与 reader 的容量和训练量无关。详见 §1.1。
+
 ---
 
 ## 1. 结构论证
@@ -43,6 +47,41 @@ value           value_proj(e_t)    ← 冻结；对同一 n-gram 是常量
 > 表是常量，读出是低保真度旋钮。
 
 ---
+
+## 1.1 补记（Round 157b）：这不是论证，是**可证明的上界**
+
+上面 §1 还是"读出带宽受限"的论证。后来在 `src/qwen35_ple/ple_hash.py::PleSpec.rowids_for_seq`
+里读到了一件更强的事，并且已从源码逐行核实：
+
+```python
+shifted = [self._shift_right_ignore_eos(hist, shift) for shift in range(PLE_NGRAM_SIZE)]
+for ngram_order, shift_range in ((2, 0), (3, PLE_HEADS_PER_NGRAM)):
+    mixed = (shifted[0][pos] * self.multipliers[0]) & _U64_MASK
+    for shifted_row, multiplier in zip(shifted[1:ngram_order], self.multipliers[1:]):
+        mixed ^= (shifted_row[pos] * multiplier) & _U64_MASK
+```
+
+`shift = 0, 1, 2` 分别取到 `token[t]`、`token[t-1]`、`token[t-2]`。**16 个头全部只依赖
+(t-2, t-1, t) 这三个 token**，因此
+
+```text
+e_t = f(token[t-2], token[t-1], token[t])        （确定性函数）
+⟹  I(e_t ; token[t+1]) ≤ I( (token[t-2],token[t-1],token[t]) ; token[t+1] )
+```
+
+由数据处理不等式，这条上界**与 reader 的深度、宽度、线性与否、训练量全都无关**。
+不是"我们的 reader 不够好"，而是**表里根本不可能装下超出 trigram 的未来信息**。
+
+三点后果：
+
+1. **"外部记忆注入知识"在这个架构下是封闭的。** 不是五次实验没做对，是设计上不可能。
+   上下文条件化的事实取回需要"按查询取回不同内容"，而取回键只有 trigram。
+2. **它仍可以是一个好的 trigram 记忆。** Qwen3.8 见过的文本远超我们那 100 万 token，
+   所以表里可能存着**估计得更好**的 trigram 后验。这是它唯一还可能赢的地方。
+3. **因此唯一有意义的对手是同存储的计数 n-gram 模型**，而不是"不注入"。
+   §4 说的最大缺口，现在从"方法论建议"变成了"唯一正确的对照"。
+
+> 这也修正了本文原先的措辞：**天花板是表的属性，不只是 reader 的属性。**
 
 ## 2. 它一次解释了全部五次否证
 

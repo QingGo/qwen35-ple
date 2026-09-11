@@ -138,61 +138,139 @@ def _text_keys(text: str, n: int, mults: np.ndarray) -> np.ndarray:
     return ngram_hash_keys(b, n, 256, mults)
 
 
-def overlap_filter(kept_texts: Sequence[str], used: Sequence[int],
-                   candidate: Sequence[int], n_chars: Sequence[int],
-                   seed: int) -> dict:
+def _byte_keys(buf: bytes, n: int, mults: np.ndarray) -> np.ndarray:
+    return ngram_hash_keys(np.frombuffer(buf, dtype=np.uint8), n, 256, mults)
+
+
+def token_overlap_filter(rec_ids: Sequence[np.ndarray], reference: np.ndarray,
+                         n_tokens: Sequence[int], seed: int) -> dict:
+    """Drop candidates sharing a verbatim token span with the real training stream.
+
+    This is the criterion that matters: ``PURE_WIKI/tokens.npy`` is what the graft
+    trained on, so a held-out record may not contain any span that also occurs
+    there.  The check is done in *token* space (not text) because the stream
+    stores ``encode(decode(shard))`` and its decoded spacing/punctuation differs
+    from the source text, which makes text-level matching both noisy and
+    unreliable.
+
+    Why the complement of ``build_mix``'s selection is not enough on its own:
+    WikiText-2-raw repeats records (2,575 of 23,767 sit in duplicate groups, the
+    largest with 129 copies) and it also carries nested granularities, so a
+    paragraph in the complement can be a verbatim substring of an article that
+    PURE_WIKI consumed.  Measured here rather than assumed.
+    """
+    ref = np.asarray(reference, dtype=np.int64).reshape(-1)
+    top = int(ref.max()) if ref.size else 0
+    for ids in rec_ids:
+        if ids.size:
+            top = max(top, int(ids.max()))
+    vocab = top + 2          # one past the largest real id
+    sentinel = top + 1       # separator that cannot occur in data
+    mults = np.random.default_rng(seed).integers(
+        1, 2 ** 63, size=512, dtype=np.uint64) | np.uint64(1)
+
+    lengths = np.array([ids.size for ids in rec_ids], dtype=np.int64)
+    joined = np.empty(int(lengths.sum()) + len(rec_ids), dtype=np.int64)
+    starts = np.zeros(len(rec_ids) + 1, dtype=np.int64)
+    pos = 0
+    for i, ids in enumerate(rec_ids):
+        starts[i] = pos
+        joined[pos : pos + ids.size] = ids
+        pos += ids.size
+        joined[pos] = sentinel
+        pos += 1
+    starts[len(rec_ids)] = pos
+    seppos = np.flatnonzero(joined == sentinel)
+
+    result = {"reference": "PURE_WIKI/tokens.npy (the graft's training stream)",
+              "reference_tokens": int(ref.shape[0]), "candidate_records": len(rec_ids),
+              "candidate_tokens": int(lengths.sum()), "per_ngram": {}}
+    excluded: Dict[int, List[int]] = {}
+    for n in sorted(set(int(x) for x in n_tokens)):
+        if n < 2:
+            continue
+        ref_keys = np.unique(ngram_hash_keys(ref, n, vocab, mults))
+        keys = ngram_hash_keys(joined, n, vocab, mults)
+        N = keys.shape[0]
+        if N:
+            w = np.arange(N, dtype=np.int64)
+            owner = np.clip(np.searchsorted(starts, w, side="right") - 1,
+                            0, len(rec_ids) - 1)
+            spans_sep = (np.searchsorted(seppos, w, side="right")
+                         != np.searchsorted(seppos, w + n, side="right"))
+            valid = (~spans_sep) & (w + n <= starts[owner + 1])
+            hit = np.isin(keys, ref_keys) & valid
+            bad = sorted({int(b) for b in np.unique(owner[hit]).tolist()
+                          if b < len(rec_ids)})
+            del w, owner, spans_sep, valid, hit
+        else:
+            bad = []
+        excluded[n] = bad
+        result["per_ngram"][str(n)] = {
+            "records_excluded": len(bad),
+            "tokens_excluded": int(lengths[bad].sum()) if bad else 0,
+        }
+        del ref_keys, keys
+    del joined, seppos
+    return {"summary": result, "excluded_by_ngram": excluded}
     """Drop candidate records that share a long verbatim span with used records.
 
-    WikiText-2-raw repeats records (2,575 of 23,767 sit in duplicate groups, the
-    largest 129 copies), so "the records build_mix did not select" is NOT a clean
-    held-out set: an unselected copy of a selected paragraph is still text the
-    graft trained on.  This compares the *characters* of the candidate records
-    against the normalised concatenation of the records PURE_WIKI actually
-    consumed, and drops any candidate sharing an ``n``-character span.
+    WikiText-2-raw is not a set of disjoint documents: it repeats records (2,575
+    of 23,767 sit in duplicate groups, the largest with 129 copies) and it also
+    carries nested granularities, so a paragraph in the complement can be a
+    verbatim substring of an article PURE_WIKI consumed.  The complement of
+    ``build_mix``'s selection is therefore NOT a clean held-out set.
 
-    Character level (not token level) because PURE_WIKI/tokens.npy stores
+    This compares the candidate records against the normalised text of the
+    records PURE_WIKI actually consumed and drops every candidate sharing an
+    ``n``-character span with it.  All offsets are **bytes** (the corpus is
+    heavily non-ASCII, so character offsets would misalign the record ranges).
+
+    Character level rather than token level because PURE_WIKI/tokens.npy stores
     ``encode(decode(shard))`` -- a re-encoding that loses about one token per
     512-token chunk -- so exact token n-gram matching misses real duplicates
-    while the text is unchanged.
+    whose text is unchanged.
     """
     mults = np.random.default_rng(seed).integers(
         1, 2 ** 63, size=512, dtype=np.uint64) | np.uint64(1)
     ref_text = _normalize(" \n ".join(kept_texts[i] for i in used))
-    result = {"reference": "concat of the {} records PURE_WIKI consumed".format(len(used)),
-              "reference_chars": len(ref_text), "per_ngram": {}}
+    enc = [_normalize(kept_texts[i]).encode("utf-8") for i in candidate]
+    joined = b"\x00".join(enc)
+    starts = np.zeros(len(candidate) + 1, dtype=np.int64)
+    pos = 0
+    for idx, e in enumerate(enc):
+        starts[idx] = pos
+        pos += len(e) + 1
+    starts[len(candidate)] = pos
+    sep_idx = np.flatnonzero(np.frombuffer(joined, dtype=np.uint8) == 0)
+    result = {"reference": "normalised concatenation of the {} records PURE_WIKI "
+                           "consumed".format(len(used)),
+              "reference_chars": len(ref_text), "candidate_records": len(candidate),
+              "per_ngram": {}}
     per_ngram_excluded = {}
     for n in sorted(set(int(x) for x in n_chars)):
         ref_keys = np.unique(_text_keys(ref_text, n, mults))
-        joined = "\x00".join(_normalize(kept_texts[i]) for i in candidate)
-        starts = np.zeros(len(candidate) + 1, dtype=np.int64)
-        pos = 0
-        for idx, i in enumerate(candidate):
-            starts[idx] = pos
-            pos += len(_normalize(kept_texts[i])) + 1  # +1 for the separator
-        starts[len(candidate)] = pos
-        keys = _text_keys(joined, n, mults)
+        keys = _byte_keys(joined, n, mults)
         N = keys.shape[0]
         if N:
             wpos = np.arange(N, dtype=np.int64)
-            owner = np.searchsorted(starts, wpos, side="right") - 1
-            owner = np.clip(owner, 0, len(candidate) - 1)
+            owner = np.clip(np.searchsorted(starts, wpos, side="right") - 1,
+                            0, len(candidate) - 1)
             contains_sep = np.zeros(N, dtype=bool)
-            # a window may not span the \x00 separator between records
-            sep_idx = np.flatnonzero(
-                np.frombuffer(joined.encode("utf-8"), dtype=np.uint8) == 0)
             if sep_idx.size:
                 contains_sep = (np.searchsorted(sep_idx, wpos, side="right")
                                 != np.searchsorted(sep_idx, wpos + n, side="right"))
             valid = (~contains_sep) & (wpos + n <= starts[owner + 1])
             hit = np.isin(keys, ref_keys) & valid
-            bad = set(np.unique(owner[hit]).tolist())
-            bad = {candidate[b] for b in bad if b < len(candidate)}
+            bad = {candidate[b] for b in np.unique(owner[hit]).tolist()
+                   if b < len(candidate)}
             del wpos, owner, contains_sep, valid, hit
         else:
             bad = set()
         per_ngram_excluded[n] = sorted(bad)
         result["per_ngram"][str(n)] = {"records_excluded": len(bad)}
-        del ref_keys, joined, keys
+        del ref_keys, keys
+    del enc, joined, sep_idx
     return {"summary": result, "excluded_by_ngram": per_ngram_excluded}
 
 
@@ -259,11 +337,14 @@ def main() -> int:
                     help="drop candidate records that share a long verbatim span "
                          "with the records PURE_WIKI consumed (default: on)")
     ap.add_argument("--no-decontaminate", dest="decontaminate", action="store_false")
-    ap.add_argument("--overlap-chars", type=int, default=128,
-                    help="character length of the verbatim overlap that "
-                         "disqualifies a record")
-    ap.add_argument("--overlap-sensitivity", default="64,128,256",
-                    help="also report exclusion counts at these lengths")
+    ap.add_argument("--decontaminate-against", default=None,
+                    help="training token stream to verify against "
+                         "(default: <pure-wiki-dir>/tokens.npy)")
+    ap.add_argument("--overlap-tokens", type=int, default=16,
+                    help="length of the verbatim token span that disqualifies "
+                         "a record")
+    ap.add_argument("--overlap-sensitivity", default="8,16,32,64",
+                    help="also report exclusion counts at these span lengths")
     args = ap.parse_args()
 
     t0 = time.time()
@@ -310,25 +391,37 @@ def main() -> int:
         len(rec_ids), int(sum(r.shape[0] for r in rec_ids.values()))))
 
     if args.decontaminate:
-        levels = sorted({args.overlap_chars} | {
+        levels = sorted({args.overlap_tokens} | {
             int(p) for p in args.overlap_sensitivity.split(",") if p.strip()})
-        filt = overlap_filter(kept_texts, list(used_set), candidate, levels, args.seed)
-        bad = set(filt["excluded_by_ngram"][args.overlap_chars])
+        ref_path = Path(args.decontaminate_against) if args.decontaminate_against \
+            else Path(args.pure_wiki_dir) / "tokens.npy"
+        if not ref_path.exists():
+            raise SystemExit("decontamination reference not found: {}".format(ref_path))
+        ref_tokens = np.load(ref_path).astype(np.int64).reshape(-1)
+        filt = token_overlap_filter([rec_ids[i] for i in candidate], ref_tokens,
+                                    levels, args.seed)
+        # the filter indexes the positional candidate list; map back to record ids
+        bad = {candidate[p] for p in filt["excluded_by_ngram"][args.overlap_tokens]}
         overlap = {
-            "method": "character-level {}-gram hash, normalised whitespace, "
-                      "reference = concatenation of the {} records build_mix consumed",
-            "chosen_chars": args.overlap_chars,
+            "method": "verbatim token {}-gram overlap against {}: a candidate "
+                      "record is dropped if any {}-token span of it also occurs in "
+                      "the stream the graft trained on".format(
+                          args.overlap_tokens, ref_path, args.overlap_tokens),
+            "chosen_tokens": args.overlap_tokens,
+            "reference_stream": str(ref_path),
+            "reference_sha256": hashlib.sha256(ref_path.read_bytes()).hexdigest(),
             "excluded_records": len(bad),
             "excluded_tokens": int(sum(rec_ids[i].shape[0] for i in bad)),
             "sensitivity": filt["summary"]["per_ngram"],
-            "reference_chars": filt["summary"]["reference_chars"],
+            "candidate_records": filt["summary"]["candidate_records"],
+            "candidate_tokens": filt["summary"]["candidate_tokens"],
+            "excluded_record_indices": sorted(bad),
             "excluded_record_indices_sha256": sha256_text(
                 ",".join(str(i) for i in sorted(bad))),
         }
-        overlap["method"] = overlap["method"].format(args.overlap_chars, len(used_set))
-        log("verbatim-overlap filter: {} of {} candidates share a >= {}-char span "
-            "with a consumed record -> dropped (sensitivity {})".format(
-                len(bad), len(candidate), args.overlap_chars,
+        log("token-overlap filter vs {}: {} of {} complement records share a "
+            ">= {}-token span with the training stream -> dropped (sensitivity {})".format(
+                ref_path, len(bad), len(candidate), args.overlap_tokens,
                 filt["summary"]["per_ngram"]))
     else:
         bad = set()
@@ -396,6 +489,7 @@ def main() -> int:
         "chunk_chars": args.chunk_chars,
         "eos_separator": bm.EOS_SEPARATOR,
         "tokens_sha256": h.hexdigest(),
+        "heldout_record_indices": held,
         "heldout_record_indices_sha256": sha256_text(
             ",".join(str(i) for i in held)),
         "used_record_indices_sha256": sha256_text(
@@ -409,7 +503,7 @@ def main() -> int:
             "repeats 2,575 of 23,767 records, so the complement alone leaks). "
             "Neither level says anything about the Qwen3.5/Qwen3.8 backbone, which "
             "was pretrained on web text that very likely includes WikiText; these "
-            "positions are NOT clean w.r.t. the backbone.".format(args.overlap_chars)),
+            "positions are NOT clean w.r.t. the backbone.".format(args.overlap_tokens)),
     }
     (out / "manifest.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

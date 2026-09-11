@@ -498,7 +498,9 @@ class NgramModel:
             act = hi > lo
             if not act.any():
                 break
-            mid = (lo + hi) >> 1
+            # converged lanes (lo == hi == row end) can equal n_tok, so clamp the
+            # probe index before touching next_tokens
+            mid = np.minimum((lo + hi) >> 1, n_tok - 1)
             right = lvl.next_tokens[mid] < w
             hi = np.where(act & ~right, mid, hi)
             lo = np.where(act & right, mid + 1, lo)
@@ -533,7 +535,6 @@ class NgramModel:
         with np.errstate(divide="ignore"):
             lp = np.log(np.maximum(p, 1e-300))
         return lp, top_level, pos, n_zero
-
     def accuracy(self, stream: np.ndarray, positions: np.ndarray,
                  candidates: np.ndarray, chunk: int) -> Dict[str, object]:
         """Exact top-1/top-5 over ``candidates`` on the given positions."""
@@ -697,11 +698,16 @@ def main() -> int:
                     help="storage budget to project onto (default 48 GiB = PLE table)")
     ap.add_argument("--ple-row-bytes", type=int, default=160,
                     help="bytes per frozen PLE row (fp8, 160 dims)")
+    ap.add_argument("--self-test", action="store_true",
+                    help="run the built-in invariant tests (ragged search, "
+                         "normalisation, floor) and exit")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--output", default=None, help="JSON result path")
     ap.add_argument("--markdown", default=None, help="optional markdown table path")
     args = ap.parse_args()
 
+    if args.self_test:
+        return self_test()
     t_start = time.time()
     train_path = Path(args.train_npy)
     if not train_path.exists():
@@ -875,14 +881,18 @@ def main() -> int:
         hist = {}
         for k in range(1, M + 1):
             hist[str(k)] = float((top_level == k).mean())
-        target_seen = float((model.p1_dense[eval_stream[pos].astype(np.int64)]
-                             > model.floor).mean())
+        seen_mask = model.p1_dense[eval_stream[pos].astype(np.int64)] > model.floor
+        target_seen = float(seen_mask.mean())
+        nll_oov_share = float(-lp[~seen_mask].sum() / pos.shape[0]) if (~seen_mask).any() else 0.0
         metrics = {
             "n_positions": int(pos.shape[0]),
             "nll_nats": nll,
             "perplexity": float(math.exp(nll)) if nll < 700 else float("inf"),
             "bits_per_token": nll / math.log(2.0),
             "target_in_unigram_vocab_rate": target_seen,
+            "nll_nats_from_out_of_vocab_targets": nll_oov_share,
+            "nll_nats_in_vocab_targets_only": (
+                float(-lp[seen_mask].mean()) if seen_mask.any() else 0.0),
             "highest_context_found_rate": hist,
             "n_zero_probability_positions": n_zero,
             "discounts_per_level": {str(k): levels[k].D for k in sorted(levels)},
@@ -1052,6 +1062,44 @@ def main() -> int:
     log("done in {:.1f}s, peak RSS {:.2f} GiB".format(
         time.time() - t_start, peak_rss_bytes() / GIB))
     return 0
+
+
+def self_test() -> int:
+    """Cheap invariants for the two places that are easy to get silently wrong.
+
+    1. the vectorised ragged binary search must agree with a linear scan,
+       including rows that end at the very end of the value array;
+    2. every level must be a proper distribution: sum_w disc_w + gamma == 1.
+    """
+    notes: List[str] = []
+    rows = np.array([[1, 5], [1, 7], [2, 3], [2, 9], [3, 4]], dtype=np.int32)
+    counts = np.array([3, 1, 2, 4, 1], dtype=np.int64)
+    l2 = build_level(rows, counts, 16)
+    finalize_level(l2, "mkn", 0.1, 16, notes)
+    uniq, cnt = unique_rows(np.array([[1], [2], [3]], dtype=np.int32))
+    l1 = build_level(uniq, np.array([5, 6, 1], dtype=np.int64), 16)
+    finalize_level(l1, "mkn", 0.1, 16, notes)
+    model = NgramModel(2, {1: l1, 2: l2}, 16, "mkn", 0.1, notes)
+    ctx = np.array([3, 2, 1, 3, 0], dtype=np.int64)
+    w = np.array([4, 9, 5, 8, 0], dtype=np.int64)
+    idx, valid = model.row_index(l2, ctx)
+    got = model.row_counts(l2, idx, valid, w)
+    want = np.zeros_like(got)
+    for j in range(ctx.shape[0]):
+        if not valid[j]:
+            continue
+        s, e = int(l2.starts[idx[j]]), int(l2.starts[idx[j] + 1])
+        hit = np.flatnonzero(l2.next_tokens[s:e] == w[j])
+        want[j] = int(l2.counts[s + hit[0]]) if hit.size else 0
+    ok_search = bool(np.array_equal(got, want))
+    # unigram floor must be positive and the unigram must sum to 1 over V
+    total = float(model.p1_dense.sum())
+    print("[self-test] ragged search == linear scan: {}".format(ok_search))
+    print("[self-test] floor={:.3e}  sum_w p1(w)={:.12f}".format(model.floor, total))
+    print("[self-test] normalization notes: {}".format(notes or "none"))
+    ok = ok_search and abs(total - 1.0) < 1e-9 and model.floor > 0 and not notes
+    print("[self-test] {}".format("PASS" if ok else "FAIL"))
+    return 0 if ok else 1
 
 
 def render_markdown(out: Dict[str, object]) -> str:

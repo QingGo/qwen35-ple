@@ -13,13 +13,17 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKBONE="${BACKBONE:-0.8B}"
 SUFFIX="${SUFFIX:-}"
 REMOTE_ROOT="${REMOTE_ROOT:-/root/autodl-tmp/qwen35-ple}"
-LOCAL_DIR="${LOCAL_DIR:-$REPO/outputs/round162}"
+# One local subdirectory per variant (0.8B / 0.8B-nosft / 4B): the arm file
+# names are identical across variants, so a shared directory would silently
+# overwrite one backbone's arm-wiki.json with another's.
+LOCAL_DIR="${LOCAL_DIR:-$REPO/outputs/round162/${BACKBONE}${SUFFIX}}"
 REMOTE_DIR="$REMOTE_ROOT/outputs/round162-${BACKBONE}${SUFFIX}"
 
 mkdir -p "$LOCAL_DIR"
 echo "[r162-pull] $REMOTE_DIR -> $LOCAL_DIR"
 QWEN35_RSYNC=1 bash "$REPO/scripts/ssh_autodl.sh" -a \
-  --include='arm-*.json' --include='crosseval-*.json' \
+  --include='arm-*.json' --include='crosseval-*.json' --include='gold-*.json' \
+  --include='contribution-similarity.json' \
   --include='stats*.jsonl' --include='timings.txt' \
   --exclude='*' \
   "root@${QWEN35_HOST:-connect.nmb1.seetacloud.com}:$REMOTE_DIR/" "$LOCAL_DIR/"

@@ -355,7 +355,7 @@ def build_level(rows: np.ndarray, counts: np.ndarray, vocab: int,
 
 
 def prune_level(lvl: LevelTable, min_count: int, smoothing: str, addk: float,
-                vocab: int, notes: List[str]) -> LevelTable:
+                vocab: int, notes: List[str], protect: bool = False) -> LevelTable:
     """Return a copy keeping only entries stored >= ``min_count`` times.
 
     This is the pruning rule for the matched-bytes comparison: corpus statistics
@@ -365,7 +365,7 @@ def prune_level(lvl: LevelTable, min_count: int, smoothing: str, addk: float,
     scorer backs off exactly as for an unseen context.  Rows that lose every
     entry are dropped, so bytes shrink monotonically with the threshold.
     """
-    if min_count <= 1:
+    if min_count <= 1 or protect:
         return lvl
     counts = lvl.counts
     entry_keep = counts.astype(np.int64) >= min_count
@@ -915,7 +915,8 @@ def budget_sweep(args, stream: np.ndarray, vocab: int, log_fn) -> Dict[str, obje
                     e = 0
                     for k in base_levels:
                         pl = prune_level(base_levels[k], tau, args.smoothing, args.addk,
-                                         vocab, notes)
+                                         vocab, notes,
+                                         protect=(k <= args.prune_protect_below))
                         b += pl.nbytes
                         e += pl.n_entries
                         del pl
@@ -934,7 +935,8 @@ def budget_sweep(args, stream: np.ndarray, vocab: int, log_fn) -> Dict[str, obje
             for tau in sorted(need):
                 levels = {k: (base_levels[k] if tau == 1 else
                               prune_level(base_levels[k], tau, args.smoothing, args.addk,
-                                          vocab, notes))
+                                          vocab, notes,
+                                          protect=(k <= args.prune_protect_below)))
                           for k in base_levels}
                 model = NgramModel(M, levels, vocab, args.smoothing, args.addk, notes,
                                    lookup=str(arm["lookup"]), key_mode="hash")
@@ -1014,31 +1016,6 @@ def budget_sweep(args, stream: np.ndarray, vocab: int, log_fn) -> Dict[str, obje
                     gaps["{}_minus_k3_top1".format(arm["name"])] = m["top1"] - base["top1"]
                     gaps["{}_bytes_vs_k3".format(arm["name"])] = m["bytes"] - base["bytes"]
                 size_entry["gaps"][str(int(bud))] = gaps
-        # matched-bytes table + gaps versus the shortest window
-        for bud in budgets:
-            matched = {}
-            for arm in arms:
-                cands = [s for s in size_entry["arms"][arm["name"]]["scored"]
-                         if s["bytes"] <= bud]
-                if not cands:
-                    continue
-                best = max(cands, key=lambda s: s["bytes"])
-                matched[str(int(bud))] = matched.get(str(int(bud)), {})
-                matched[str(int(bud))][arm["name"]] = {
-                    "bytes": best["bytes"], "nll": best["nll"], "top1": best["top1"],
-                    "min_count": best["min_count"]}
-            size_entry["matched"][str(int(bud))] = matched
-            base = matched.get("k3")
-            if base:
-                gaps = {}
-                for arm in arms:
-                    if arm["name"] == "k3" or arm["name"] not in matched:
-                        continue
-                    m = matched[arm["name"]]
-                    gaps["{}_minus_k3_nll".format(arm["name"])] = base["nll"] - m["nll"]
-                    gaps["{}_minus_k3_top1".format(arm["name"])] = m["top1"] - base["top1"]
-                    gaps["{}_bytes_vs_k3".format(arm["name"])] = m["bytes"] - base["bytes"]
-                size_entry["gaps"][str(int(bud))] = gaps
         per_size[str(N)] = size_entry
         del full
         gc.collect()
@@ -1067,8 +1044,10 @@ def budget_sweep(args, stream: np.ndarray, vocab: int, log_fn) -> Dict[str, obje
         "prune_grid": grid, "budget_bytes": [int(b) for b in budgets],
         "eval_start": int(eval_start), "eval_tokens": int(eval_len),
         "key_mode": "hash (8-byte hashed context keys at every order)",
-        "pruning_rule": ("drop stored entries with count < min_count; corpus "
-                         "statistics are NOT recomputed, missing rows back off"),
+        "pruning_rule": ("drop stored entries with count < min_count (levels up to "
+                         "--prune-protect-below are exempt); corpus statistics are NOT "
+                         "recomputed, missing rows back off"),
+        "prune_protect_below": int(args.prune_protect_below),
         "lookup_interpolate": "arms k3/k8/k16 mix every level (interpolated MKN)",
         "lookup_longest": ("arm longest16 uses only the longest stored matching "
                            "context and sends that level's discounted mass to the "
@@ -1286,6 +1265,9 @@ def main() -> int:
                     help="4/9/17 = interpolated MKN with context <= 3/8/16 tokens; "
                          "longestN = variable-length longest-suffix lookup")
     ap.add_argument("--prune-grid", default="1,2,4,8,16,32,64,128,256,1024")
+    ap.add_argument("--prune-protect-below", type=int, default=0,
+                    help="never prune levels up to this n-gram order; the byte budget "
+                         "is then spent only on longer contexts (allocation sensitivity)")
     ap.add_argument("--budget-bytes", default="1048576,5242880,20971520")
     ap.add_argument("--eval-start", type=int, default=None,
                     help="first token index of the sweep eval block "

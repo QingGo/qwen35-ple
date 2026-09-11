@@ -61,6 +61,8 @@ def main() -> int:
     ap.add_argument("--max-tokens", type=int, default=1_152_891,
                     help="cap the held-out stream so corpora can be compared at "
                          "identical eval size")
+    ap.add_argument("--overlap-mode", choices=["token", "char"], default="token")
+    ap.add_argument("--overlap-chars", type=int, default=32)
     ap.add_argument("--overlap-tokens", type=int, default=16)
     ap.add_argument("--overlap-sensitivity", default="8,16,32,64")
     ap.add_argument("--verify-needles", default="32,128")
@@ -118,15 +120,33 @@ def main() -> int:
     log("complement: {} records / {} tokens".format(
         len(candidate), int(sum(r.shape[0] for r in rec_ids.values()))))
 
-    levels = sorted({args.overlap_tokens} | {
-        int(p) for p in args.overlap_sensitivity.split(",") if p.strip()})
-    ref_tokens = np.load(cdir / "tokens.npy").astype(np.int64).reshape(-1)
-    filt = bh.token_overlap_filter([rec_ids[i] for i in candidate], ref_tokens,
-                                   levels, args.seed)
-    bad = {candidate[p] for p in filt["excluded_by_ngram"][args.overlap_tokens]}
-    log("token-overlap filter vs {}/tokens.npy: {} of {} complement records dropped "
-        "(sensitivity {})".format(cdir.name, len(bad), len(candidate),
-                                  filt["summary"]["per_ngram"]))
+    if args.overlap_mode == "char":
+        cf = bh.char_overlap_filter(kept_texts, candidate,
+                                    (cdir / "corpus.txt").read_text(
+                                        encoding="utf-8", errors="ignore"),
+                                    args.overlap_chars, args.seed)
+        bad = set(cf["excluded"])
+        filt_summary = {"mode": "char", "chars": args.overlap_chars,
+                        "excluded": len(cf["excluded"]),
+                        "untestable_records_too_short": len(cf["untestable"]),
+                        "untestable_tokens": int(sum(rec_ids[i].shape[0]
+                                                     for i in cf["untestable"]))}
+        log("char-overlap filter vs {}/corpus.txt: {} of {} candidates share a >= "
+            "{}-char window -> dropped; {} too short to test ({:,} tokens, kept)".format(
+                cdir.name, len(cf["excluded"]), len(candidate), args.overlap_chars,
+                len(cf["untestable"]), filt_summary["untestable_tokens"]))
+    else:
+        levels = sorted({args.overlap_tokens} | {
+            int(p) for p in args.overlap_sensitivity.split(",") if p.strip()})
+        ref_tokens = np.load(cdir / "tokens.npy").astype(np.int64).reshape(-1)
+        filt = bh.token_overlap_filter([rec_ids[i] for i in candidate], ref_tokens,
+                                       levels, args.seed)
+        bad = {candidate[p] for p in filt["excluded_by_ngram"][args.overlap_tokens]}
+        filt_summary = {"mode": "token", "tokens": args.overlap_tokens,
+                        "sensitivity": filt["summary"]["per_ngram"]}
+        log("token-overlap filter vs {}/tokens.npy: {} of {} complement records dropped "
+            "(sensitivity {})".format(cdir.name, len(bad), len(candidate),
+                                      filt["summary"]["per_ngram"]))
 
     token_ids: List[int] = []
     held: List[int] = []
@@ -187,15 +207,15 @@ def main() -> int:
         "chunk_chars": man["chunk_chars"],
         "eos_separator": bm.EOS_SEPARATOR,
         "tokens_sha256": h.hexdigest(),
-        "overlap_filter": {
+        "overlap_filter": dict(filt_summary, **{
             "chosen_tokens": args.overlap_tokens,
             "reference_stream": str(cdir / "tokens.npy"),
             "excluded_records": len(bad),
             "excluded_tokens": int(sum(rec_ids[i].shape[0] for i in bad)),
-            "sensitivity": filt["summary"]["per_ngram"],
-            "candidate_records": filt["summary"]["candidate_records"],
-            "candidate_tokens": filt["summary"]["candidate_tokens"],
-        },
+            "sensitivity": filt_summary.get("sensitivity", {}),
+            "candidate_records": len(candidate),
+            "candidate_tokens": int(sum(r.shape[0] for r in rec_ids.values())),
+        }),
         "disjointness_verification": verification,
         "decontamination_caveat": (
             "two levels against the corpora the count model trains on: (1) records "

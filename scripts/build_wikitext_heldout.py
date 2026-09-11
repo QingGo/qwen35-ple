@@ -62,7 +62,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_mix as bm  # noqa: E402  (sibling script, deliberately reused)
-from bench_ngram_reference import ngram_hash_keys  # noqa: E402  (single canonical copy)
+from bench_ngram_reference import default_mults, ngram_hash_keys  # noqa: E402
 
 
 def log(msg: str) -> None:
@@ -115,6 +115,50 @@ def _text_keys(text: str, n: int, mults: np.ndarray) -> np.ndarray:
 
 def _byte_keys(buf: bytes, n: int, mults: np.ndarray) -> np.ndarray:
     return ngram_hash_keys(np.frombuffer(buf, dtype=np.uint8), n, 256, mults)
+
+
+def char_overlap_filter(kept_texts: Sequence[str], candidate: Sequence[int],
+                        reference_text: str, n_chars: int,
+                        seed: int = 0) -> Dict[str, object]:
+    """Drop candidates sharing any >= ``n_chars``-character span with reference text.
+
+    This is the *character*-level criterion (the sibling contamination test):
+    a record is contaminated when any normalised character window of it occurs in
+    ``corpus.txt``.  It is finer than the token-level test at the short end and,
+    unlike it, is immune to the ``encode(decode(shard))`` spacing/punctuation
+    drift that makes token n-gram matching miss real overlaps.
+
+    Windows are taken over unicode code points (not bytes), so a 32-character
+    window means 32 characters for non-ASCII text too.  A window must lie inside
+    one record (records are concatenated without separators, and windows that
+    straddle a record boundary are discarded), and records shorter than the
+    window are reported separately as untestable rather than silently kept.
+    """
+    mults = default_mults()
+    cp_vocab = 1 << 21
+    ref_cp = np.frombuffer(_normalize(reference_text).encode("utf-32-le"), dtype="<u4")
+    ref_keys = np.unique(ngram_hash_keys(ref_cp, n_chars, cp_vocab, mults))
+    texts = [_normalize(kept_texts[i]) for i in candidate]
+    cps = [np.frombuffer(t.encode("utf-32-le"), dtype="<u4") for t in texts]
+    lens = np.array([a.shape[0] for a in cps], dtype=np.int64)
+    starts = np.zeros(len(cps) + 1, dtype=np.int64)
+    np.cumsum(lens, out=starts[1:])
+    joined = (np.concatenate(cps) if cps else np.zeros(0, dtype="<u4"))
+    keys = ngram_hash_keys(joined, n_chars, cp_vocab, mults)
+    bad = set()
+    N = keys.shape[0]
+    if N:
+        w = np.arange(N, dtype=np.int64)
+        owner = np.clip(np.searchsorted(starts, w, side="right") - 1, 0, len(cps) - 1)
+        valid = (w + n_chars) <= starts[owner + 1]
+        hit = np.isin(keys, ref_keys) & valid
+        bad = {candidate[int(b)] for b in np.unique(owner[hit]).tolist()}
+        del w, owner, valid, hit
+    untestable = [candidate[i] for i, t in enumerate(texts) if t.__len__() < n_chars]
+    del ref_keys, keys, joined, cps
+    return {"excluded": bad, "untestable": untestable, "reference_chars": len(ref_cp),
+            "candidate_records": len(candidate), "testable_records":
+                len(candidate) - len(untestable)}
 
 
 def token_overlap_filter(rec_ids: Sequence[np.ndarray], reference: np.ndarray,
@@ -315,6 +359,14 @@ def main() -> int:
     ap.add_argument("--decontaminate-against", default=None,
                     help="training token stream to verify against "
                          "(default: <pure-wiki-dir>/tokens.npy)")
+    ap.add_argument("--overlap-mode", choices=["token", "char"], default="token",
+                    help="token = >=N-token span shared with tokens.npy (rounds 158/159); "
+                         "char = >=N-character span shared with corpus.txt (sibling test)")
+    ap.add_argument("--overlap-chars", type=int, default=32,
+                    help="character window for --overlap-mode char")
+    ap.add_argument("--drop-untestable", action="store_true",
+                    help="also drop records shorter than the window (they cannot be "
+                         "tested; default keeps them and reports the count)")
     ap.add_argument("--overlap-tokens", type=int, default=16,
                     help="length of the verbatim token span that disqualifies "
                          "a record")
@@ -365,7 +417,38 @@ def main() -> int:
     log("tokenised {} complement records ({} tokens)".format(
         len(rec_ids), int(sum(r.shape[0] for r in rec_ids.values()))))
 
-    if args.decontaminate:
+    if args.decontaminate and args.overlap_mode == "char":
+        corpus_txt = Path(args.verify_against) if args.verify_against is not None \
+            else Path(args.pure_wiki_dir) / "corpus.txt"
+        if not corpus_txt.exists():
+            raise SystemExit("character-level reference not found: {}".format(corpus_txt))
+        cf = char_overlap_filter(kept_texts, candidate,
+                                 corpus_txt.read_text(encoding="utf-8", errors="ignore"),
+                                 args.overlap_chars, args.seed)
+        bad = set(cf["excluded"])
+        if args.drop_untestable:
+            bad |= set(cf["untestable"])
+        overlap = {
+            "method": "character-level: drop any candidate sharing a >= {}-character "
+                      "window with {}".format(args.overlap_chars, corpus_txt),
+            "chosen_chars": args.overlap_chars,
+            "reference_text": str(corpus_txt),
+            "excluded_records": len(cf["excluded"]),
+            "untestable_records_too_short": len(cf["untestable"]),
+            "untestable_tokens": int(sum(rec_ids[i].shape[0] for i in cf["untestable"])),
+            "dropped_untestable": bool(args.drop_untestable),
+            "candidate_records": cf["candidate_records"],
+            "excluded_tokens": int(sum(rec_ids[i].shape[0] for i in bad)),
+            "excluded_record_indices": sorted(bad),
+            "excluded_record_indices_sha256": sha256_text(
+                ",".join(str(i) for i in sorted(bad))),
+        }
+        log("char-overlap filter vs {}: {} of {} candidates share a >= {}-char window "
+            "-> dropped; {} records too short to test ({:,} tokens){}".format(
+                corpus_txt, len(cf["excluded"]), len(candidate), args.overlap_chars,
+                len(cf["untestable"]), overlap["untestable_tokens"],
+                " also dropped" if args.drop_untestable else " kept"))
+    elif args.decontaminate:
         levels = sorted({args.overlap_tokens} | {
             int(p) for p in args.overlap_sensitivity.split(",") if p.strip()})
         ref_path = Path(args.decontaminate_against) if args.decontaminate_against \

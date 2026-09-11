@@ -689,63 +689,63 @@ def _qa_gold_nll(
                 ids_np[row, :length] = entry["full_ids"]
                 mask_np[row, :length] = 1
             ids = torch.from_numpy(ids_np).long().to(device)
-        attention_mask = torch.from_numpy(mask_np).long().to(device)
+            attention_mask = torch.from_numpy(mask_np).long().to(device)
 
-        if qa_store is not None:
-            # One row per item, zero-padded on the right, exactly mirroring the
-            # sequential layout: the reader's causal convolution then only ever
-            # mixes an item's own earlier tokens (row-local), so every scored
-            # logit matches the unbatched computation while the model forward is
-            # shared across the batch.
-            rows = []
-            for entry in batch:
-                et = qa_store.fetch(entry["full_ids"])
-                if control:
-                    rng = np.random.default_rng(seed * 1000 + entry["idx"])
-                    et = et[rng.permutation(len(et))]
-                et = _apply_head_mask(et, head_mask)
-                rows.append(np.asarray(et, dtype=np.float32))
-            padded = np.zeros((len(batch), max_len, rows[0].shape[-1]), dtype=np.float32)
-            for row, et in enumerate(rows):
-                padded[row, : et.shape[0]] = et
-            model._current_ple_e_t = torch.from_numpy(padded).float().to(device)
-        else:
-            model._current_ple_e_t = None
+            if qa_store is not None:
+                # One row per item, zero-padded on the right, exactly mirroring the
+                # sequential layout: the reader's causal convolution then only ever
+                # mixes an item's own earlier tokens (row-local), so every scored
+                # logit matches the unbatched computation while the model forward is
+                # shared across the batch.
+                rows = []
+                for entry in batch:
+                    et = qa_store.fetch(entry["full_ids"])
+                    if control:
+                        rng = np.random.default_rng(seed * 1000 + entry["idx"])
+                        et = et[rng.permutation(len(et))]
+                    et = _apply_head_mask(et, head_mask)
+                    rows.append(np.asarray(et, dtype=np.float32))
+                padded = np.zeros((len(batch), max_len, rows[0].shape[-1]), dtype=np.float32)
+                for row, et in enumerate(rows):
+                    padded[row, : et.shape[0]] = et
+                model._current_ple_e_t = torch.from_numpy(padded).float().to(device)
+            else:
+                model._current_ple_e_t = None
 
-        with torch.no_grad():
-            out = model(input_ids=ids, attention_mask=attention_mask)
-        logits = out.logits.float()
-        for row, entry in enumerate(batch):
-            start, end = entry["start"], entry["end"]
-            shift_logits = logits[row, start - 1 : end - 1, :]
-            labels = ids[row, start:end]
-            loss = F.cross_entropy(shift_logits, labels)
-            value = float(loss.item())
-            n_tokens = int(end - start)
-            task = str(entry["item"].get("task", "unknown"))
-            done += 1
-            if done % 200 == 0 or done == n_prepared:
-                print(f"    gold-NLL {done}/{n_prepared}", flush=True)
-            if entry.get("variant", "raw") == "spaced":
-                # Diagnostic reading only: recorded beside the raw NLL, never
-                # folded into the headline aggregates.
-                spaced_by_idx[entry["idx"]] = value
-                per_task_nll_spaced.setdefault(task, []).append(value)
-                continue
-            answers.append(
-                {
-                    "_idx": entry["idx"],
-                    "task": task,
-                    "question": str(entry["item"].get("question", "")),
-                    "answer": entry["answer"],
-                    "gold_nll": value,
-                    "n_tokens": n_tokens,
-                    "continuation": entry["continuation"],
-                }
-            )
-            per_task_nll.setdefault(task, []).append(value)
-            total_loss += value * n_tokens
-            total_tokens += n_tokens
+            with torch.no_grad():
+                out = model(input_ids=ids, attention_mask=attention_mask)
+            logits = out.logits.float()
+            for row, entry in enumerate(batch):
+                start, end = entry["start"], entry["end"]
+                shift_logits = logits[row, start - 1 : end - 1, :]
+                labels = ids[row, start:end]
+                loss = F.cross_entropy(shift_logits, labels)
+                value = float(loss.item())
+                n_tokens = int(end - start)
+                task = str(entry["item"].get("task", "unknown"))
+                done += 1
+                if done % 200 == 0 or done == n_prepared:
+                    print(f"    gold-NLL {done}/{n_prepared}", flush=True)
+                if entry.get("variant", "raw") == "spaced":
+                    # Diagnostic reading only: recorded beside the raw NLL, never
+                    # folded into the headline aggregates.
+                    spaced_by_idx[entry["idx"]] = value
+                    per_task_nll_spaced.setdefault(task, []).append(value)
+                    continue
+                answers.append(
+                    {
+                        "_idx": entry["idx"],
+                        "task": task,
+                        "question": str(entry["item"].get("question", "")),
+                        "answer": entry["answer"],
+                        "gold_nll": value,
+                        "n_tokens": n_tokens,
+                        "continuation": entry["continuation"],
+                    }
+                )
+                per_task_nll.setdefault(task, []).append(value)
+                total_loss += value * n_tokens
+                total_tokens += n_tokens
 
     metrics = {
         f"qa_{task}_nll": float(np.mean(vals))
@@ -1189,6 +1189,7 @@ def _qa_exact_match(
     chat_template: bool = False,
     chat_enable_thinking: bool = False,
     head_mask: list[int] | None = None,
+    norm_stats: bool = False,
 ) -> dict:
     """Greedy exact-match QA generation with live PLE injection.
 
@@ -1200,6 +1201,15 @@ def _qa_exact_match(
     of questions per batch and ``max_batch_tokens`` is an optional token budget
     (roughly ``batch_size * padded_length``).  Grouping by prompt length and
     token budget keeps padding bounded and avoids OOM on long BoolQ passages.
+
+    ``norm_stats`` (round-162, additive, default off) additionally records the
+    magnitude of the injected contribution relative to the backbone hidden
+    state at the injection layer, measured at the pre-answer position of every
+    decoding step.  A contrast between arms whose injected norms differ by more
+    than ~3x is confounded by scale rather than content, so every arm that
+    claims a content effect has to carry this number.  Skipped when
+    ``qa_store`` is None (no-reader / --ple-off), where the contribution is
+    identically zero by construction.
     """
     device = next(model.parameters()).device
     eos_id = tokenizer.eos_token_id
@@ -1250,6 +1260,10 @@ def _qa_exact_match(
         batches.append(current)
 
     records: list[tuple[int, dict[str, Any], bool, bool]] = []
+    # Round-162 additive magnitude control: per-step norms of the injected
+    # contribution and of the backbone hidden state at the injection layer.
+    norm_c: list[float] = []
+    norm_h: list[float] = []
     for batch in batches:
         states = []
         for idx, item in batch:
@@ -1309,6 +1323,16 @@ def _qa_exact_match(
                     model._current_ple_e_t = None
 
                 out = model(input_ids=input_ids, attention_mask=attention_mask)
+                if norm_stats and qa_store is not None:
+                    contrib = getattr(model, "_last_reader_contribution", None)
+                    hidden = getattr(model, "_last_reader_hidden", None)
+                    if contrib is not None and hidden is not None:
+                        for row, state in enumerate(active):
+                            pos = len(state["ids"]) - 1
+                            norm_c.append(
+                                float(contrib[row, pos].float().norm().item())
+                            )
+                            norm_h.append(float(hidden[row, pos].float().norm().item()))
                 for row, state in enumerate(active):
                     logits = out.logits[row, len(state["ids"]) - 1]
                     next_id = int(torch.argmax(logits).item())
@@ -1377,6 +1401,22 @@ def _qa_exact_match(
     )
     metrics["qa_n"] = float(len(all_hits))
     metrics.update(_format_fingerprint(answers))
+    if norm_stats and norm_c:
+        c_arr = np.asarray(norm_c, dtype=np.float64)
+        h_arr = np.asarray(norm_h, dtype=np.float64)
+        safe_h = np.where(h_arr > 0, h_arr, np.nan)
+        metrics["qa_norm_n"] = float(c_arr.size)
+        metrics["qa_norm_cnorm_mean"] = float(np.nanmean(c_arr))
+        metrics["qa_norm_hnorm_mean"] = float(np.nanmean(h_arr))
+        metrics["qa_norm_ratio_mean"] = float(np.nanmean(c_arr / safe_h))
+        metrics["qa_norm_ratio_median"] = float(np.nanmedian(c_arr / safe_h))
+        metrics["qa_norm_ratio_p90"] = float(np.nanpercentile(c_arr / safe_h, 90))
+        # Ratio-of-means is reported alongside the mean-of-ratios: the two agree
+        # only when norm and ratio are uncorrelated, so a gap between them is
+        # itself a warning that the aggregate hides a heavy tail.
+        metrics["qa_norm_ratio_of_means"] = float(
+            np.nanmean(c_arr) / np.nanmean(safe_h)
+        )
     return {"metrics": metrics, "answers": answers}
 
 
@@ -1527,6 +1567,7 @@ def _run_mode(
                     getattr(args, "qa_chat_enable_thinking", False)
                 ),
                 head_mask=head_mask,
+                norm_stats=bool(getattr(args, "qa_norm_stats", False)),
             )
         qa_gold = None
         if getattr(args, "qa_gold_nll", False) and qa_exact_items:
@@ -1642,6 +1683,12 @@ def _run_mode(
         reader.gate_override = float(gate_override)
 
     handle = install_reader_hook(model, args.layer, reader, short_conv)
+    # Round-162: drop any diagnostic tensors left behind by an earlier mode in
+    # the same process.  Without this, a later mode whose hook never fires (a
+    # --ple-off arm) would report the *previous* arm's contribution norms.
+    for _stale in ("_last_reader_contribution", "_last_reader_hidden"):
+        if hasattr(model, _stale):
+            delattr(model, _stale)
 
     e_t = train_e_t
     if mode == "control":
@@ -1730,6 +1777,7 @@ def _run_mode(
                 getattr(args, "qa_chat_enable_thinking", False)
             ),
             head_mask=head_mask,
+            norm_stats=bool(getattr(args, "qa_norm_stats", False)),
         )
 
     qa_gold = None
@@ -1851,6 +1899,10 @@ def _summarize(results: list[dict], modes: list[str]) -> dict:
         "qa_fmt_scaffold_rate",
         "qa_fmt_distinct_rate",
         "qa_fmt_boolq_yes_rate",
+        "qa_norm_ratio_mean",
+        "qa_norm_ratio_median",
+        "qa_norm_ratio_p90",
+        "qa_norm_ratio_of_means",
     )
     for mode in modes:
         vals = [
@@ -2187,6 +2239,18 @@ def main() -> int:
             "model emits 9542, the spaced token, so a binary task shows 6-14 "
             "nats against 0.88 EM). Reported as *_nll_spaced; the raw reading "
             "stays the headline number so earlier rounds remain comparable"
+        ),
+    )
+    parser.add_argument(
+        "--qa-norm-stats",
+        action="store_true",
+        help=(
+            "record the injected contribution's norm relative to the backbone "
+            "hidden-state norm at the injection layer, per decoding step "
+            "(qa_norm_ratio_mean / _median / _p90 / _of_means).  Round-162 "
+            "magnitude control: a content contrast between arms whose injected "
+            "norms differ by more than ~3x is confounded by scale.  Purely "
+            "additive and off by default, so earlier rounds stay comparable"
         ),
     )
     parser.add_argument(

@@ -92,3 +92,71 @@ def test_token_level_hit_does_not_match_across_a_boundary() -> None:
         "_token_level_hit must not use substring containment; that is the "
         "round-156 bug that inflated a scaffolding arm by 33 points"
     )
+
+
+def test_gold_nll_per_chunk_body_is_inside_the_offset_loop() -> None:
+    """Every chunk must be scored, not just the last one.
+
+    Regression for f1685cf: the ``for group in groups`` refactor that kept the
+    raw and spaced gold-NLL variants in separate chunkings re-indented the
+    ``for offset in range(...)`` header one level deeper but left the 57-line
+    per-chunk body behind.  The body therefore ran once per variant group, on
+    whatever ``batch`` the loop happened to leave behind, and
+    ``--qa-gold-nll`` scored only the last ``--qa-batch-size`` items -- silently,
+    because the metrics still looked like ordinary numbers.  Every artifact on
+    the box carrying ``nll_spaced`` reported ``qa_n = 4.0`` for a 1500-item eval.
+
+    Purely static, so it catches the mistake before a GPU run rather than after:
+    the forward pass must be *inside* the offset loop.
+    """
+    tree = _parse()
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    fn = funcs.get("_qa_gold_nll")
+    assert fn is not None
+
+    offset_loops = [
+        node
+        for node in ast.walk(fn)
+        if isinstance(node, ast.For)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "offset"
+    ]
+    assert len(offset_loops) == 1, f"expected one offset loop, found {len(offset_loops)}"
+    loop = offset_loops[0]
+
+    names_in_loop = {n.id for n in ast.walk(loop) if isinstance(n, ast.Name)}
+    for required in ("ids_np", "mask_np", "batch"):
+        assert required in names_in_loop, (
+            f"{required!r} is not built inside the offset loop, so the per-chunk "
+            "body has escaped it and only one chunk will be scored"
+        )
+
+    forwards = [
+        call
+        for call in ast.walk(loop)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and call.func.attr == "no_grad"
+    ]
+    assert forwards, (
+        "the model forward is not inside the offset loop; --qa-gold-nll would "
+        "score only the final batch"
+    )
+
+
+def test_gold_nll_metric_counts_every_item() -> None:
+    """``qa_n`` must be recomputed from what was actually scored.
+
+    A guard against the same class of failure surviving a future refactor in a
+    different shape: the number of scored items must come from the answers list,
+    not from whatever a loop variable happens to hold.
+    """
+    tree = _parse()
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    fn = funcs.get("_qa_gold_nll")
+    assert fn is not None
+    source = ast.unparse(fn)
+    assert 'metrics["qa_n"] = float(len(answers))' in source.replace("'", '"'), (
+        "qa_n must be len(answers); deriving it from a loop variable is how the "
+        "f1685cf bug stayed invisible"
+    )

@@ -68,6 +68,7 @@ jobs:
           bash -n scripts/ssh_autodl.sh
           bash -n scripts/run_round152_g0_4b.sh
           bash -n scripts/round152_finish.sh
+          bash -n scripts/round162_finish.sh
 
       - name: Test
         run: uv run pytest -q

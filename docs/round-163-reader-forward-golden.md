@@ -150,6 +150,38 @@ ple_layer_index = config.ple_layer_ids.index(layer_idx + 1) if layer_idx + 1 in 
 > 一个会在缺件时 fail 的 golden、一个固定死常数的 config 断言、
 > 一个会因扰动而失败的变异守卫。
 
+### 5.1 第十一次：CI 抓到了同一个语义错误的第二个实例
+
+第一次提交 **CI 红了**（`Test` 步失败；`Lint` 与论文编译都通过）。原因不是测试写错，
+而是**我把"缺件要不要 fail"这条语义只修了一半**：
+
+CI 的 Test 步给整个 job 设了 `QWEN35_REQUIRE_GOLDEN=1`，意思是
+"**本该在仓库里的** golden 不见了 → 这次运行未经检查 → 这是失败不是跳过"。
+我却把这个"致命"助手用在了 65 MB 的 `data/official_ple_reader.pt` 上 ——
+而它被 `.gitignore:8` 忽略、**根本不在 CI 里**。于是 CI 上必然硬失败。
+
+我在**同一个文件里、相隔一个函数**的地方，刚刚才为 `config.json` 修好这条语义，
+然后没有回头把同一个判断用到旁边的 checkpoint 上。
+
+修复不是把断言删掉，而是**把两类资产在代码里分开**：
+
+| 助手 | 用于 | 缺件时（`QWEN35_REQUIRE_GOLDEN=1`） |
+|---|---|---|
+| `_require_or_skip` | **已提交**的 golden（`tests/golden/*`） | **fail** —— 运行确实未经检查 |
+| `_skip_external` | gitignore 的大资产（`.pt`、49 GB checkpoint） | **skip** —— 它在不在与检查是否接好无关 |
+
+四种组合都实测过（远端）：
+
+| 条件 | 结果 |
+|---|---|
+| 无 `.pt` + flag（= CI） | `13 passed, 3 skipped` —— **不再红** |
+| 有 `.pt` + flag | `15 passed, 1 skipped` |
+| 摘录缺失 + flag | **`1 failed`** —— 提交的 golden 仍然硬失败 |
+| 摘录缺失 + 无 flag | `14 passed, 2 skipped` |
+
+> 这一条本身就是本轮论点的第二个例证：**"我知道该怎么做"不等于"我在每一处都做了"。**
+> 唯一能兜住它的是**在 CI 的真实条件下跑一遍**，而不是再读一遍代码。
+
 ---
 
 ## 6. 复现
@@ -158,12 +190,17 @@ ple_layer_index = config.ple_layer_ids.index(layer_idx + 1) if layer_idx + 1 in 
 # 全量（torch + 官方权重存在时）
 PYTHONPATH=src QWEN35_REQUIRE_GOLDEN=1 pytest tests/test_official_reader_forward_golden.py -q
 
+# 模拟 CI（权重缺席，两个外部资产测试应当 skip 而非 fail）
+PYTHONPATH=src QWEN35_REQUIRE_GOLDEN=1 pytest tests/test_official_reader_forward_golden.py -q
+
 # 额外用真实 config.json 校验固化摘录（作者机器）
 QWEN35_OFFICIAL_CONFIG="/Volumes/My Passport/qwen38-ple/config.json" \
   PYTHONPATH=src pytest tests/test_official_reader_forward_golden.py -q
 ```
 
-远端实测：`16 passed`（含真实权重位级对拍）；全量 `189 passed, 5 skipped`。
+远端实测：有权重 `15 passed, 1 skipped`（含真实权重位级对拍）；
+模拟 CI（无权重）`13 passed, 3 skipped`；全量在两种条件下均**零失败**
+（无权重 `187 passed, 7 skipped`）。
 
 ---
 

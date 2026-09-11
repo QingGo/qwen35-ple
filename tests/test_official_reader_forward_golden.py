@@ -400,6 +400,10 @@ def test_production_constants_match_official_config() -> None:
     (``conv1d.weight`` is ``(10240, 1, 4)`` for any dilation), so it is the one
     worth checking most: it fixes both the conv dilation and the head count.
     """
+    # Committed golden: missing means the run is unchecked, so this one *does*
+    # obey QWEN35_REQUIRE_GOLDEN (unlike the 65 MB checkpoint below).
+    if not OFFICIAL_CONFIG_EXCERPT.exists():
+        _require_or_skip(f"committed config excerpt missing: {OFFICIAL_CONFIG_EXCERPT}")
     excerpt = json.loads(OFFICIAL_CONFIG_EXCERPT.read_text())
     assert excerpt["hidden_size"] == PROD_HIDDEN
     assert excerpt["hc_count"] == PROD_HC
@@ -439,14 +443,33 @@ def test_official_config_excerpt_matches_the_real_config() -> None:
 
 
 def _require_or_skip(message: str) -> None:
+    """Guard for goldens *committed to this repo* (via ``tests/golden/``).
+
+    ``QWEN35_REQUIRE_GOLDEN=1`` (set by CI for the whole test job) means "a
+    golden that should be present is missing, so this run is unchecked" -- that
+    is a failure, not a skip.  Use ``_skip_external`` instead for assets that
+    are gitignored and therefore never in CI.
+    """
     if os.environ.get("QWEN35_REQUIRE_GOLDEN") == "1":
         pytest.fail(message)
     pytest.skip(message)
 
 
+def _skip_external(path: Path, what: str) -> None:
+    """Skip when a large *external* asset is absent -- never fail.
+
+    ``data/official_ple_reader.pt`` is 65 MB and gitignored (``.gitignore:8``),
+    like the 49 GB checkpoint it is extracted from.  Those live on the authoring
+    machine and the compute box, so their absence in CI says nothing about
+    whether the check is wired up; failing on it would only teach people to
+    ignore a red run.  ``QWEN35_REQUIRE_GOLDEN`` deliberately does not apply.
+    """
+    if not path.exists():
+        pytest.skip(f"{what} not found: {path}")
+
+
 def _load_official_state() -> dict[str, torch.Tensor]:
-    if not OFFICIAL_READER_PATH.exists():
-        _require_or_skip(f"official reader checkpoint not found: {OFFICIAL_READER_PATH}")
+    _skip_external(OFFICIAL_READER_PATH, "official reader checkpoint")
     return torch.load(OFFICIAL_READER_PATH, map_location="cpu", weights_only=False)
 
 

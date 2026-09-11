@@ -3314,3 +3314,13 @@ lazy-window gate        ✅
   no-SFT 变体 → 4B 复现 → gold-NLL 重跑）正在远端推进，finisher 的
   存活性检查已确认能看见生产者进程，跑完自动关机。
 - **新增文档**：`docs/round-163-reader-forward-golden.md`。
+- **第十一次同形错误（CI 抓到）**：第一次提交 CI 红在 Test 步。原因不是测试写错，
+  而是**"缺件要不要 fail"这条语义我只修了一半**：CI 给整个 job 设
+  `QWEN35_REQUIRE_GOLDEN=1`，我却把这个"致命"助手用在被 `.gitignore` 忽略、
+  **根本不在 CI 里**的 65 MB `data/official_ple_reader.pt` 上。
+  同一个文件里相隔一个函数，我刚为 `config.json` 修好这条语义，**没有回头**用在
+  旁边的 checkpoint 上。修复是把两类资产在代码里分开：
+  `_require_or_skip`（**已提交**的 golden，缺件 → fail）vs
+  `_skip_external`（gitignore 的大资产，缺件 → skip）。四种组合都在远端实测过。
+  → **"我知道该怎么做"不等于"我在每一处都做了"；能兜住它的只有在 CI 的真实条件下
+  跑一遍，而不是再读一遍代码。**

@@ -326,8 +326,7 @@ def build_level(rows: np.ndarray, counts: np.ndarray, vocab: int,
         ctx_len = k - 1
         if key_mode == "hash" or ctx_len > 3:
             if mults is None:
-                mults = np.random.default_rng(0).integers(
-                    1, 2 ** 63, size=512, dtype=np.uint64) | np.uint64(1)
+                mults = default_mults()
             ctx_keys = ngram_hash_rows(np.ascontiguousarray(rows[:, :-1]),
                                        vocab, mults)
         else:
@@ -534,8 +533,7 @@ class NgramModel:
         self.addk = addk
         self.lookup = lookup
         self.key_mode = key_mode
-        self.mults = (np.random.default_rng(0).integers(
-            1, 2 ** 63, size=512, dtype=np.uint64) | np.uint64(1)) if key_mode == "hash" else None
+        self.mults = default_mults()
         lvl1 = levels[1]
         zeff1 = float(lvl1.zeff[0]) if lvl1.zeff.size else 1.0
         zeff1 = zeff1 if zeff1 > 0 else 1.0
@@ -715,6 +713,9 @@ class NgramModel:
         n_out = int(np.count_nonzero(cand_col[stream[positions].astype(np.int64)] < 0))
         inside = cand_col[stream[positions].astype(np.int64)] >= 0
         return {
+            "_top1_mask": top1,
+            "_top5_mask": top5,
+            "_inside_mask": inside,
             "n_positions": int(positions.shape[0]),
             "n_candidates": int(C),
             "n_targets_outside_candidates": n_out,
@@ -841,6 +842,7 @@ def budget_sweep(args, stream: np.ndarray, vocab: int, log_fn) -> Dict[str, obje
     # against the LARGEST training prefix so the eval set is identical at every
     # training size (otherwise the size comparison would be confounded)
     positions_all = np.arange(max_order - 1, eval_stream.shape[0], dtype=np.int64)
+    positions_unfiltered = positions_all.copy()
     decon = {"applied": False}
     if args.position_decon_against:
         ref = np.ascontiguousarray(stream[: max(sizes)])
@@ -875,8 +877,7 @@ def budget_sweep(args, stream: np.ndarray, vocab: int, log_fn) -> Dict[str, obje
                                         int(cand_topk.shape[0])))
 
     notes: List[str] = []
-    mults = np.random.default_rng(0).integers(1, 2 ** 63, size=512,
-                                              dtype=np.uint64) | np.uint64(1)
+    mults = default_mults()
     per_size: Dict[str, object] = {}
     for N in sizes:
         train = np.ascontiguousarray(stream[:N])
@@ -903,6 +904,7 @@ def budget_sweep(args, stream: np.ndarray, vocab: int, log_fn) -> Dict[str, obje
             M = int(arm["order"])
             base_levels = {k: full["cont{}".format(k) if k < M else "raw{}".format(k)]
                            for k in range(1, M + 1)}
+            # 1) measured byte frontier over the whole threshold grid (no scoring)
             frontier = []
             for tau in grid:
                 if tau == 1:
@@ -919,16 +921,17 @@ def budget_sweep(args, stream: np.ndarray, vocab: int, log_fn) -> Dict[str, obje
                         del pl
                 frontier.append({"min_count": tau, "bytes": b, "stored_ngrams": e})
                 gc.collect()
-            chosen = {}
+            # 2) score the points that bracket each budget, plus the unpruned table
+            need = {1}
             for bud in budgets:
-                fit = [p for p in frontier if p["bytes"] <= bud]
-                if not fit:
-                    continue
-                pick = min(fit, key=lambda p: p["min_count"])   # biggest table that fits
-                chosen.setdefault(pick["min_count"], []).append(bud)
-            chosen.setdefault(1, [])
+                below = [p for p in frontier if p["bytes"] <= bud]
+                above = [p for p in frontier if p["bytes"] > bud]
+                if below:
+                    need.add(max(below, key=lambda p: p["bytes"])["min_count"])
+                if above:
+                    need.add(min(above, key=lambda p: p["bytes"])["min_count"])
             scored = []
-            for tau, buds in sorted(chosen.items()):
+            for tau in sorted(need):
                 levels = {k: (base_levels[k] if tau == 1 else
                               prune_level(base_levels[k], tau, args.smoothing, args.addk,
                                           vocab, notes))
@@ -940,21 +943,77 @@ def budget_sweep(args, stream: np.ndarray, vocab: int, log_fn) -> Dict[str, obje
                 acc = model.accuracy(eval_stream, acc_pos, cand_topk, args.acc_chunk)
                 bytes_total = int(sum(levels[k].nbytes for k in levels))
                 ngrams = int(sum(levels[k].n_entries for k in levels))
-                scored.append({
-                    "min_count": tau, "for_budgets": [int(b) for b in buds],
-                    "bytes": bytes_total, "stored_ngrams": ngrams,
+                point = {
+                    "min_count": tau, "bytes": bytes_total, "stored_ngrams": ngrams,
                     "nll": nll, "perplexity": float(math.exp(nll)) if nll < 700 else None,
                     "top1": acc["top1"], "top5": acc["top5"],
                     "n_positions": int(pos.shape[0]),
-                })
+                }
+                if (args.sweep_raw_positions and decon.get("applied")
+                        and N == max(sizes)):
+                    lp_r, _t, pos_r, _z = model.stream_logprob(eval_stream,
+                                                               positions_unfiltered)
+                    point["nll_unfiltered_positions"] = float(-lp_r.mean())
+                    point["top1_unfiltered_positions"] = model.accuracy(
+                        eval_stream, acc_pos, cand_topk, args.acc_chunk)["top1"]
+                    point["n_positions_unfiltered"] = int(pos_r.shape[0])
+                    del lp_r, pos_r
+                scored.append(point)
                 log_fn("  arm {} tau={} bytes={:,} ngrams={:,} NLL={:.4f} top1={:.4f}".format(
                     arm["name"], tau, bytes_total, ngrams, nll, acc["top1"]))
                 del model, lp, pos
                 if tau != 1:
                     del levels
                 gc.collect()
-            size_entry["arms"][arm["name"]] = {"order": M, "lookup": arm["lookup"],
-                                               "frontier": frontier, "scored": scored}
+            size_entry["arms"][arm["name"]] = {
+                "order": M, "lookup": arm["lookup"], "frontier": frontier,
+                "scored": scored}
+        # 3) read each budget off the scored points by interpolating NLL on ln(bytes),
+        #    always reporting the two measured points that bracket it
+        for bud in budgets:
+            matched = {}
+            for arm in arms:
+                pts = sorted(size_entry["arms"][arm["name"]]["scored"],
+                             key=lambda p: p["bytes"])
+                interior = None
+                for a, b in zip(pts, pts[1:]):
+                    if a["bytes"] <= bud <= b["bytes"]:
+                        interior = (a, b)
+                        break
+                lo = [p for p in pts if p["bytes"] <= bud]
+                if interior:
+                    a, b = interior
+                    la, lb = math.log(a["bytes"]), math.log(b["bytes"])
+                    w = 0.0 if lb == la else (math.log(bud) - la) / (lb - la)
+                    nll = a["nll"] + w * (b["nll"] - a["nll"])
+                    t1 = a["top1"] + w * (b["top1"] - a["top1"])
+                    matched[arm["name"]] = {
+                        "bytes": float(bud), "nll": float(nll), "top1": float(t1),
+                        "interpolated": True,
+                        "bracket_bytes": [a["bytes"], b["bytes"]],
+                        "bracket_nll": [a["nll"], b["nll"]],
+                        "bracket_min_count": [a["min_count"], b["min_count"]],
+                    }
+                elif lo:
+                    best = max(lo, key=lambda p: p["bytes"])
+                    matched[arm["name"]] = {
+                        "bytes": best["bytes"], "nll": best["nll"], "top1": best["top1"],
+                        "min_count": best["min_count"], "interpolated": False,
+                        "caveat": "no scored point reaches the budget; this arm cannot "
+                                  "spend that many bytes",
+                    }
+            size_entry["matched"][str(int(bud))] = matched
+            base = matched.get("k3")
+            if base:
+                gaps = {}
+                for arm in arms:
+                    if arm["name"] == "k3" or arm["name"] not in matched:
+                        continue
+                    m = matched[arm["name"]]
+                    gaps["{}_minus_k3_nll".format(arm["name"])] = base["nll"] - m["nll"]
+                    gaps["{}_minus_k3_top1".format(arm["name"])] = m["top1"] - base["top1"]
+                    gaps["{}_bytes_vs_k3".format(arm["name"])] = m["bytes"] - base["bytes"]
+                size_entry["gaps"][str(int(bud))] = gaps
         # matched-bytes table + gaps versus the shortest window
         for bud in budgets:
             matched = {}
@@ -1233,6 +1292,10 @@ def main() -> int:
                          "(default: after the largest training size)")
     ap.add_argument("--eval-len", type=int, default=0)
     ap.add_argument("--sweep-acc-positions", type=int, default=10000)
+    ap.add_argument("--sweep-raw-positions", action="store_true",
+                    help="also score every chosen point on the unfiltered position "
+                         "set at the largest training size (the 64-token filter "
+                         "deletes exactly the repeats a long window can memorise)")
     ap.add_argument("--sweep-output", default=None, help="JSON path for the sweep")
     ap.add_argument("--sweep-markdown", default=None)
     ap.add_argument("--self-test", action="store_true",
@@ -2002,6 +2065,16 @@ def quality_at_bytes(curve: Sequence[Dict[str, float]], target: float,
 
 
 
+def default_mults(size: int = 512) -> np.ndarray:
+    """Deterministic odd multipliers for context hashing (fixed seed).
+
+    The table builder and the scorer must use the *same* multipliers or their
+    hashes would not agree; ``self_test`` asserts that they do.
+    """
+    return np.random.default_rng(0).integers(
+        1, 2 ** 63, size=size, dtype=np.uint64) | np.uint64(1)
+
+
 def ngram_hash_rows(rows: np.ndarray, vocab: int, mults: np.ndarray) -> np.ndarray:
     """Hash each row of a 2-D token matrix as one context key (uint64).
 
@@ -2199,8 +2272,56 @@ def self_test() -> int:
     print("[self-test] bucket edges: {}".format(ok_buckets))
     print("[self-test] verbatim hit (seen 5-gram True / unseen False): {}".format(ok_verbatim))
     print("[self-test] position decontamination: {}".format(ok_decon))
+    # 6. round-160: hashed rows must equal the model's own context hashing
+    rng2 = np.random.default_rng(7)
+    probe = rng2.integers(0, 100, size=(50, 5)).astype(np.int32)
+    mv2 = np.random.default_rng(0).integers(1, 2 ** 63, size=512, dtype=np.uint64) | np.uint64(1)
+    rows_hash = ngram_hash_rows(probe, 128, mv2)
+    probe_stream = np.concatenate([probe[0], probe[1]])
+    model_hash = NgramModel(2, {1: l1, 2: l2}, 128, "mkn", 0.1, notes,
+                            key_mode="hash")._ctx_keys(probe_stream[:6], np.array([5]), 5)
+    ok_hash = bool(np.array_equal(rows_hash[0], model_hash[0]))
+    # 7. pruning: bytes shrink, nothing below the threshold survives, still a
+    #    proper distribution (finalize_level's per-row check must not complain)
+    notes_prune: List[str] = []
+    big = build_level(np.array([[1, 5], [1, 7], [2, 3], [2, 9], [3, 4], [3, 6]],
+                               dtype=np.int32),
+                      np.array([3, 1, 2, 4, 1, 1], dtype=np.int64), 16)
+    finalize_level(big, "mkn", 0.1, 16, notes_prune)
+    small = prune_level(big, 2, "mkn", 0.1, 16, notes_prune)
+    ok_prune = (small.nbytes < big.nbytes and small.n_entries < big.n_entries
+                and int(small.counts.min()) >= 2 and not notes_prune)
+    # 8. longest-suffix lookup must differ from interpolation where a long context
+    #    is observed once but a shorter one is reliably different
+    # a long context seen once with a misleading continuation, while the shorter
+    # context is *reliably* continued by the gold token: interpolation can lean on
+    # the shorter context, longest-match cannot
+    tr2_list = []
+    for pre in (20, 21, 22, 23, 24):      # five distinct left extensions ...
+        tr2_list += [pre, 1, 2, 3, 4]     # ... so cont_4(1,2,3,4) = 5 (KN-counted)
+    tr2_list += [30, 1, 2, 3, 31]         # one long context (30,1,2,3) -> 31
+    tr2 = np.array(tr2_list, dtype=np.int32)
+    raw2, cont2 = build_counts(tr2, [1, 2, 3, 4, 5], 32)
+    lvls2 = {}
+    for k in range(1, 6):
+        uq, ct = raw2[k] if k == 5 else cont2[k]
+        lvls2[k] = build_level(uq, ct, 32)
+        finalize_level(lvls2[k], "mkn", 0.1, 32, notes)
+    q2 = np.array([30, 1, 2, 3, 4], dtype=np.int32)
+    ppos2 = np.array([4], dtype=np.int64)   # context (30,1,2,3), gold 4
+    m_i = NgramModel(5, lvls2, 32, "mkn", 0.1, notes, lookup="interpolate")
+    m_l = NgramModel(5, lvls2, 32, "mkn", 0.1, notes, lookup="longest")
+    lp_i, tl_i, _, _ = m_i.stream_logprob(q2, ppos2)
+    lp_l, tl_l, _, _ = m_l.stream_logprob(q2, ppos2)
+    ok_lookup = bool(lp_i[0] > lp_l[0] + 0.5 and int(tl_l[0]) == 5 and int(tl_i[0]) == 5)
+    print("[self-test] hashed rows == model context hash: {}".format(ok_hash))
+    print("[self-test] pruning (bytes {} -> {}, min count >= 2): {}".format(
+        big.nbytes, small.nbytes, ok_prune))
+    print("[self-test] longest lookup differs (interp ln p={:.4f} vs longest {:.4f}, "
+          "gap {:.4f} nats): {}".format(lp_i[0], lp_l[0], lp_i[0] - lp_l[0], ok_lookup))
     ok = (ok_search and abs(total - 1.0) < 1e-9 and model.floor > 0 and not notes
-          and ok_buckets and ok_verbatim and ok_decon)
+          and ok_buckets and ok_verbatim and ok_decon and ok_hash and ok_prune
+          and ok_lookup)
     print("[self-test] {}".format("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 

@@ -103,10 +103,20 @@ watch_gpu() {
   done
 }
 
+# ARMS selects a subset of the six arms (space-separated).  When a subset is
+# requested the queue is no longer the full pre-registered design, so the
+# resulting JSONs must never be reported as such; it exists to make the
+# decisive 1/2/3 + 5-or-6 comparison affordable in a secondary regime.
+ARMS="${ARMS:-wiki code stem wiki-shuf ple-off no-reader}"
+
 run_arm() {
   # run_arm <name> <corpus-tokens-npy|-> <mode> [extra flags...]
   local name="$1" corpus="$2" mode="$3"
   shift 3
+  if [[ " $ARMS " != *" $name "* ]]; then
+    log "skip arm $name (not in ARMS='$ARMS')"
+    return 0
+  fi
   local out="$OUT/arm-$name.json"
   if [[ -f "$out" ]] && grep -q '"answers"' "$out" 2>/dev/null; then
     log "skip arm $name (complete)"

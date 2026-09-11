@@ -7,7 +7,8 @@
 > `scripts/analyze_round162.py`（配对统计 + 机械判决）、`scripts/reader_contribution_similarity.py`（注入向量对照）、
 > `scripts/run_round162_reader_crosseval.sh`（操纵强度）、`scripts/run_round162_gold_rerun.sh`（gold NLL 同口径重算）、
 > `scripts/with_rusage.py`（墙钟/峰值内存）
-> 产物：`outputs/round162/*`（本地）与 `/root/autodl-tmp/qwen35-ple/outputs/round162-{0.8B,4B}/`（远端）
+> 产物：`outputs/round162/{0.8B,4B,0.8B-nosft}/`（本地，**唯一的权威副本**——
+> 远端实例在 4B 第 5 臂后断开，未拉回的远端文件已丢失，见 §8.2b / §9）
 
 ---
 
@@ -174,7 +175,10 @@ steps=500、seq-len=128、lr=1e-4、seed=0、同一 `--qa-sft-*` 配方、同一
    `nvidia-smi --query-compute-apps` 为空、GPU 0%）持有。本队列**先按规矩等待** 3600 s，
    若仍未释放则**记录后放弃锁继续**（因为本队列只需 GPU）。实际等待时间为 0 s（sibling 恰在此时结束），
    所以本轮**没有**发生并发争用；这一条只是把机制写清楚。
-2. **指标 bug（本轮发现并修复，已由上游提交为 26aa2cd）**：`scripts/run_phase0.py` 的 `_qa_gold_nll`
+2. **实例中途被停（01:44 起连接被拒）**：0.8B 六臂、4B 前四臂、以及全部需要的对照都已在断线前
+   拉回本地；4B 的 `wiki-shuf`（已 `rc=0` 但未拉回）与 `ple-off`（未跑完）随实例丢失。
+   详见 §8.2b 与 §9。**这是本轮唯一影响完整性的基础设施事件。**
+3. **指标 bug（本轮发现并修复，已由上游提交为 26aa2cd）**：`scripts/run_phase0.py` 的 `_qa_gold_nll`
    在 commit `f1685cf`（round-157b）被 `for group in groups` 重构时**缩进错位**——`for offset ...`
    的循环体（`attention_mask = ...` 起的 57 行）少缩进一级，于是**每个 variant 组只评了最后一个 chunk**。
    证据：所有带 `nll_spaced` 的产物都报 `qa_gold.metrics.qa_n = 4.0`（`--qa-batch-size 8`），
@@ -219,7 +223,7 @@ steps=500、seq-len=128、lr=1e-4、seed=0、同一 `--qa-sft-*` 配方、同一
 
 ## 3. 结果：0.8B 主实验（n=1500/臂，Qwen3.5-0.8B，fp32，层 2）
 
-### 3.1 六臂格式分布（`outputs/round162/analysis.md`）
+### 3.1 六臂格式分布（`outputs/round162/0.8B/analysis.md`）
 
 | arm | empty | chat_scaffold | code_fence | json | refusal | raw_continuation | other |
 |---|---|---|---|---|---|---|---|
@@ -330,6 +334,95 @@ steps=500、seq-len=128、lr=1e-4、seed=0、同一 `--qa-sft-*` 配方、同一
 
 ---
 
+### 3.6 4B 复现（round-156 看到效应的那个骨干）
+
+**Qwen3.5-4B，bfloat16，层 2，同一读出架构 / 同一训练预算（500 步）/ 同一提示**，
+评测集换成 `data/qa-standard/eval-600b.jsonl`（BoolQ/TriviaQA/NQ 各 200，n=600/臂），
+batch 2 / 1024 token（24GB 卡的保守设置）。选 600 条平衡子集的理由是成本：
+4B 每臂约 9–14 min。决定性对比（1/2/3 + 零注入参照）只用到前四臂。
+
+> ⚠️ **本轮的 4B 只完成 4/6 臂。** `wiki-shuf` 在 01:32:30 正常结束（`rc=0`）
+> 但在被拉回本地之前**实例就断了**（`ssh: connect ... Connection refused`，
+> 与 round-156 §5 记录的同一失败模式：实例被停）；`ple-off` 正在跑时断线、未完成。
+> 因此：
+> * **4B 的 P1（内容相关）判决不受影响**——它只用臂 1/2/3 与臂 6，四臂齐全、已落盘；
+> * **4B 的 P3（5≈6）与"臂 4 在 4B 上如何"未结算**。这两条在 0.8B 上都已逐位结算
+>   （P3：每个配对差恰好 0.0000；臂 4：见 §6.3），4B 只是缺一个冗余确认。
+> * 报告里凡写"4B"处，一律指这四臂。
+
+| arm | empty | chat_scaffold | raw | 生成 token 均值 | newline_lead | no_lead | 首个 token top3 |
+|---|---|---|---|---|---|---|---|
+| `wiki` | 0.0000 | **0.0000** | 1.0000 | 2.66 | 0.000 | 1.000 | 9405(`yes`):119, 2083(`no`):81, 760(`The`):63 |
+| `code` | 0.0000 | **0.0000** | 1.0000 | 2.58 | 0.000 | 1.000 | 9405:137, 2083:63, 760:56 |
+| `stem` | 0.0000 | **0.0017** | 0.9983 | 2.67 | 0.000 | 1.000 | 9405:122, 2083:78, 760:56 |
+| `no-reader` | 0.0000 | **0.9583** | 0.0400 | **31.23** | **0.980** | 0.000 | **271(`\n\n`):588**, 561:8, 357:2 |
+
+**逐任务脚手架率**（n=200/任务）：
+
+| arm | BoolQ | NQ | TriviaQA |
+|---|---|---|---|
+| `wiki` / `code` | 0.000 | 0.000 | 0.000 |
+| `stem` | 0.000 | 0.005 | 0.000 |
+| `no-reader` | **0.995** | **0.990** | **0.890** |
+
+**逐条配对（n=600）**：
+
+| 对比 | Δ脚手架 | SEM | McNemar 精确 p | TV(label) | TV(joint) | TV(首 token) | 首 token 相同率 |
+|---|---|---|---|---|---|---|---|
+| `wiki` vs `no-reader` | **−0.9583** | 0.0082 | **1.6e−173** | 0.9600 | 1.0000 | **1.0000** | **0.0000** |
+| `code` vs `no-reader` | −0.9583 | 0.0082 | 1.6e−173 | 0.9600 | 1.0000 | 1.0000 | 0.0000 |
+| `stem` vs `no-reader` | −0.9567 | 0.0083 | 3.2e−173 | 0.9583 | 1.0000 | 1.0000 | 0.0000 |
+| `wiki` vs `code` | +0.0000 | 0.0000 | — | **0.0000** | **0.0000** | 0.1367 | 0.8100 |
+| `wiki` vs `stem` | −0.0017 | 0.0017 | 1.0 | **0.0017** | **0.0017** | 0.1350 | 0.8200 |
+| `code` vs `stem` | −0.0017 | 0.0017 | 1.0 | **0.0017** | **0.0017** | 0.1483 | 0.7933 |
+
+**co-primary（split-half 地板 vs 1/2/3 内部最大）**：
+
+| 指标 | 1/2/3 内部最大 | 臂内 split-half 地板 | 落在噪声内 |
+|---|---|---|---|
+| `tv_label_dist` | 0.0017 | 0.0033 | ✅ |
+| `tv_prefix_dist` | 0.0000 | 0.0000 | ✅（完全相同） |
+| `tv_joint_dist` | 0.0017 | 0.0033 | ✅ |
+| `tv_first_token_dist` | 0.1483 | **0.3755** | ✅（差 2.5 倍在噪声内） |
+| 生成 token 数 | 0.09 ± 0.091 | — | ✅ |
+
+**逐字复现 round-156 的形状**（这不是统计，是字符串）：
+
+```text
+4B  no-reader（零注入）:
+  boolq    '\n\n<think>\n\n</think>\n\nYesuser\nPassage: The 1990s was a decade of significant ...'
+  boolq    '\n\n<think>\n\n</think>\n\nNouser\nPassage: The Coast Guard operates approximately 201 ...'
+  triviaqa '\n\n<think>\n\n</think>\n\nThe painting you are referring to is called **The Persistence of Memory** (1931) ...'
+4B  wiki（注入 PURE_WIKI 训练的读出器）:
+  boolq    'yes'          (gold 'yes')
+  boolq    'no'           (gold 'no')
+  triviaqa 'The Persistence of Memory'
+```
+
+`Yesuser` / `Nouser` 的粘连**逐字出现**——正是 round-156 §3 用来展示"子串 EM 虚高 33 点"的那个字符串
+（`Nouser` 含子串 `no`）。所以本轮的 4B 臂同时复现了 round-156 的**现象**与它的**指标陷阱**。
+
+**四条读数：**
+
+1. **round-156 的现象在它自己的骨干上以极大效应复现**：零注入的 4B **95.8%** 吐 chat 脚手架、
+   平均 31.2 token、98% 以 `\n\n`(271) 开头；三个注入臂一律 **0.0–0.2%** 脚手架、100% `no_lead`、
+   2.6 token。1500 条里首 token 相同率为 **0.0000**。这比 0.8B 的 19.5% → 0% 强烈得多。
+2. **方向与 round-156 一致**：零注入吐脚手架（`\n\n<think>…`），注入被压回 raw 续写。
+3. **但在 4B 上同样是内容无关的**：`wiki` vs `code` 的格式分布 TV **恰好 0.0000**；
+   `stem` 与二者差 0.0017，**小于该臂自己折半的 0.0033**。首 token TV 0.148 相对
+   split-half 地板 0.376 也完全在噪声内。方向性预测依旧失败
+   （代码标记 `code` 臂 0.0017 却是反向差、数学标记全部 0.000）。
+4. **所以"0.8B 上内容无关是因为 4B 才有聊天模板可扰动"这个反驳被直接排除**：
+   4B 上有 95.8% 的脚手架可扰动，扰动依旧与语料无关。
+   方向性预测在 4B 上同样失败：代码标记 `code>wiki` 只有 **+0.0017 ± 0.0017**（离散对 0/1，p=0.16）、
+   数学标记差 **0.0000**；只有散文标记 `wiki>code` 是 +0.0250 ± 0.0140（单侧 p=0.037，19/11）。
+
+> 残余（与 0.8B 同一条）：`wiki` > `code` 的散文/冠词标记 +0.0250 ± 0.0140（约 1.8 SEM，
+> 单侧 p≈0.037），且 `code` 臂的代码标记反而略高。方向沾边、量级微小、**不动格式**。
+> 4B 的注入臂同样贴顶在 2.6 token，所以 §7 第 3 条的"天花板"保留意见在 4B 上**依然成立**。
+
+
+
 ## 4. 幅度控制（不可谈判项）
 
 ### 4.1 参数级：`scripts/audit_reader_checkpoints.py`
@@ -345,6 +438,19 @@ audit passed: frozen tensors consistent, adapters moved
 ```
 
 **跨臂适配器范数比 0.997×–1.045×，远在 3× 阈值内**；适配器确实移动了（max |Δ| ≈ 0.02）。
+
+**4B 同样跑了这个审计**（同一命令，换 `outputs/round162-4B/`）：
+
+```text
+query_bridge.0.weight      adapter   (2560, 2560)   29.660   29.909   29.544   Δ=0.0191
+query_bridge.2.weight      adapter  (10240, 2560)   59.294   59.627   59.114   Δ=0.0187
+frozen tensors (6): 跨臂 |Δ| = 0，相对 init 漂移 = 0.00000
+[code/wiki] adapter norm ratios: 0.998x / 0.886x / 1.008x / 1.006x
+[stem/wiki] adapter norm ratios: 1.000x / 0.952x / 0.996x / 0.997x
+audit passed: frozen tensors consistent, adapters moved
+```
+
+→ 4B 的参数级幅度控制与 0.8B 同级（**0.886×–1.008×**）。
 
 ### 4.2 注入向量级：`scripts/reader_contribution_similarity.py`
 
@@ -435,6 +541,21 @@ audit passed: frozen tensors consistent, adapters moved
 3. `wiki-shuf` 的 BoolQ yes 率掉到 0.374（真行为 0.730）——乱序行确实把标签分布打歪了，
    而三臂之间 yes 率 0.730/0.726/0.714 几乎不动。
 
+**4B 侧同一张表**（round-156 的指标陷阱在它自己的骨干上复现）：
+
+| arm | `qa_em_mean`（子串） | `qa_em_token_mean` | `qa_boolq_em` | `qa_boolq_em_token` | 脚手架率 |
+|---|---|---|---|---|---|
+| `wiki` | 0.4717 | 0.4700 | 0.9000 | 0.9000 | 0.0000 |
+| `code` | 0.4733 | 0.4733 | 0.8500 | 0.8500 | 0.0000 |
+| `stem` | 0.4717 | 0.4717 | 0.8850 | 0.8850 | 0.0017 |
+| `no-reader` | **0.4800** | **0.4700** | **0.9050** | **0.8850** | **0.9600** |
+
+**脚手架臂在子串口径下"赢"了**（0.4800 > 0.4717，BoolQ 0.9050 > 0.9000），
+而 token 口径下三者并列（0.4700）；虚高集中在 BoolQ 的 `Yesuser`/`Nouser` 粘连上
+（+0.0200）。这正是 round-156 §1 那个"两个指标排序相反"的结构，
+只是本轮量级小得多（round-156 是 +10 点，本轮 +0.8 点）——因为本轮的任务/提示/读出不同。
+**结论不变**：跨臂比较**必须**用 token 级口径 + 格式指纹，两者都在这里。
+
 ### 5.2 gold NLL：口径一致性重算（承 §1.5）
 
 原始队列中 `wiki` 与 `code` 两臂跑在**修复前**的代码上（`qa_gold.metrics.qa_n = 4.0`），
@@ -487,30 +608,44 @@ f1685cf 只动了后者）。
 
 ### 6.1 一句话头条
 
-> **格式迁移是「扰动伪影」，与记忆内容无关**：在 0.8B 上层 2 注入三个语料各自训练的读出器，
-> 都把脚手架率从 0.195 压到 0.000（1500 条里没有一条共享同一个首个 token，McNemar p = 1.3e−88），
-> 而这三个读出器**注入的向量彼此只有 cos 0.73–0.76**，输出格式分布却**完全相同**
-> （TV = 0.0000，n=1500/臂；首 token 分布之差 0.083 也小于臂内折半噪声 0.259）。
+> **格式迁移是「扰动伪影」，与记忆内容无关。** 在 round-156 看到效应的那个骨干上
+> （Qwen3.5-4B，bf16，层 2），零注入的模型 **95.8%** 吐对话脚手架 `\n\n<think>…`、
+> 平均 31.2 token；注入任意一个语料训练出来的读出器都把它压到 **0.0%** 脚手架、2.6 token
+> （600 条里没有一条共享同一个首个 token，McNemar p = 1.6e−173）。与此同时
+> PURE_WIKI / PURE_CODE / PURE_STEM 三个读出器**注入的向量彼此只有 cos 0.73–0.76**，
+> 格式分布却**完全相同**（TV = 0.0000；`stem` 相差 0.0017，**小于该臂自己折半的 0.0033**）。
+> 同一结论在 0.8B + fp32 上独立复现（脚手架 0.195 → 0.000，n=1500/臂，p = 1.3e−88）。
 
 英文版（可直接进 README / paper）：
 
 ```text
-The format shift is a perturbation artifact independent of memory content: readers
-trained on PURE_WIKI, PURE_CODE and PURE_STEM inject measurably different vectors at
-layer 2 (pairwise cosine 0.73-0.76) yet produce exactly the same output-format
-distribution (total variation 0.0000 over n=1500 per arm), while training on any of
-them moves chat-scaffolding from 0.195 to 0.000.
+The format shift is a perturbation artifact independent of memory content.  On the
+backbone where the effect was first seen (Qwen3.5-4B, bf16, layer 2), zero injection
+makes the model emit chat scaffolding on 95.8% of items (mean 31.2 tokens), while
+injecting a reader trained on PURE_WIKI, PURE_CODE or PURE_STEM alike suppresses it to
+0.0% (mean 2.6 tokens; not one of the 600 items shares its first token with the
+zero-injection arm, McNemar p = 1.6e-173).  Those three readers inject measurably
+different vectors (pairwise cosine 0.73-0.76) yet produce identical output-format
+distributions (total variation 0.0000; the largest cross-corpus spread, 0.0017, is a
+single item out of 600 and sits below the split-half floor of the arm that produced it,
+0.0033).  The same null reproduces
+independently on Qwen3.5-0.8B in fp32 (scaffolding 0.195 -> 0.000, n=1500 per arm,
+p = 1.3e-88).
 ```
 
 ### 6.2 预注册条款的逐条结算
 
-| 条款 | 结果 |
-|---|---|
-| P1（内容相关先验） | **否证**。TV(label/prefix/joint) = 0.0000；首 token TV 0.083 < split-half 0.259；方向性预测全灭 |
-| P2（扰动伪影） | **成立**（但"与臂 4 不可区分"不成立，见 6.3） |
-| P3（5 ≈ 6） | **成立到逐位相同**（1500 条每个配对差恰好 0.0000，噪声地板 = 0） |
-| P4（领域词法随语料移动） | **否证**，仅存一处非预注册的散文/冠词残差（§3.5） |
-| 否证条款 | **触发**：臂 1/2/3 不可区分 → 「格式先验」读法错误，诚实结论是"注入扰动模板，内容无关" |
+| 条款 | 0.8B（n=1500） | 4B（n=600） |
+|---|---|---|
+| P1（内容相关先验） | **否证**。TV(label/prefix/joint) = 0.0000；首 token TV 0.083 < split-half 0.259；方向性预测全灭 | **否证**。TV(label/joint) ≤ 0.0017 < split-half 0.0033；首 token TV 0.148 < split-half 0.376；方向性预测全灭 |
+| P2（扰动伪影） | **成立**（但"与臂 4 不可区分"不成立，见 6.3） | **1/2/3 部分成立**；臂 4 的 4B 版本随实例丢失，未结算 |
+| P3（5 ≈ 6） | **成立到逐位相同**（1500 条每个配对差恰好 0.0000，噪声地板 = 0） | **未结算**（`ple-off` 臂断线未完成）。0.8B 上已逐位结算，故不构成结论缺口 |
+| P4（领域词法随语料移动） | **否证**，仅存一处非预注册的散文/冠词残差（§3.5） | **否证**：代码标记 0/1 离散对，数学标记差 0.0000；散文 wiki>code +0.025 ± 0.014（§3.6） |
+| 否证条款 | **触发**：臂 1/2/3 不可区分 → 「格式先验」读法错误 | **触发**，且效应量更大（0.958 vs 0.195），结论相同 |
+
+> 两个骨干、两种精度、两个评测集规模（1500 / 600）、两条独立队列，
+> 就**决定性对比 1 vs 2 vs 3** 给出**同一个否证**。这不是单点结果。
+> 4B 侧缺的两臂（`wiki-shuf`、`ple-off`）是**冗余确认**臂，不是判决臂。
 
 ### 6.3 一个必须写清楚的例外：臂 4 与臂 1/2/3 **不**可区分这个预测是错的
 
@@ -539,8 +674,10 @@ round-156 观察到「注入把 4B 从 chat 脚手架压回 raw」，并把它�
 ## 7. 什么会使本结论错
 
 1. **幅度混淆**（已排除，但口径要写死）：若臂 1/2/3 的注入范数相差 >3×，比较作废。
-   实测：参数级 0.997–1.045×（audit）、解码级 ratio_of_means 1.10×、固定提示级 0.96–1.10×。
+   实测（0.8B）：参数级 0.997–1.045×（audit）、解码级 ratio_of_means 1.10×、固定提示级 0.96–1.10×。
    若换 seed、换训练步数使范数比越界，§3 的 null 立即失效。
+   4B 的参数级审计同样通过（0.886×–1.008×，见 §4.1）；4B 的**注入向量级**对照
+   （§4.2 那个仪器）由跟随队列在 4B 完成后补跑，产物 `outputs/round162-4B/contribution-similarity.json`。
 2. **操纵没生效**（已用 §4.2 排除，但这是最强的辩护方向）：若三臂注入向量近乎共线，
    "内容无关"只是"读出器相同"的同义词。实测余弦 0.73–0.76，故不成立。
    **残余风险**：三者仍有 73% 的共享方向（很可能来自各臂完全相同的 QA-SFT 混合），
@@ -561,8 +698,11 @@ round-156 观察到「注入把 4B 从 chat 脚手架压回 raw」，并把它�
 6. **任务构成**：效应在 BoolQ 上只有 0.048，在 NQ/TriviaQA 上是 0.27。
    任何在**前 N 条**（=全是 BoolQ）上做的冒烟都会得出"效应不存在"的错误结论——
    本轮自己就先犯了一次（§3.1 的注）。若换提示集或换采样顺序，效应量会变。
-7. **骨干**：全部结论只在 **Qwen3.5-0.8B + fp32 + 层 2** 上成立。
-   round-156 的效果出现在 4B + bf16 上，两者**不是**同一个数值环境；4B 复现见 §9。
+7. **骨干与层**：结论在 **Qwen3.5-0.8B + fp32** 与 **Qwen3.5-4B + bf16** 两个骨干上都成立
+   （§3 与 §3.6），但两者都是 **`--layer 2`** 注入。
+   另外 round-163 指出官方 PLE 挂在 **0-based 第 1 层**，而本仓库主线（149/152/156/162）
+   一律 `--layer 2`（第三层）。**本轮的否证因此只覆盖层 2**；
+   层 1 的版本未被排除（也未被支持）。
 8. **是否有内容效应存在于别的读出指标上**：本轮只测了格式与领域词法。
    §3.5 的冠词差异说明内容**有**微弱影响（在答案串层面）。因此"内容无关"必须限定为
    **"对格式分布的任何一轴无影响"**，不能说成"内容完全无用"。
@@ -618,32 +758,87 @@ bash scripts/pull_round162_results.sh
 （python 进程 ~800–1140% CPU、GPU 利用率 18–26%），不是显存或算力瓶颈。
 读出器训练本身约 4–5 min/臂（500 步，含 QA-SFT 混合）。
 
-### 8.3 本轮改动的文件（树保持 dirty，未提交）
+### 8.2b 墙钟与峰值内存（4B 已完成的四臂，bf16，同卡）
 
-| 文件 | 状态 | 说明 |
-|---|---|---|
-| `scripts/run_phase0.py` | 修改 | `--qa-norm-stats`（纯新增、默认关闭）；`_qa_gold_nll` 缩进修复（已由上游提交 26aa2cd） |
-| `scripts/classify_format.py` | 新增 | 格式分类法 + 前导面 + 首 token + 领域指纹 |
-| `scripts/analyze_round162.py` | 新增 | 配对统计、split-half 地板、机械判决、markdown 表格 |
-| `scripts/run_round162_format_prior.sh` | 新增 | 六臂队列（可 `BACKBONE=` / `NO_SFT=1` / `ITEMS_FILE=` 复用） |
-| `scripts/run_round162_reader_crosseval.sh` | 新增 | 操纵强度（读出器 × 语料交叉评测） |
-| `scripts/run_round162_gold_rerun.sh` | 新增 | gold NLL 同口径重算 + 两条不变量断言 |
-| `scripts/reader_contribution_similarity.py` | 新增 | 注入向量余弦 / 相对 L2 / 范数比 |
-| `scripts/round162_followup.sh` | 新增 | 跟随队列编排 |
-| `scripts/pull_round162_results.sh` | 新增 | 拉取 + 本地分析 |
-| `scripts/with_rusage.py` | 新增 | 墙钟与峰值 RSS（本机无 `/usr/bin/time`） |
+| arm | 墙钟 | 峰值 RSS | 峰值显存 |
+|---|---|---|---|
+| `wiki` | 561.1 s | 8.78 GiB | 15 009 MiB |
+| `code` | 549.9 s | 8.78 GiB | 15 469 MiB |
+| `stem` | 563.6 s | 8.80 GiB | 15 349 MiB |
+| `no-reader` | **839.0 s** | 9.08 GiB | 14 899 MiB |
+
+零注入臂比注入臂慢 **50%**（839 s vs ~558 s），原因是它 95.8% 的条目吐满 32 token
+（注入臂 2.6 token 就停）——**"格式"在这里直接决定了推理成本**，这是本轮一个附带但真实的读数。
+4B 四臂总墙钟 **41.9 min**（00:34:08 → 01:16:02）。
+
+> **实例在 4B 第 5 臂结束后断开**（`ssh: connect to host ... Connection refused`，01:44 起，
+> 端口 40783 与旧端口 19236 均不可达）。第 5 臂（`wiki-shuf`）在断线前已 `rc=0`，
+> 但在被拉回本地前就随实例丢失；第 6 臂（`ple-off`）未完成。
+> 这不是脚本问题：队列的每一步都在 `logs/round162-4B.log` 里有时间戳，`no-reader` 已正常落盘。
+> round-156 §5 记录过同一失败模式（实例被停），本轮**再次**发生——**离开实例前必须把产物拉回**，
+> `pull_round162_results.sh` 的存在正是为此，但它没有在每一步之后自动运行。
+
+### 8.3 本轮改动的文件
+
+产物目录：`outputs/round162/{0.8B,4B,0.8B-nosft}/`（`outputs/` 被 .gitignore，不进版本库）。
+
+| 文件 | 说明 |
+|---|---|
+| `scripts/run_phase0.py` | `--qa-norm-stats`（纯新增、默认关闭）；`_qa_gold_nll` 缩进修复 |
+| `scripts/classify_format.py` | 格式分类法 + 前导面 + 首 token + 领域指纹 |
+| `scripts/analyze_round162.py` | 配对统计、split-half 地板、机械判决、markdown 表格 |
+| `scripts/run_round162_format_prior.sh` | 队列（`BACKBONE=` / `NO_SFT=1` / `ITEMS_FILE=` / `ARMS=` 复用） |
+| `scripts/run_round162_reader_crosseval.sh` | 操纵强度（读出器 × 语料交叉评测） |
+| `scripts/run_round162_gold_rerun.sh` | gold NLL 同口径重算 + 两条不变量断言 |
+| `scripts/reader_contribution_similarity.py` | 注入向量余弦 / 相对 L2 / 范数比 |
+| `scripts/round162_followup.sh` / `round162_followup2.sh` | 跟随队列编排 |
+| `scripts/pull_round162_results.sh` | 拉取 + 本地分析 |
+| `scripts/with_rusage.py` | 墙钟与峰值 RSS（本机无 `/usr/bin/time`） |
+
+> 时间线（供评审核对本文的预注册声明）：`--qa-norm-stats` 与 §0 的预注册在任何正式臂之前完成；
+> `script`/分析脚本随后；`ARMS=` 子集开关与 `round162_followup2.sh` 在实验中途加入，
+> 只影响"能否用更小成本补跑次要 regime"，**不影响任何已报告数字**。
+> 上游在实验期间把我的修复与 `--qa-norm-stats` 一并提交（26aa2cd 等），
+> 因此本报告描述的并非"仅存在于工作区的代码"。
 
 ---
 
-## 9. 未决与下一步
+## 9. 未决与下一步（本轮结束时的实际状态）
 
-* **4B 复现**（`outputs/round162-4B`，600 条平衡子集，bf16，batch 2/1024）：
-  round-156 的现象是在 4B 上看到的。0.8B 的结论是"内容无关"，4B 若**同样**内容无关，
-  则本轮的否证在两个骨干上都成立；4B 若出现内容依赖，则结论必须收紧为
-  「0.8B 上内容无关，4B 上待查」。**结果无论哪个方向都照实写。**
-  （执行顺序说明：跟随队列实际先跑了无 SFT regime 再跑 4B——队列进程在编排脚本被重排前
-  已读取旧版本；这不影响任一实验的臂内设计，只影响完成先后。）
-* **无 SFT regime**（`outputs/round162-0.8B-nosft`）：去掉答案格式训练后的决定性对比，
-  用于排除 §7 第 3 条的"贴顶"解释。
-* ~~读出器交叉评测~~：**已完成，见 §4.4，前置条件通过。**
-* ~~gold NLL 重算~~：**已完成，六臂全部 `STATUS=OK`，见 §5.3。**
+> **实例已断开**，所有未拉回的远端产物已丢失。下面逐条写明"已得到什么 / 还缺什么 / 重跑什么"。
+
+* ✅ **0.8B 主实验**：六臂齐全，`outputs/round162/0.8B/`（含 6 个 arm JSON、analysis、gold 重算、
+  交叉评测、注入向量相似度、stats、timings）。判决：**内容无关**（§3、§6）。
+* ✅ **4B 复现（决定性部分）**：四臂齐全，`outputs/round162/4B/`
+  （`wiki` / `code` / `stem` / `no-reader`，600 条平衡子集）。判决：**内容无关，且效应量更大**
+  （0.958 vs 0.195，§3.6）。
+* ✅ **操纵强度**（0.8B）：`crosseval-*.json`，三读出器各自在自己语料上最低（§4.4）——前提条件通过。
+* ✅ **幅度控制**：0.8B 三层口径（参数 / 注入向量 / 解码期）+ 4B 参数级（§4.1）；均在 3× 内。
+* ✅ **gold NLL 同口径重算**（0.8B 六臂，`STATUS=OK`，§5.3）。
+* ⚠️ **4B 的 `wiki-shuf` 与 `ple-off` 两臂丢失**（断线前未拉回）。
+  这两臂是**冗余确认**臂：P3（5≈6）已在 0.8B 上逐位结算、臂 4 的行为已在 0.8B 上量化（§6.3）。
+  重跑命令：
+  ```bash
+  BACKBONE=4B ITEMS_FILE=data/qa-standard/eval-600b.jsonl BATCH_SIZE=2 BATCH_TOKENS=1024 \
+    ARMS="wiki-shuf ple-off" bash scripts/run_round162_format_prior.sh
+  ```
+  （`ARMS=` 子集开关是本轮为此新增的；用它跑出来的产物**不是**预注册的六臂设计，报告时须标注。）
+* ⚠️ **4B 的注入向量级幅度对照**未跑（`outputs/round162-4B/contribution-similarity.json` 不存在）。
+  4B 已有参数级审计（0.886×–1.008×），但缺 §4.2 那个仪器。重跑命令见 `scripts/round162_followup2.sh` 第 0 步。
+* ⚠️ **无 SFT regime 的决定性对比未完成**。这是本轮**最重要的缺口**，因为它直接对应
+  §7 第 3 条的"天花板效应"：臂 1/2/3 在两种骨干上都贴顶在 2.5–2.7 token，
+  所以"内容无关"仍可能是"没地方表现"。
+  已得到的：`outputs/round162/0.8B-nosft/`（**只有 `wiki` 一臂**，描述性）——
+  该 regime 确实不贴顶（13.95 token、96.9% `space_lead`、散文标记 1.528），
+  但**单臂不含任何内容对比**，不能当结论用。
+  代价实测 24 min/臂（生成长 → 解码成瓶颈）。建议的重跑（约 40 min）：
+  ```bash
+  NO_SFT=1 ARMS="wiki code stem no-reader" ITEMS_FILE=data/qa-standard/eval-600b.jsonl \
+    OUTDIR=/root/autodl-tmp/qwen35-ple/outputs/round162-0.8B-nosft600 \
+    bash scripts/run_round162_format_prior.sh
+  ```
+  预注册的读数方式：只跑 §3.4/§6 的同一套机械判决（1/2/3 内部 spread vs 臂内 split-half 地板），
+  **不新增指标**。
+* ⚠️ **实例停机没有自动兜底**：round-156 §5 修的是"finisher 脱离 session"，
+  但没修"产物离机"——每一步之后自动 `pull_round162_results.sh` 才是真正的兜底。
+  这是本轮给下一条队列的直接建议。

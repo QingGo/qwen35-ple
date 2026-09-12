@@ -430,7 +430,7 @@ src/qwen35_ple/    实验编排代码（config / engine / data / train / eval / 
   live_store.py    PLE 行表懒加载（LiveETStore / LiveETDataset）
 configs/           训练与推理配置
 scripts/           一次性脚本（数据构建、表资产、评测、审计）
-docs/              169 篇文档（索引见下）
+docs/              170 篇文档（索引见下）
 tests/             35 个测试文件（golden 对拍与不变量）
 paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生成）
 ```
@@ -439,7 +439,7 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 
 ## 文档索引
 
-`docs/` 共 169 篇。**不要通读**，按主题进入：
+`docs/` 共 170 篇。**不要通读**，按主题进入：
 
 **起点（想快速了解现状）**
 
@@ -454,6 +454,7 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 | `round-165-collapse-provenance-results.md` | **把塌缩拆成两个独立损失**：答案位置的寻址**逐字节常量**（每任务 1/200 条不同行），而同一个 read-out 把有效维数 137 的输入压成 1.02 —— 前者是界的前提，后者是 read-out 缺陷 |
 | `round-165-readout-repair-preregistration.md` | round-165 的预注册：塌缩溯源级联 + 端到端 read-out 替换（含反空转对照与冻结判定规则） |
 | `round-166-unsaturated-multibackbone-preregistration.md` | **非饱和正面结果的多骨干复现**：逐字复用 round-162 的队列与判定规则，只换骨干；含 `SATURATION_NOT_LIFTED` 先决条件 |
+| `round-166-unsaturated-multibackbone-results.md` | **2B/4B 复现为 `PARTIAL`，并发现一个长度混淆**：散文标记计数随生成长度上升，raw 符号随 regime 翻转；等长校正后 2B 由 −0.68 变 +0.58（p=2.8e−13），0.8B 的 +0.69 缩水 40% |
 | `round-158-ngram-reference-frame.md` | **计数参照系：这张表必须打败的数字** |
 | `round-156-g0-nople-format-vs-content-and-metric-bugs.md` | 格式 vs 知识；两个指标 bug；关机事故复盘 |
 | `round-154-session-consolidation-and-handoff.md` | 会话交接总览 |

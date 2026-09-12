@@ -257,10 +257,37 @@
               [The table-probe numbers],
             [An offline reproduction averaged over the diagonal of a similarity matrix],
               [Unit test comparing it against the online statistic],
-              [The read-out collapse figure]
+              [The read-out collapse figure],
+            [A directional lexical contrast was never checked against generated length],
+              [Re-running the regime on two more backbones, where the length ordering inverted],
+              [The prose directional prediction and its 0.8B magnitude]
           ),
           caption: [Every case found where a claim stood because its falsifying check was not run. The column that matters is the second: in each case the durable fix was making the failure detectable, and the detection is what we kept.],
         ) <tbl-audit>
+
+    The one entry above that changed a number rather than merely exposing a bug is
+    the length confound, so it is worth stating separately. The lexical markers are
+    counts of how many distinct markers appear, which rises with generated length;
+    regressing the paired difference on the paired length difference gives the
+    contrast at equal length.
+
+    #figure(
+          table(
+            columns: 5,
+            align: center,
+            [regime], [raw contrast], [slope / token], [at equal length], [95\% CI],
+            [0.8B], [$+0.6933$], [$+0.0790$], [*$+0.4159$*], [$[+0.326, +0.506]$],
+            [2B], [$-0.6800$], [$+0.0633$], [*$+0.5832$*], [$[+0.424, +0.742]$],
+            [4B], [$-0.8467$], [$+0.0823$], [$+0.0098$], [$[-0.121, +0.141]$],
+          ),
+          caption: [
+            The Wikipedia-emits-more-prose prediction, before and after controlling
+            for generated length. The raw sign follows whichever arm generates more,
+            which at 2B and 4B is the code arm because it runs to the 32-token cap on
+            over 94\% of items; at equal length the effect is positive in all three
+            regimes, significantly so at 0.8B and 2B, and unidentifiable at 4B.
+          ],
+        )
 
     = Extended Limitations <sec-lim-ext>
 
@@ -543,7 +570,7 @@ The contrast with the zero-injection arm shows the channel is not merely inert, 
 
 == Removing the Ceiling
 
-This null has a scope, and testing it changes what the result means. On both backbones the injected arms saturate at 2.5 to 2.7 generated tokens, so "no format difference" could mean "no room for one". We therefore ran the regime that removes the saturation --- no answer-format SFT, where generated length returns to 11 to 21 tokens --- over all six arms on 600 items, so the same pre-registered rule applies without adjustment. The reader-disabled and no-reader arms are again bit-identical, giving a noise floor of exactly zero. The two halves of the rule then disagree, and the disagreement is the result. The coarse label taxonomy still reports a perturbation artifact, because the scaffold rate spans only $0.0100$ against a threshold of $0.0122$; every finer format descriptor reports content dependence. That division is why the co-primary descriptors were pre-registered alongside the taxonomy, on the stated grounds that the taxonomy can be insensitive to a real format shift. All four move outside each arm's own split-half sampling floor (leading-surface total variation $0.1433$ against a floor of $0.0237$; first-token $0.4983$ against $0.2176$), and both pre-registered directional lexical predictions hold: the code reader emits more code markers ($+0.0333$, one-sided $p = 3.9 times 10^(-4)$) and the Wikipedia reader emits far more prose markers ($+0.6933$, $p = 4.5 times 10^(-34)$), where under saturation both predictions had failed outright.
+This null has a scope, and testing it changes what the result means. On both backbones the injected arms saturate at 2.5 to 2.7 generated tokens, so "no format difference" could mean "no room for one". We therefore ran the regime that removes the saturation --- no answer-format SFT, where generated length returns to 12 to 32 tokens --- over all six arms on 600 items, and repeated it on 2B and 4B with the same pre-registered rule and the same analysis script, applied unchanged. The reader-disabled and no-reader arms are bit-identical on all three, giving a noise floor of exactly zero. The two halves of the rule then disagree, and the disagreement is the result. The coarse taxonomy reports a perturbation artifact only on 0.8B, where the scaffold rate spans $0.0100$ against a threshold of $0.0122$; it leaves that floor on 2B ($0.8200$) and 4B ($0.5167$). Every finer descriptor reports content dependence on all three: on 2B, leading-surface total variation is $0.6433$ against a split-half floor of $0.0507$, and first-token $0.6450$ against $0.1243$. Of the two pre-registered directional lexical predictions, the code reader emitting more code markers replicates on all three backbones. The prose prediction does not, and the reason is a confound.
 
 #figure(
   scope: "parent",
@@ -554,24 +581,27 @@ This null has a scope, and testing it changes what the result means. On both bac
     four format descriptors, against each arm's own split-half floor (short
     ticks). Under the standard recipe three descriptors are pinned at exactly
     zero; with the ceiling removed all four move outside their floors.
-    #emph[(b)] The pre-registered directional lexical predictions. Both were
-    refuted under saturation and both hold without it. Math markers remain
-    non-significant in both regimes, which is the expected result for a contrast
-    the corpus does not separate.
+    #emph[(b)] The pre-registered directional lexical predictions on 0.8B. Both
+    were refuted under saturation and both hold without it; the multi-backbone
+    replication in the text qualifies the prose one. Math markers are
+    non-significant in every regime, the expected result for a contrast the
+    corpus does not separate.
   ],
 )
 
-The rule, its thresholds and the co-primary descriptors were fixed in the repository before the six-arm run, and the analysis script that scores the unsaturated regime is the same one that scored the saturated regime, applied unchanged. All three directional predictions were pre-registered and all three are reported, including the one that fails in both regimes (math markers, $p = 0.16$ unsaturated, $0.84$ saturated). We apply no multiple-comparison correction across the four co-primary descriptors, and instead report each against its own arm's split-half floor, which is the stricter comparison for a single arm; across the three directional predictions we report uncorrected $p$ values, and note that a Bonferroni correction at $0.05\/3$ would leave both positive results significant.
+The marker is a count of how many distinct markers appear, not a rate, so it rises with generated length. On 2B and 4B the code and stem arms run to the 32-token cap on 94 to 99.8\% of items while the Wikipedia arm stops near 12 to 21, which reverses the comparison without invoking content at all. Regressing the paired difference on the paired length difference gives the equal-length effect: $+0.5832$ ($p = 2.8 times 10^(-13)$) on 2B, where the raw contrast was $-0.6800$, and $+0.0098$ on 4B, where it is not identifiable because so few items have comparable length. The same adjustment shrinks our published 0.8B figure from $+0.6933$ to $+0.4159$, which remains far outside noise. The original number was inflated by 40\% and that check was not run at the time.
+
+The rule, its thresholds and the co-primary descriptors were fixed before the six-arm run, and the script that scores the unsaturated regime is the one that scored the saturated regime, applied unchanged. All three directional predictions were pre-registered and all three are reported, including the math contrast that is null in every regime ($p = 0.16$ to $0.75$). Each descriptor is reported against its own arm's split-half floor rather than against a multiple-comparison correction, which is the stricter comparison for a single arm; across the directional predictions the $p$ values are uncorrected, and a Bonferroni correction at $0.05\/3$ would leave the surviving results significant.
 
 == The Layering Is What the Bound Predicts
 
-One point of setup has to be explicit, because it scopes the claim. Our tables are general corpus tables --- built from Wikipedia, code and STEM text --- and not from the evaluation passages. A table therefore cannot recall a passage it was never built from, and the zero we report is not evidence that a table built from the passage would fail. What the bound forbids is narrower and does not depend on that: at the answer position the window holds the prompt's format rather than its content, so passage content cannot be supplied through this channel whatever the table contains. The experiment that would separate the two readings --- a table built from the evaluation passages, with a question whose answer lies outside the window --- is not in this paper, and it is the first thing we would add. We also note that TriviaQA is a weak probe of this: the frozen base model is already at $0.005$ exact match, so the task cannot detect an improvement even if one existed, and a task where the base model is measurably above chance is required.
+One point of setup scopes the claim. Our tables are general corpus tables --- built from Wikipedia, code and STEM text --- not from the evaluation passages, so a table cannot recall a passage it was never built from, and the zero we report is not evidence that a table built from the passage would fail. What the bound forbids is narrower: at the answer position the window holds the prompt's format rather than its content, so passage content cannot be supplied through this channel whatever the table contains. The experiment that would separate the two readings --- a table built from the evaluation passages, with the answer outside the window --- is not in this paper, and is the first thing we would add. TriviaQA is also a weak probe: the frozen base model is already at $0.005$ exact match, so the task cannot detect an improvement even if one existed.
 
-So the correct statement is layered rather than absolute, and it is the layering the bound predicts. Suppressing the chat scaffold is content-independent --- all three readers suppress it, and they differ from each other by at most $0.01$. The rest of the output distribution is content-dependent, and that dependence *is* the trigram prior the bound allows the channel to carry: a reader trained on Wikipedia supplies Wikipedia-like surface statistics, one trained on code supplies code-like ones. What never appears, with or without the ceiling, is passage-conditioned recall --- the knowledge probes that require the passage return zero. The channel carries the corpus prior and nothing above it.
+So the correct statement is layered rather than absolute, and it is the layering the bound predicts. Suppressing the chat scaffold is content-independent --- all three readers suppress it and differ from each other by at most $0.01$. The rest of the distribution is content-dependent, and that dependence *is* the trigram prior the bound allows: a reader trained on Wikipedia supplies Wikipedia-like surface statistics, one trained on code supplies code-like ones. What never appears, with or without the ceiling, is passage-conditioned recall --- the knowledge probes that require the passage return zero. The channel carries the corpus prior and nothing above it.
 
 == How Much Prior Is Actually There
 
-The bound permits the memory to carry a corpus's rare n-gram statistics, so the useful question is how much of that prior the frozen table actually holds and how much of it the read-out recovers. We probe the raw 2560-dimensional rows directly, on held-out windows, against explicit counts on the same corpus as a reference frame. Majority-class prediction gives a floor of $0.0537$ top-1. A count bigram reaches $0.2264$ and a count trigram $0.2535$. A ridge probe on the frozen rows reaches $0.1280$; an MLP reaches $0.1502$ at its best epoch and $0.1225$ at 24 epochs, so additional training makes it worse rather than better. Shuffled-row controls collapse below the majority floor at $0.0459$ and $0.0373$. The table therefore does hold a recoverable trigram prior --- well above the floor and destroyed by shuffling --- but the read-out recovers only about 59% of what explicit counts reach.
+The bound permits the memory to carry a corpus's rare n-gram statistics, so the useful question is how much of that prior the frozen table holds and how much the read-out recovers. We probe the raw 2560-dimensional rows directly, on held-out windows, against explicit counts on the same corpus as a reference frame. Majority-class prediction gives a floor of $0.0537$ top-1; a count bigram reaches $0.2264$ and a count trigram $0.2535$. A ridge probe on the frozen rows reaches $0.1280$; an MLP reaches $0.1502$ at its best epoch and $0.1225$ at 24 epochs, so additional training makes it worse. Shuffled-row controls collapse below the floor at $0.0459$ and $0.0373$. The table does hold a recoverable trigram prior --- well above the floor and destroyed by shuffling --- but the read-out recovers only about 59% of what explicit counts reach.
 
 == The Read-Out Does Not Transmit It
 
@@ -583,7 +613,7 @@ Two explanations remain, and they are separable. The reader's arithmetic is $e_t
 
 == The Obvious Repair Does Not Pay
 
-Nor does lengthening the key. Replacing the 4-gram address with 8-token, 16-token and longest-suffix memories at matched storage ties or loses at every budget and training size on both corpora, so the short window costs nothing measurable. That the window can be widened without gain, while the corpus the table is built from cannot be changed without gain either, is the same statement twice: the channel's output is fixed by what the window already determines.
+Nor does lengthening the key. Replacing the 4-gram address with 8-token, 16-token and longest-suffix memories at matched storage ties or loses at every budget and training size, so the short window costs nothing measurable. That the window can be widened without gain, while the corpus behind the table cannot be changed without gain, is the same statement twice: the channel's output is fixed by what the window already determines.
 
 = The Logit-Correction Interface Under the Same Bound
 
@@ -603,7 +633,7 @@ Two mechanisms escape the bound, and only two: retrieval, which addresses by que
 
 = Method Audit
 
-A channel must be checked against its information-theoretic ceiling before its capacity is scaled, and a memory module must be evaluated by whether it uses memory content rather than by whether loss improves. Earlier hidden-state readers, MLP readers and direct residual injection often improved loss-like metrics and failed the real-versus-control test, and the bound explains why: a reader translating a token-keyed row into the residual stream cannot carry context the window does not determine.
+A channel must be checked against its information-theoretic ceiling before its capacity is scaled, and a memory module must be evaluated by whether it uses memory content rather than by whether loss improves. Earlier hidden-state and MLP readers often improved loss-like metrics and failed the real-versus-control test, and the bound explains why: a reader translating a token-keyed row into the residual stream cannot carry context the window does not determine.
 
 The less comfortable lesson is that a claim is only as trustworthy as the check behind it. @tbl-audit lists every case we found in which a change was made, a claim written, and the falsifying check either absent or silently skipped, with the full table in @sec-audit-app. None was found by re-reading code; each was found by making the failure detectable --- invariant assertions, regression tests that fail on the specific bug, a flag that converts a silent skip into a failure, and manifests recording a fingerprint of what was measured. Three of these were failures of the pipeline's *account of itself* rather than of the experiment --- the arm count, the items scored, and an offline reproduction that averaged over a matrix diagonal --- and in each the model's numbers were right while our description of our own artifacts was wrong. That asymmetry is why this paper reports an equivalence margin rather than a claim of identical distributions.
 
@@ -612,7 +642,7 @@ Finally, a failure that is not a mistake. Our last experiment pre-registered a p
 
 = Limitations
 
-The code results are directional rather than benchmark-scale, and the unsaturated regime that reveals the corpus's surface prior is 600 items on one backbone under a different training recipe; extending it to more backbones and larger samples is the most direct further test of the layering result, and we have not done it. The bound's rarity prediction is stated but not tested, and §3.2 shows it is not testable by corpus counting at this window scale. The conclusion is scoped to frozen-table grafts on a frozen backbone at a single mid-stack layer with a 0.8B--4B target, so co-training, learned routing, adaptive layer placement, the official layer-1 placement, and deployment trade-offs in table size and memory bandwidth are untested rather than refuted. HumanEval is public and we cannot rule out contamination of the base model's training data, and the equivalence result in §4.1 is exact agreement of empirical histograms at the sample's $1\/n$ resolution rather than proof that the underlying distributions are identical. The read-out collapse is localised in §4.7, but that localisation rests on one reader checkpoint at one layer. @sec-lim-ext lists these and the remaining limitations in full.
+The code results are directional rather than benchmark-scale, and the unsaturated regime that reveals the corpus's surface prior is 600 items on three backbones; its prose directional prediction is confounded by generated length, which the text corrects for but does not eliminate. More tasks and larger samples remain open. The bound's rarity prediction is stated but not tested, and §3.2 shows it is not testable by corpus counting at this window scale. The conclusion is scoped to frozen-table grafts on a frozen backbone at a single mid-stack layer with a 0.8B--4B target, so co-training, learned routing, adaptive layer placement, the official layer-1 placement, and deployment trade-offs in table size and memory bandwidth are untested rather than refuted. HumanEval is public and we cannot rule out contamination of the base model's training data, and the equivalence result in §4.1 is exact agreement of empirical histograms at the sample's $1\/n$ resolution rather than proof that the underlying distributions are identical. The read-out collapse is localised in §4.7, but that localisation rests on one reader checkpoint at one layer. @sec-lim-ext lists these and the remaining limitations in full.
 
 
 = Conclusion

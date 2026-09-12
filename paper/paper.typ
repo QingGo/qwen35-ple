@@ -11,7 +11,7 @@
 
     Testing that prediction, three readers differing only in the corpus behind the table --- Wikipedia, code and STEM --- write measurably different vectors (pairwise cosine 0.38 to 0.49 on 4B) and yet produce identical output distributions: total variation $0.0000$ over 1500 items on 0.8B, and on 4B a largest cross-corpus spread of one item out of 600. Removing the answer-format SFT that collapses every arm to 2.5 generated tokens reveals the other half of the bound: all four format descriptors then move outside their split-half floors, and both pre-registered directional lexical predictions hold. Suppressing the chat scaffold is content-independent; the rest of the distribution carries the corpus's surface statistics, which is the trigram prior the bound permits. Passage-conditioned recall never appears, with or without the ceiling.
 
-    Two measurements then point in different directions. A probe of the frozen table recovers about 59% of the trigram top-1 that explicit counts reach on the same corpus, and additional training makes it worse. Measured directly, the vector the reader injects has an effective dimensionality of $1.001$ over 600 prompts, against $1.480$ for the hidden state it is gated on --- the read-out is close to a constant function of its input. The design therefore fails for the bound's reason and for a read-out defect at once, and only the first of those is unfixable at a twelve-token window.
+    Two measurements then point in different directions. A probe of the frozen table recovers about 59% of the trigram top-1 that explicit counts reach on the same corpus, and additional training makes it worse. Measured directly, the vector the reader injects has an effective dimensionality of $1.001$ over 600 prompts, against $1.480$ for the hidden state it is gated on --- the read-out is close to a constant function of its input. The design therefore fails for the bound's reason and for a read-out defect at once, and only the first of those is unfixable by improving the reader.
   ],
   bibliography: bibliography("refs.bib"),
   accepted: none,
@@ -113,7 +113,7 @@
         [memory 120/240], [19.47], [0.755],
         [memory 300/600], [20.28], [0.210]
       ),
-      caption: [Sensitivity over n-gram order and memory-bank size on code continuation. The calibrated fused gain is the NLL improvement of calibrated real fusion over the base model.]
+      caption: [Sensitivity over n-gram order and memory-bank size on code continuation. Gain is the NLL improvement of calibrated real fusion over the base model; all rows are single-seed exploratory sweeps, not pre-registered comparisons.]
     )
 
     #figure(
@@ -189,7 +189,7 @@ The bound makes a sharp and testable prediction about content, and we test it on
 
 It would be a mistake to stop there, and we did not. Every arm in that experiment collapses to a two-token answer, so "no format difference" could mean "no room for one". Removing the answer-format supervision that causes the collapse changes the conclusion, and the change is the bound's other half rather than a counterexample to it: all four format descriptors move outside their split-half floors and both pre-registered directional lexical predictions hold, with the Wikipedia reader emitting far more prose markers than the code reader. The layering is exactly what the bound predicts. Suppression of the chat scaffold is content-independent --- all three readers suppress it and differ from one another by at most $0.01$ --- while the rest of the distribution carries the corpus's surface statistics. That dependence *is* the trigram prior the channel is permitted to carry. What never appears, with or without the ceiling, is passage-conditioned recall; the knowledge probes that require the passage return zero.
 
-Finally we ask how much of the permitted prior actually survives the reader, and the answer complicates the story in a way we did not expect when we began. Probing the frozen table directly shows that it does hold a recoverable trigram prior, well above the majority floor and destroyed by shuffling, but that the read-out recovers only about 59% of what explicit counts reach. Measuring the injected vector directly shows why: over 600 diverse prompts it spans effectively one dimension, against $1.480$ for the hidden state it is gated on. So the design fails for two independent reasons --- one the bound, which is not fixable at a twelve-token window, and one a read-out that has collapsed, which is. Separating them matters, because it changes what the negative result is evidence for, and we are explicit below about the limits of our ability to do so.
+Finally we ask how much of the permitted prior actually survives the reader, and the answer complicates the story in a way we did not expect when we began. Probing the frozen table directly shows that it does hold a recoverable trigram prior, well above the majority floor and destroyed by shuffling, but that the read-out recovers only about 59% of what explicit counts reach. Measuring the injected vector directly shows why: over 600 diverse prompts it spans effectively one dimension, while the query state it reads sits at $1.480$. So the design fails for two independent reasons --- one the bound, which is not fixable at a twelve-token window, and one a read-out that has collapsed, which is. Separating them matters, because it changes what the negative result is evidence for, and we are explicit below about the limits of our ability to do so.
 
 Our contributions are these.
 
@@ -233,25 +233,45 @@ LoRA @lora2022, QLoRA @qlora2023, and MoRA @mora2024 provide compact parametric 
 
 Let a context be a token sequence $c = (c_1, ..., c_t)$. We maintain sparse counts for each n-gram of order $n$:
 
-$ p_m(y | c) = "count"(c, y) / sum_y "count"(c, y). $
+$ p_m(y mid c) = "count"(c, y) / sum_y "count"(c, y). $
 
 The memory also returns the longest matched order and an external value index that can be audited. This memory is non-parametric, transparent, and can be rebuilt from any corpus.
 
 == The Bound
 
-The Engram / PLE line injects a retrieved vector into the residual stream. It is worth stating precisely what such a channel can carry, because the answer does not depend on the reader.
+The Engram / PLE line injects a retrieved vector into the residual stream. What such a channel can carry does not depend on the reader, and because the scope of the negative results below is exactly the scope of this statement, it is worth setting out with its assumptions.
 
-Let $w_t$ denote the addressing window ending at position $t$, and let the row identifier be a deterministic function of it, $a_t = A(w_t)$, so that the retrieved memory is $e_t = E(a_t)$. The contribution to the residual stream is $c_t = F(h_t, e_{t-r..t})$, where the backbone hidden state $h_t$ enters through the gate as the query and $r$ is the reach of the short causal convolution that follows the gate. In the Engram and Qwen3.8 designs the row id reads the last $n - 1$ tokens and the convolution has kernel 4 with dilation 3, so the convolution at a position reads memory rows up to nine positions back, each row itself reading two tokens further, and the window reaches eleven tokens back --- twelve tokens in all, not the two that $n = 3$ alone would suggest. Because $e_t$ is a deterministic function of the window, the data-processing inequality gives
+#emph[Setting.] Fix a token context $c = (c_1, ..., c_t)$. Write $Y$ for the *#emph[future]*: where we score a known continuation $Y$ is that continuation, and where we measure emitted text it is the completion the model goes on to produce. Let $w_t$ be the addressing window ending at $t$, $a_t = A(w_t)$ the row identifier, $e_t = E(a_t)$ the retrieved rows, $h_t$ the backbone hidden state, and
 
-$ I("future" ; e_t | h_t) <= I("future" ; w_t | h_t). $
+$ c_t = F(h_t, e_(t-r:t)) $
 
-Three consequences follow.
+the contribution added to the residual stream, where $r$ is the reach of the short causal convolution that follows the gate. Each retrieved row is keyed by an $n$-gram ending at its own position, so $r$ positions of convolutional reach plus an $n$-token key give a window of exactly
 
-First, the bound is independent of the reader. Depth, width, linearity and training budget do not appear in it, so no reader, however expressive, can exceed it. This turns our earlier failures with hidden-state readers and direct residual injection from an empirical observation into a necessary one.
+$ |w_t| = r + n = (k - 1) n + n = k n $
 
-Second, it constrains addressing rather than capacity. The memory can only supply what the window already determines and the hidden state has not retained, so no context-conditioned recall is possible when the determining information lies outside the window. For a question answered from a passage, the window at the answer position carries the prompt's format, not its content; the memory may still sharpen *how* the answer is emitted, which is the format effect we measure, but not *which* answer is correct.
+tokens for a kernel-$k$ convolution with dilation $n$. Engram and Qwen3.8-Flash-Next use $k = 4$, $n = 3$, so $|w_t| = 12$: twelve tokens, not the two an order-3 key alone implies. @sec:window measures this by execution rather than by reading a config.
 
-Third, it does not say the memory is useless. Backbone weights are a lossy compression of the training corpus, and rare n-gram statistics are among what is compressed away. The bound leaves room for precisely that, and it predicts where: gains should concentrate on rare n-grams and on continuations the window determines, and should vanish elsewhere. Two parts of that prediction we can test and do: knowledge probes that require the passage return zero, and the measurable residual is a format prior rather than content. The rarity half we cannot test, and it is worth saying why. Correlating gain with context rarity requires a count for the window n-gram, and no affordable reference corpus supplies one: over a 3.1M-token corpus, 93% of the evaluated windows have a zero count at the table's own addressing order of three, so the tertile split degenerates, and at the window scale itself essentially every twelve-gram is unique in any corpus one could count. The rarity prediction therefore remains a prediction.
+#emph[Assumption (deterministic read-out).] $A$, $E$ and $F$ are deterministic. This holds at inference in every design in the family: the only stochasticity in the graft is the sampling of $Y$ itself, which is the quantity being predicted rather than a part of the channel. Were the read-out stochastic --- inference-time dropout, or an address perturbed by noise $xi$ --- the bound still holds conditionally, $I(Y ; c_t | h_t, xi) <= I(Y ; w_t | h_t, xi)$, and marginalising over $xi$ cannot increase the left-hand side, since mutual information is convex in the channel.
+
+#emph[Theorem.] Under determinism, $I(Y ; c_t | h_t) <= I(Y ; e_(t-r:t) | h_t) <= I(Y ; w_t | h_t)$.
+
+#emph[Proof.] Conditioned on $h_t$, $c_t = F(h_t, e_(t-r:t))$ is a function of $e_(t-r:t)$ alone, so $Y -> (h_t, e_(t-r:t)) -> c_t$ is a Markov chain and the data-processing inequality gives the first bound. Each row $e_(t-j)$, $0 <= j <= r$, is $E(A(w_(t-j)))$, and $w_(t-j)$ lies inside $w_t$ because the convolution only reads rows whose keys fall within the same $k n$ tokens; so $e_(t-r:t)$ is a deterministic function of $w_t$ given $h_t$, and the second bound is the same inequality again. ∎
+
+Three consequences follow, and three qualifications, which matter at least as much.
+
+#emph[Consequence 1: the bound is independent of the reader.] Depth, width, linearity and training budget do not appear in it, so no reader, however expressive, can exceed it. This turns our earlier failures with hidden-state readers and direct residual injection from an empirical observation into a necessary one.
+
+#emph[Consequence 2: it constrains addressing, not capacity.] The memory can supply only what the window already determines and the hidden state has not retained, so no context-conditioned recall is possible when the determining information lies outside the window. For a question answered from a passage, the window at the answer position carries the prompt's format rather than its content: the memory may sharpen *#emph[how]* an answer is emitted, which is the format effect we measure, but not *#emph[which]* answer is correct.
+
+#emph[Consequence 3: it does not say the memory is useless.] Backbone weights are a lossy compression of the training corpus, and rare n-gram statistics are among what is compressed away. The bound leaves room for precisely that, and it predicts where: gains should concentrate on rare n-grams and on continuations the window determines, and vanish elsewhere. We can test two parts of that prediction and do: knowledge probes requiring the passage return zero, and the measurable residual is a format prior rather than content. The rarity half we cannot test, and it is worth saying why. Correlating gain with context rarity requires a count for the window n-gram, and no affordable reference corpus supplies one: over a 3.1M-token corpus 93% of the evaluated windows have a zero count even at the table's own addressing order of three, so a tertile split degenerates, and at the window scale essentially every twelve-gram is unique in any corpus one could count. The rarity prediction therefore remains a prediction.
+
+#emph[Qualification 1 (the bound constrains information, not effect size).] The theorem bounds what the memory can tell the model about the future. It does not bound how much the memory can change the model's behaviour, and the two come apart sharply. A contribution $c_t$ that is constant --- independent of $w_t$ given $h_t$ --- satisfies $I(Y ; c_t | h_t) = 0$ while still shifting the residual stream and therefore the output distribution. So a large, reproducible behavioural effect is no evidence against the bound, and the bound is no argument that an injection is harmless. This is exactly the regime §4.3 and §4.7 measure: the graft moves the model off its chat template on essentially every item while, on the measurements available to us, carrying almost nothing about the future.
+
+#emph[Qualification 2 (the address may depend on the state, and that does not help).] Because the bound is conditional on $h_t$, an address that also reads the hidden state does not escape it: if $a_t = A(w_t, h_t)$ then given $h_t$, $e_t$ remains a function of $w_t$, and the theorem is unchanged. What escapes the bound is addressing on information $h_t$ has *#emph[not]* retained --- retrieval over the full context, which is the complement of a lossy summary rather than a wider view of the same neighbourhood. An earlier draft of this paper claimed that any query-dependent address would relax the bound; that is wrong for the reason just given, and the correction matters for how the family is read.
+
+#emph[Qualification 3 (the bound does not compose across positions).] The theorem is per position and conditions on $h_t$, which is itself a function of everything injected before $t$. It therefore bounds what the memory adds at a position given the state it has already produced; it does not bound what the memory contributes to a sequence. A chain rule over positions would have to allow for the fact that $h_t$ is not a sufficient statistic for the past, so rows injected at $t' < t$ persist in $h_t$ and can influence tokens arbitrarily far ahead. Concretely: the per-position bound forbids the channel from introducing, at any single position, more about the future than the window determines beyond the current state, and it does not forbid accumulation across positions. The effect we measure is precisely such an accumulation, and a per-position bound of zero would not have predicted it --- which is one reason we report the format shift as a finding rather than as a puzzle for the theory.
+
+#emph[Qualification 4 (tightness).] The bound is vacuous when $I(Y ; w_t | h_t)$ is large, and for our tasks it is not zero: an explicit count trigram over the same window reaches $0.2535$ top-1 against a majority floor of $0.0537$ (§4.6), so the window's last three tokens do carry next-token information the backbone has not retained. A zero content result is therefore not by itself evidence for the bound. Separating the bound from a read-out that fails to transmit is the subject of §4.7, and we do not fully succeed.
 
 == Scope: The Family, Not One Implementation
 
@@ -259,13 +279,43 @@ The scope is the family, not one implementation. DeepSeek Engram and Qwen3.8-Fla
 
 One clarification is worth making, because it is easy to over-read. The bound is conditional on $h_t$, so an address that depends on the hidden state as well as the window does not escape it: if $a_t = A(w_t, h_t)$ then $e_t$ is still a function of $(w_t, h_t)$ given $h_t$, and $I("future" ; e_t | h_t) <= I("future" ; w_t | h_t)$ is unchanged. What escapes the bound is addressing on information that $h_t$ has *not* retained --- retrieval over the full context, which is a lossy summary's complement rather than a wider view of the same neighbourhood.
 
+== The Window, Measured <sec:window>
+
+The arithmetic above is a claim about the *#emph[executed]* code path, and this project has been wrong before about what is executed --- one audit item was a convolution believed absent that was in fact in the path (§7). So we measure the window rather than derive it. Build the official PLE layer from the official geometry, hold the query hidden state fixed, change a single input token at lag $L$, and record whether the layer's output at position $t$ moves. The support of that response is the effective receptive field; the test asserts support, not magnitude, so it is insensitive to dtype, seed and scale.
+
+#figure(
+  table(
+    columns: 5,
+    align: center,
+    [kernel $k$], [key order $n$], [conv pad $(k-1)n$], [predicted $k n$], [measured],
+    [4], [3], [9], [12], [*12*],
+    [1], [4], [0], [4], [*4*],
+    [2], [3], [3], [6], [6],
+    [4], [2], [6], [8], [8],
+    [3], [3], [6], [9], [9],
+    [4], [4], [12], [16], [16],
+  ),
+  caption: [
+    The window is the product of kernel size and key order, confirmed by
+    perturbing one token at a time and observing which output positions respond.
+    For every row, all lags inside the predicted window moved the output and all
+    lags outside it moved it by exactly zero. Rows 1 and 2 are the two production
+    geometries: kernel 4 with order-3 keys is Engram and Qwen3.8-Flash-Next, and
+    a kernel of 1 --- the convolution removed --- is the ablation that leaves
+    V4.1-Flash with the key order itself. Checked by
+    @sec:window in the project's test suite.
+  ],
+)
+
+Two readings follow. First, the twelve-token figure is a property of Engram and Qwen3.8 and not of the family: removing the convolution collapses the window to the key order, which is why V4.1-Flash's window is four rather than three-to-four times larger. We take V4.1-Flash's design from its published description and model it as that ablation; we have not run its released weights, so that row is a statement about the design as described rather than about an implementation we measured. Second, the window is architectural: it is fixed by $k$ and $n$ and does not move with the embedding-table size, which is what licenses the small-configuration tests above as evidence about production geometry.
+
 = Does Memory Content Reach the Output?
 
 We tested the bound's content prediction directly on two backbones. We train three readers that differ only in the corpus feeding the table --- Wikipedia, code and STEM text --- and graft each into the same backbone at the same layer under identical prompts. If the memory carried corpus content, the three should answer differently.
 
 == Under the Standard Recipe, They Do Not
 
-On Qwen3.5-0.8B in fp32, over 1500 items per arm, the answer-label distribution, the leading-surface distribution and their joint all differ by a total-variation distance of exactly $0.0000$, and every pre-registered directional lexical prediction fails, with zero discordant pairs for code markers. On Qwen3.5-4B in bf16 --- the backbone on which the format effect was first observed --- the same null holds over 600 items per arm: the largest cross-corpus spread is a single item, below the split-half floor of the arm that produced it. What the corpus changes is the part of the trigram statistic the backbone weights already encode, and under this recipe that part leaves no trace in the output.
+On Qwen3.5-0.8B in fp32, over 1500 items per arm, the answer-label distribution, the leading-surface distribution and their joint agree *#emph[exactly]*: the empirical total-variation distance is $0.0000$, not merely within sampling error, and every pre-registered directional lexical prediction fails, with zero discordant pairs for code markers. Exact agreement is a stronger statement than a null result, so it is worth being precise about what it does and does not establish. It rules out any difference the sample could resolve, which for a categorical histogram over $n$ items is $1\/n$ --- one item in 1500. It does not establish that the underlying distributions are identical; it establishes that the corpora are interchangeable at the resolution this evaluation has, and the equivalence margin is reported rather than assumed (see §8). On Qwen3.5-4B in bf16 --- the backbone on which the format effect was first observed --- the same null holds over 600 items per arm: the largest cross-corpus spread is a single item, below the split-half floor of the arm that produced it. What the corpus changes is the part of the trigram statistic the backbone weights already encode, and under this recipe that part leaves no trace in the output.
 
 == The Manipulation Reached the Injection Point
 
@@ -295,7 +345,11 @@ This null has a scope, and testing it changes what the result means. On both bac
   ],
 )
 
+The rule, its thresholds and the co-primary descriptors were fixed in the repository before the six-arm run, and the analysis script that scores the unsaturated regime is the same one that scored the saturated regime, applied unchanged. All three directional predictions were pre-registered and all three are reported, including the one that fails in both regimes (math markers, $p = 0.16$ unsaturated, $0.84$ saturated). We apply no multiple-comparison correction across the four co-primary descriptors, and instead report each against its own arm's split-half floor, which is the stricter comparison for a single arm; across the three directional predictions we report uncorrected $p$ values, and note that a Bonferroni correction at $0.05\/3$ would leave both positive results significant.
+
 == The Layering Is What the Bound Predicts
+
+One point of setup has to be explicit, because it scopes the claim. Our tables are general corpus tables --- built from Wikipedia, code and STEM text --- and not from the evaluation passages. A table therefore cannot recall a passage it was never built from, and the zero we report is not evidence that a table built from the passage would fail. What the bound forbids is narrower and does not depend on that: at the answer position the window holds the prompt's format rather than its content, so passage content cannot be supplied through this channel whatever the table contains. The experiment that would separate the two readings --- a table built from the evaluation passages, with a question whose answer lies outside the window --- is not in this paper, and it is the first thing we would add. We also note that TriviaQA is a weak probe of this: the frozen base model is already at $0.005$ exact match, so the task cannot detect an improvement even if one existed, and a task where the base model is measurably above chance is required.
 
 So the correct statement is layered rather than absolute, and it is the layering the bound predicts. Suppressing the chat scaffold is content-independent --- all three readers suppress it, and they differ from each other by at most $0.01$. The rest of the output distribution is content-dependent, and that dependence *is* the trigram prior the bound allows the channel to carry: a reader trained on Wikipedia supplies Wikipedia-like surface statistics, one trained on code supplies code-like ones. What never appears, with or without the ceiling, is passage-conditioned recall --- the knowledge probes that require the passage return zero. The channel carries the corpus prior and nothing above it.
 
@@ -312,9 +366,12 @@ That gap is not a small correction, and measuring the injected vector directly s
   image("figures/fig_readout_collapse.svg", width: 100%),
   caption: [
     The read-out is close to a constant function of its input.
-    #emph[(a)] Effective dimensionality (participation ratio) of the injected
-    vector, of the hidden state it is gated on, and of that hidden state after a
-    random linear map of the same shape. The random maps are the control: a
+    #emph[(a)] Effective dimensionality of the injected vector, of the hidden
+    state it is gated on, and of that hidden state after a random linear map of
+    the same shape. Participation ratio $(sum lambda)^2 \/ sum lambda^2$ over
+    $n = 600$ items; error bars on the random-map bar are one standard deviation
+    across three maps, and bootstrap 95% intervals are $[1.0012, 1.0015]$ for
+    $c_t$ and $[1.433, 1.535]$ for $h_t$. The random maps are the control: a
     generic map does not collapse the hidden state, so the collapse to $1.001$ is
     the read-out's. #emph[(b)] Share of variance in the leading direction.
     #emph[(c)] What actually moves the injected vector. Changing the prompt
@@ -322,6 +379,8 @@ That gap is not a small correction, and measuring the injected vector directly s
     item within a template moves it least of all.
   ],
 )
+
+The measurement is 600 items at the same layer and dtype as the arms. The participation ratio is $(sum lambda)^2 \/ sum lambda^2$ over the eigenvalues of the covariance of the 600 injected vectors, with 95% intervals from 2000 bootstrap resamples. It gives $1.0014$ $[1.0012, 1.0015]$ for $c_t$ against $1.480$ $[1.433, 1.535]$ for $h_t$, so the two are separated by far more than resampling error. The injected vector is also close to orthogonal to the state that produced it (mean cosine $0.04$) and its norm is $0.53 plus-minus 0.33$ against $1.33 plus-minus 0.06$ for that state --- a mean ratio of $0.40$ with a coefficient of variation of $0.62$. The collapse is therefore not a shut gate: the injection is comparable in magnitude to the state it modifies, and the gate opens onto the same direction every time.
 
 The consequence is that the content-independence we measure under the standard recipe has two candidate explanations, and our experiments separate their consequences without separating the explanations themselves: either the window has nothing to give beyond the hidden state, or the read-out does not transmit what the window has. The bound is a theorem and holds in both cases, but the second explanation is a defect rather than a limit. The table probe is the reason we do not simply attribute the whole null to the bound: an explicit count model over the same trigram reaches $0.2535$ top-1, which is above the majority floor and therefore genuine information that a better read-out could in principle transmit.
 
@@ -331,6 +390,8 @@ Nor does lengthening the key. Replacing the 4-gram address with 8-token, 16-toke
 
 = The Logit-Correction Interface Under the Same Bound
 
+Four terms recur and we use them in one sense throughout. The *#emph[reader]* is the module that turns retrieved rows into a residual contribution; its *#emph[read-out]* is the arithmetic inside it --- the projections, the gate and the short convolution --- and is what the round-16 measurements probe. The *#emph[projector]* is the logit-level analogue that produces $(alpha_t, beta_t)$, and an *#emph[adapter]* is a parametric update to the backbone. Reader and projector are two interfaces to the memory; the adapter is not a memory interface at all.
+
 The remainder of the paper concerns a second interface to the same resource. Instead of injecting the retrieved row into the residual stream, a small projector adds a per-token correction to the logits, $log p_(upright("fused"))(y) = log p_b(y) + alpha_t log p_m(y) + beta_t$, with a learned token policy deciding when the correction is active. We describe it here because reading it under the bound changes what its results are evidence for, and we report it in that light rather than as a separate contribution.
 
 The distinction between the two interfaces is real but it is not an exemption. Logit-level fusion of an n-gram memory is *also* a function of the addressing window, so the bound applies exactly as it does to the residual graft. What the projector gets is a better interface, not a larger allowance: the permitted prior is the same in both cases. The graft loses it twice, once through the read-out and again through a residual-stream bottleneck in which a single vector must be disentangled by the backbone before it can affect any logit; the logit correction loses it once, and spends it in the basis where it is used.
@@ -338,6 +399,8 @@ The distinction between the two interfaces is real but it is not an exemption. L
 == Method
 
 The projector is a small MLP $f_theta(h_t, m_t) = (alpha_t, beta_t)$ over the last hidden state and a feature vector $m_t$ carrying the matched n-gram order, base and memory entropy, the density ratio, both top-1 probabilities, memory/base agreement, and a task one-hot. Its final layer is zero-initialized so the projection begins as the identity. A logistic policy on the same features predicts whether fusion will help at the current token and disables it otherwise, which is what keeps open-ended generation from degrading. Per-task calibration supplies a scale, bias and temperature, and only projector and policy parameters are trained; the backbone and the memory table stay frozen.
+
+The policy deserves a word on its information-theoretic status, since it reads hidden states and memory features and could be mistaken for a way around the bound. It cannot be. The policy only sets $alpha_t$ and $beta_t$ to zero or leaves them alone, so the corrected distribution is either the projector's or the base model's; a gate that removes a contribution cannot add information that the contribution did not carry. Formally, $p_(upright("fused"))$ is a function of $h_t$ together with $e_t$ and the policy's own deterministic features, so the chain in §3.2 applies unchanged, and the policy's role is to *reduce* the exponent rather than to supply anything new.
 
 == What It Buys
 
@@ -357,7 +420,7 @@ The gain is confined to low-entropy local continuation, which is the region the 
   caption: [Joint system mean answer log-probability, three seeds; higher is better. RAG carries knowledge, the adapter carries arithmetic and code-output, and PLE alone carries neither. Standard deviations across seeds are below $0.012$ in every cell.]
 )
 
-The joint system separates by resource rather than by strength. RAG supplies document-level evidence and is the only component that moves the knowledge column; the parametric adapter moves arithmetic and code-output; PLE alone moves nothing, and the combination is worth roughly its best member. On HumanEval the same picture holds from the other direction: greedy #text("pass@1") is $0.22$ for the base model and $0.10$ for BM25+PLE, the two pass sets overlap on a single problem out of 50, and under sampling over 10 problems at temperature $0.8$, top-$p$ $0.9$ the ordering reverses ($0.40$ to $0.70$). Neither direction is a reliable gain, and we read both as the same statement: a token-level n-gram prior sharpens the base model's local mode rather than adding capability.
+The joint system separates by resource rather than by strength. RAG supplies document-level evidence and is the only component that moves the knowledge column; the parametric adapter moves arithmetic and code-output; PLE alone moves nothing, and adding it to the best retrieval-plus-adapter combination changes nothing on knowledge (exactly $0.000$ nats) or code-output, while costing $0.123$ nats on arithmetic. The full system is therefore not the best system on any column, which is what a memory channel that cannot carry content should look like. On HumanEval the same picture holds from the other direction: greedy #text("pass@1") is $0.22$ for the base model and $0.10$ for BM25+PLE, the two pass sets overlap on a single problem out of 50, and under sampling over 10 problems at temperature $0.8$, top-$p$ $0.9$ the ordering reverses ($0.40$ to $0.70$). Neither direction is a reliable gain, and we read both as the same statement: a token-level n-gram prior sharpens the base model's local mode rather than adding capability.
 
 Knowledge QA confirms the boundary. On 200 TriviaQA RC validation examples the frozen 0.8B model reaches exact match $0.005$, and PLE does not move it, because the required knowledge is not in local n-gram continuations. Training-free baselines behave the same way: NGM leaves the distribution essentially unchanged, and kNN-LM raises #text("hit@1") from $0.505$ to $0.540$ while worsening NLL from $2.633$ to $2.847$ on the same evaluation set. An external LLM judge agrees with the pass-based metrics (mean score $0.60$ for base against $0.20$ for BM25+PLE on HumanEval 50, with a parallel API rerun differing by up to $0.20$, so we treat it as secondary evidence). Full per-condition tables, the sensitivity sweep over n-gram order and memory-bank size, the algorithm listings, and the system figures are in the appendix.
 
@@ -379,13 +442,56 @@ Two mechanisms escape the bound, and only two: retrieval, which addresses by que
 
 Fixed calibration selects one scale and bias for all tokens. A learned projector varies the trust it places in memory by context, using a large positive scale on code and a near-zero scale on ambiguous open-ended text. That is what the improvement over fixed calibration measures, and it is a statement about the interface rather than about the memory's content, which is bounded in both cases.
 
-= A Note on Method
+= Method Audit
 
 Two lessons from this project bear on how the results should be read.
 
 The first is that a channel must be checked against its information-theoretic ceiling before its capacity is scaled, and a memory module must be evaluated by whether it uses memory content rather than by whether loss improves. Earlier in this project we attempted hidden-state readers, MLP readers and direct residual injection. These approaches often improved loss-like metrics but failed the real-versus-control test, and the bound explains why they had to: a reader translating a token-keyed row into the residual stream cannot carry context the window does not determine, so the real and control arms converge once the reader is well trained.
 
-The second is less comfortable. Ten times in this project a change was made, a claim was written, and the check that would have falsified the claim either did not exist or silently skipped, so the claim stood unexamined. A runtime used a different row-identifier implementation than the one that had been proved correct. A convolution believed absent was in the executed path. A loop body was indented such that a metric scored four items instead of 1500. Four golden tests were skipping rather than passing on the machine that produced every number. And the forward pass of the reader underlying every graft measurement had never been compared to the official mathematics it claimed to reuse, which we finally did: they agree bit-for-bit, which is the outcome that makes the rest of this paper readable rather than a cautionary tale. None of these were found by re-reading code. Each was found by making the failure detectable --- invariant assertions, regression tests that fail on the specific bug, a flag that converts a silent skip into a failure, and manifests recording a fingerprint of what was actually measured. In every case the durable fix was the detection mechanism, not the correction. A further two mistakes of the same family, a constant copied from the wrong fixture and a skip flag applied to an asset that is not in the repository, were caught within minutes once the checks were real; the difference between the two families is the whole lesson.
+The second is less comfortable. A change was made, a claim was written, and the check that would have falsified the claim either did not exist or silently skipped, so the claim stood unexamined. @tbl-audit lists every such case we found, how it was finally caught, and which claim it put at risk. None of them was found by re-reading code. Each was found by making the failure detectable --- invariant assertions, regression tests that fail on the specific bug, a flag that converts a silent skip into a failure, and manifests recording a fingerprint of what was actually measured. In every case the durable fix was the detection mechanism rather than the correction, which is why we report the detection column and not only the fix.
+
+#figure(
+  scope: "parent",
+  table(
+    columns: (2.15in, 2.25in, 2.35in),
+    align: (left, left, left),
+    inset: 4pt,
+    table.header([*Unrun or skipped check*], [*How it surfaced*], [*Claim it put at risk*]),
+    [Row-identifier implementation differed from the proved-correct one],
+      [Cross-repo golden against two independent implementations],
+      [Every addressing claim],
+    [A convolution believed absent was in the executed path],
+      [Receptive-field measurement of the real layer (@sec:window)],
+      [The twelve-token window],
+    [A loop body was indented so a metric scored 4 items, not 1500],
+      [Item-count fingerprint in the result manifest],
+      [The 0.8B saturated null],
+    [Four golden tests were skipping, not passing, on the compute box],
+      [Environment flag converting a silent skip into a failure],
+      [Every graft measurement],
+    [The reader's forward had never been compared to the official mathematics],
+      [Bit-exact golden at production geometry; they agree exactly],
+      [Every graft conclusion],
+    [A constant was copied from the wrong fixture ($10^(-5)$ against $10^(-6)$)],
+      [The new golden test failed on first run],
+      [Nothing --- caught before use],
+    [A skip flag was applied to a 65 MB asset absent from the repository],
+      [CI went red],
+      [Nothing --- caught before use],
+    [A scheduled shutdown interrupted a queue with two arms on the data disk],
+      [Manifest whose arm count disagreed with the log],
+      [The 4B arm count, recovered on restart],
+    [A gold-NLL metric scored only the last batch],
+      [$n$-items-scored against the requested count],
+      [The table-probe numbers],
+    [An offline reproduction averaged over the diagonal of a similarity matrix],
+      [Unit test comparing it against the online statistic],
+      [The read-out collapse figure]
+  ),
+  caption: [Every case found where a claim stood because its falsifying check was not run. The column that matters is the second: in each case the durable fix was making the failure detectable, and the detection is what we kept.],
+) <tbl-audit>
+
+The pattern is worth naming, because it recurred at the end of this work as well. Three of these were failures of the *pipeline's account of itself* rather than of the experiment: the arm count, the items scored, and the offline reproduction. In each case the model's numbers were right and our description of our own artifacts was wrong. That asymmetry --- the measurements held up, the bookkeeping did not --- is the reason this paper reports an equivalence margin rather than a claim of identical distributions, and why the number of seeds is stated per table rather than assumed.
 
 A third observation is about failure that is not a mistake. Our final experiment pre-registered a prediction --- that the injected vector would be more nearly constant for a task whose addressing window is mostly a fixed instruction suffix than for tasks whose windows carry query text --- and the prediction was wrong. Within-task similarity came out at $0.9994$ and $0.9992$, a difference of $+0.0002$ that a permutation test over task labels declined to distinguish from noise ($p = 0.27$). What fixing the statistic and its refutation condition in advance bought us was not protection from a wrong result. It is that the wrong result is legible: because the rule could not be adjusted afterwards, the failure pointed straight at the near-constant read-out, which is a stronger finding than the prediction would have been. A full account of the audit, including the complete list of unrun checks, is in the project repository.
 
@@ -400,6 +506,11 @@ A third observation is about failure that is not a mistake. Our final experiment
 + The reader-fidelity check covers the read-out, not the addressing: we verify that our reader reproduces the official mathematics bit-for-bit at production geometry, but the table itself is accessed through our own row-identifier implementation, which is separately pinned against two independent implementations.
 + The official Qwen3.8 model attaches its memory layer at 0-based layer 1, while our grafts inject at layer 2. The bound is a property of the reader's input-output map and is layer-independent, so the results above are unaffected, but the layer-1 configuration is untested rather than refuted.
 + Co-training the table with the backbone --- the configuration all three production systems use, and the one most likely to change the value of the channel within the bound --- is not tested here, at this scale.
++ The equivalence result in §4.1 is an exact agreement of empirical histograms over 1500 and 600 items, which rules out differences the sample can resolve --- one item in $n$ --- and does not establish that the underlying distributions are identical. The equivalence margin is the sampling resolution, not a confidence interval on a difference.
++ The conclusion is scoped to frozen-table grafts onto a frozen backbone, injected at a single mid-stack layer, with a table of production size but a target model of 0.8B to 4B. We do not test co-training, learned routing, adaptive layer placement, or the memory-to-compute ratios the production systems use, and the bound is a statement about the channel rather than a prediction that those configurations are worthless.
++ Table size, memory bandwidth and serving cost are not evaluated here. The table we access is 47.7 GiB on disk; inference cost is dominated by row fetch rather than by arithmetic, and every arm in this paper is read from a local disk with no latency budget. Deployment trade-offs are therefore not addressed.
++ HumanEval is a public benchmark and we cannot rule out contamination of the base model's training data. The base model solves 11 of 50 problems greedily; if some of those are memorised, the comparison against BM25+PLE is affected in an unknown direction, which is a further reason we treat the code results as directional.
++ All experiments ran on a single NVIDIA RTX 4090 with 24 GiB and an AutoDL instance whose data disk held the table; software versions, container definitions, seeds, per-arm manifests and the analysis scripts are recorded with each result file, and the released bundle carries the raw evaluation outputs rather than summaries.
 + The bound is elementary --- a data-processing inequality --- and we do not claim otherwise. Its value is in the window arithmetic it forces on a family that three production systems scaled without writing it down, and in the experiment that tests its content prediction.
 + Public projector and adapter weights are available on Hugging Face, but the upstream Qwen model weights themselves are not redistributed. CPU deployment throughput is about $2$ tok/s with the current unoptimized eager implementation.
 

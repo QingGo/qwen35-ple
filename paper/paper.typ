@@ -284,6 +284,107 @@
     + A method is considered useful only if it outperforms the control memory by a meaningful margin.
     + All projector results in the paper are paired across identical evaluation rows.
 
+    = The Read-Out Collapse, Localised <sec-collapse-app>
+
+    §4.7 reports that the injected vector $c_t$ has an effective dimensionality of
+    $1.001$ while the hidden state it is gated on sits at $1.480$, and that the
+    argument for calling this a read-out defect rested on a random map of $h_t$.
+    That control bounds the measurement, not the explanation: the read-out's input
+    is $(h_t, e_t)$, and a faithful read-out fed a constant $e_t$ would emit a
+    constant too. Measuring the ladder at several positions back from the answer
+    position varies $e_t$ and so separates the two.
+
+    Each stage is the reader's own arithmetic, captured by forward hooks on
+    `value_proj` and `out_proj`; the effective dimensionality is the participation
+    ratio over the 600 evaluation items, and $cos("real", "shuf")$ is the per-item
+    cosine between the real and row-permuted conditions using the same permutation
+    as the control arms.
+
+    #figure(
+      scope: "parent",
+      image("figures/fig_readout_collapse.svg", width: 100%),
+      caption: [
+        The read-out is close to a constant function of its input, which the
+        ladder below localises. #emph[(a)] Effective dimensionality of the
+        injected vector, of the hidden state it is gated on, and of that hidden
+        state after a random linear map of the same shape. Participation ratio
+        $(sum lambda)^2 \/ sum lambda^2$ over $n = 600$ items; error bars on the
+        random-map bar are one standard deviation across three maps, and bootstrap
+        95% intervals are $[1.0012, 1.0015]$ for $c_t$ and $[1.433, 1.535]$ for
+        $h_t$. #emph[(b)] Share of variance in the leading direction.
+        #emph[(c)] What actually moves the injected vector.
+      ],
+    )
+
+    #figure(
+          table(
+            columns: 6,
+            align: center,
+            [offset], [stage], [dim], [PR], [dup.\ rows], [$cos("real", "shuf")$],
+            [0], [$e_t$], [2560], [1.000], [99.7%], [0.102],
+            [0], [value proj], [2560], [1.000], [98.7%], [0.357],
+            [0], [branch sum], [2560], [1.208], [0.0%], [0.619],
+            [0], [$c_t$], [1024], [*1.001*], [0.0%], [*0.9966*],
+            [0], [$h_t$], [1024], [1.480], [0.0%], [---],
+            [12], [$e_t$], [2560], [*28.250*], [27.0%], [0.081],
+            [12], [value proj], [2560], [14.387], [26.2%], [0.315],
+            [12], [branch sum], [2560], [2.676], [24.5%], [0.711],
+            [12], [$c_t$], [1024], [*1.019*], [24.5%], [*0.9958*],
+            [12], [$h_t$], [1024], [3.717], [24.5%], [---],
+            [40], [$e_t$], [2560], [3.379], [66.5%], [0.050],
+            [40], [value proj], [2560], [2.521], [66.2%], [0.168],
+            [40], [branch sum], [2560], [1.034], [65.7%], [0.358],
+            [40], [$c_t$], [1024], [*1.012*], [65.7%], [*0.9927*],
+            [40], [$h_t$], [1024], [2.453], [65.7%], [---],
+          ),
+          caption: [
+            The collapse is inherited from the addressing at the answer position
+            and produced by the read-out everywhere else. At offset 0 every one of
+            the 600 items addresses a byte-identical row, because all three prompt
+            templates end in the same trigram, so a perfect read-out would still
+            emit a constant. At offset 12 the addressed row is item-specific
+            ($190$ of $200$ BoolQ rows distinct, PR $136.7$) and the same read-out
+            still emits PR $1.02$. Offset 40 is meaningful for BoolQ only: the NQ
+            and TriviaQA prompts are shorter than $40$ tokens, so those rows are
+            clamped to position 0.
+          ],
+        )
+
+    Per task at the two informative offsets, addressed rows distinct out of 200
+    and the resulting $c_t$:
+
+    #figure(
+          table(
+            columns: 4,
+            align: center,
+            [offset], [task], [$e_t$ distinct], [$c_t$ PR],
+            [0], [BoolQ], [1], [1.158],
+            [0], [NQ], [1], [1.001],
+            [0], [TriviaQA], [1], [1.009],
+            [12], [BoolQ], [190], [1.020],
+            [12], [TriviaQA], [172], [1.015],
+            [12], [NQ], [79], [1.030],
+            [40], [BoolQ], [198], [1.011],
+          ),
+          caption: [
+            Where the addressing is degenerate, so is the injection; where the
+            addressing is rich, the injection is still degenerate.
+          ],
+        )
+
+    Two caveats. A participation ratio measures how many directions the variation
+    spreads over, not how much information is present, so every claim here is about
+    the shape of the variation rather than its quantity. And offset 12 is a
+    different position from the one the arms read: it is used to characterise the
+    read-out as a function, not to claim the arms read there.
+
+
+    #v(0.6em)
+    #strong[Acknowledgement.] We thank the open-source community for the PLE/Engram, Qwen, and related memory infrastructure used in this study. This work was carried out as an independent low-resource research project.
+
+    #v(0.4em)
+    #strong[Data Availability.] All source code, evaluation scripts, container definitions, evaluation cards, and checksums are publicly available in the project repository and in the Hugging Face artifact repository. The released artifact bundle includes PLE projector checkpoints, Purified OPSD MoRA adapters, projector datasets, configurations, and the raw evaluation result files, including the per-item injected vectors behind the read-out measurement. The PLE memory tables can be rebuilt from the published corpus construction scripts, and upstream Qwen model weights are not redistributed.
+
 
   ],
 )
@@ -370,7 +471,7 @@ Three consequences follow, and four qualifications, which matter at least as muc
 
 #emph[Qualification 3 (it does not compose across positions).] The theorem is per position and conditions on $h_t$, which is itself a function of everything injected before $t$. It bounds what the memory adds at a position given the state it has already produced; it does not bound what it contributes to a sequence. $h_t$ is not a sufficient statistic for the past, so rows injected at $t' < t$ persist in $h_t$ and can influence tokens arbitrarily far ahead: the per-position bound forbids per-position excess, not accumulation. The effect we measure is such an accumulation, and a per-position bound of zero would not have predicted it.
 
-#emph[Qualification 4 (tightness).] The bound is vacuous when $I(Y ; w_t | h_t)$ is large, and for our tasks it is not zero: an explicit count trigram over the same window reaches $0.2535$ top-1 against a majority floor of $0.0537$ (§4.6). A zero content result is therefore not by itself evidence for the bound; separating the bound from a read-out that fails to transmit is §4.7, and we do not fully succeed.
+#emph[Qualification 4 (tightness).] The bound is vacuous when $I(Y ; w_t | h_t)$ is large, and how large it is depends on where in the prompt the window sits. On content-bearing windows it is not zero: an explicit count trigram over such a window reaches $0.2535$ top-1 against a majority floor of $0.0537$ (§4.6). At the answer position, where the arms actually read and where every prompt ends in the same template trigram, the addressed row is byte-identical across items, so the right-hand side is zero there and the bound is tight rather than vacuous. A zero content result at that position is therefore forced by the premise; it is not by itself evidence that a read-out could not have transmitted something, and §4.7 separates the two losses.
 
 
 == Scope: The Family, Not One Implementation
@@ -439,28 +540,9 @@ The bound permits the memory to carry a corpus's rare n-gram statistics, so the 
 
 That gap is not a small correction, and measuring the injected vector directly shows how large it is. Over 600 diverse prompts the vector the reader adds to the residual stream has an effective dimensionality of $1.001$: $99.93\%$ of its variance lies in a single direction, and two prompts are separated by about two degrees. The hidden state the reader is gated on sits at $1.480$, with $81.9\%$ in its leading direction. A generic linear map does not do this --- three random maps of the same shape leave the hidden state's ratio at $1.454$, $1.472$ and $1.485$ --- and replacing the retrieved rows with permuted ones, at the same checkpoint, moves the injected direction by only about five degrees.
 
-#figure(
-  scope: "parent",
-  image("figures/fig_readout_collapse.svg", width: 100%),
-  caption: [
-    The read-out is close to a constant function of its input.
-    #emph[(a)] Effective dimensionality of the injected vector, of the hidden
-    state it is gated on, and of that hidden state after a random linear map of
-    the same shape. Participation ratio $(sum lambda)^2 \/ sum lambda^2$ over
-    $n = 600$ items; error bars on the random-map bar are one standard deviation
-    across three maps, and bootstrap 95% intervals are $[1.0012, 1.0015]$ for
-    $c_t$ and $[1.433, 1.535]$ for $h_t$. The random maps are the control: a
-    generic map does not collapse the hidden state, so the collapse to $1.001$ is
-    the read-out's. #emph[(b)] Share of variance in the leading direction.
-    #emph[(c)] What actually moves the injected vector. Changing the prompt
-    template moves it further than permuting the retrieved rows, and changing the
-    item within a template moves it least of all.
-  ],
-)
-
 The measurement is 600 items at the same layer and dtype as the arms. The participation ratio is $(sum lambda)^2 \/ sum lambda^2$ over the eigenvalues of the covariance of the 600 injected vectors, with 95% intervals from 2000 bootstrap resamples. It gives $1.0014$ $[1.0012, 1.0015]$ for $c_t$ against $1.480$ $[1.433, 1.535]$ for $h_t$, so the two are separated by far more than resampling error. The injected vector is also close to orthogonal to the state that produced it (mean cosine $0.04$) and its norm is $0.53 plus-minus 0.33$ against $1.33 plus-minus 0.06$ for that state --- a mean ratio of $0.40$ with a coefficient of variation of $0.62$. The collapse is therefore not a shut gate: the injection is comparable in magnitude to the state it modifies, and the gate opens onto the same direction every time.
 
-The consequence is that the content-independence we measure under the standard recipe has two candidate explanations, and our experiments separate their consequences without separating the explanations themselves: either the window has nothing to give beyond the hidden state, or the read-out does not transmit what the window has. The bound is a theorem and holds in both cases, but the second explanation is a defect rather than a limit. The table probe is the reason we do not simply attribute the whole null to the bound: an explicit count model over the same trigram reaches $0.2535$ top-1, which is above the majority floor and therefore genuine information that a better read-out could in principle transmit.
+Two explanations remain, and they are separable. The reader's arithmetic is $e_t -> "value proj" -> "branch sum" -> c_t$, and measuring it at positions further back varies its input. At the answer position the addressed row is not merely similar across items but byte-identical: all 200 items of each task address the same row, because every prompt ends in the same template trigram, so the bound's right-hand side is zero there and the null is forced by its premise. Twelve tokens back, the same read-out is fed a genuinely item-specific row --- $190$ of $200$ distinct, effective dimensionality $136.7$ --- and still emits $1.02$, discarding about $99.3\%$ of the effective dimensionality available to it: a factor of ten in the gate and value path, a further factor of three in the output projection. Appendix J gives the ladder and the figure. This also corrects the argument above, since the random-linear-map control maps the hidden state and never the addressed row.
 
 == The Obvious Repair Does Not Pay
 
@@ -470,52 +552,37 @@ Nor does lengthening the key. Replacing the 4-gram address with 8-token, 16-toke
 
 Four terms recur and we use them in one sense throughout. The *#emph[reader]* is the module that turns retrieved rows into a residual contribution; its *#emph[read-out]* is the arithmetic inside it --- the projections, the gate and the short convolution --- and is what our probes measure. The *#emph[projector]* is the logit-level analogue that produces $(alpha_t, beta_t)$, and an *#emph[adapter]* is a parametric update to the backbone. Reader and projector are two interfaces to the memory; the adapter is not a memory interface at all.
 
-The second interface replaces residual injection with a per-token logit correction, $log p_(upright("fused"))(y) = log p_b(y) + alpha_t log p_m(y) + beta_t$, gated by a learned token policy. We report it here because reading it under the bound changes what its results are evidence for. It is not an exemption: logit-level fusion of an n-gram memory is *also* a function of the addressing window, so the bound applies exactly as it does to the residual graft, and the permitted prior is the same in both cases. What the projector gets is a better interface, not a larger allowance. The graft loses that prior twice --- once through the read-out, and again through a residual bottleneck in which a single vector must be disentangled by the backbone before it can affect any logit --- while the logit correction loses it once, and spends it in the basis where it is used. @sec-sys-method gives the method, the policy's information-theoretic status, and the algorithm listings.
+The second interface replaces residual injection with a per-token logit correction, $log p_(upright("fused"))(y) = log p_b(y) + alpha_t log p_m(y) + beta_t$, gated by a learned token policy. It is not an exemption: logit-level fusion of an n-gram memory is *also* a function of the addressing window, so the bound applies exactly as it does to the residual graft, and the permitted prior is the same in both cases. What the projector gets is a better interface, not a larger allowance. The graft loses that prior twice --- once through the read-out, and again through a residual bottleneck --- while the logit correction loses it once, and spends it in the basis where it is used. @sec-sys-method gives the method and the algorithm listings.
 
-The gain is confined to low-entropy local continuation, which is the region the bound leaves open, and it scales with projector training data: on code continuation the projector beats fixed calibration by $+0.1044$ nats over 100 samples (bootstrap 95% CI $[0.0251, 0.1866]$) and by $+0.2249$ at 10k (CI $[0.1436, 0.3255]$), with all five seeds positive at 10k. The joint system separates by resource rather than by strength (@sec-sys-results): RAG is the only component that moves the knowledge column, the adapter moves arithmetic and code-output, PLE alone moves nothing, and adding it to the best retrieval-plus-adapter combination changes nothing on knowledge or code-output while costing $0.123$ nats on arithmetic. On HumanEval greedy #text("pass@1") is $0.22$ for the base model against $0.10$ for BM25+PLE and the ordering reverses under sampling ($0.40$ to $0.70$); neither direction is a reliable gain, and knowledge QA confirms the boundary at TriviaQA's $0.005$. We read all of it as one statement: a token-level n-gram prior sharpens the base model's local mode rather than adding capability.
+The gain is confined to low-entropy local continuation --- the region the bound leaves open --- and scales with projector training data: $+0.1044$ nats over 100 samples (95% CI $[0.0251, 0.1866]$), $+0.2249$ at 10k (CI $[0.1436, 0.3255]$), all five seeds positive. Beyond that the joint system separates by resource rather than by strength (@sec-sys-results): adding PLE to the best retrieval-plus-adapter combination changes nothing on knowledge or code-output while costing $0.123$ nats on arithmetic. On HumanEval neither ordering survives sampling. A token-level n-gram prior sharpens the base model's local mode rather than adding capability.
 
 
 = Analysis
 
 The channel helps where the true next token is highly predictable from local n-grams --- code, identifiers, repeated structural patterns, name-like continuations --- which is exactly the region the bound leaves open, and it fails where the answer needs world knowledge or long-range reasoning, which is why TriviaQA sits at $0.005$ and why unconditional fusion degrades open-ended generation without the policy. For token-keyed memory that failure is necessary rather than contingent.
 
-Two mechanisms escape the bound, and only two: retrieval, which addresses by query rather than by a fixed window, and parametric adapters, which are not a memory channel at all. PLE, RAG and adapters are therefore not three points on one axis of strength but three interfaces to three resources, and only the first is bounded as this paper describes. That reading holds against our own numbers: the projector's gain is confined to low-entropy local continuation and is absent on knowledge tasks. Within it, a learned projector beats fixed calibration because it varies how much it trusts memory by context, which is a statement about the interface rather than about content, since the content is bounded either way.
+Two mechanisms escape the bound, and only two: retrieval, which addresses by query rather than by a fixed window, and parametric adapters, which are not a memory channel at all. PLE, RAG and adapters are therefore not three points on one axis of strength but three interfaces to three resources, and only the first is bounded as this paper describes. That reading holds against our own numbers: the projector's gain is confined to low-entropy local continuation and is absent on knowledge tasks.
 
 
 = Method Audit
 
 A channel must be checked against its information-theoretic ceiling before its capacity is scaled, and a memory module must be evaluated by whether it uses memory content rather than by whether loss improves. Earlier hidden-state readers, MLP readers and direct residual injection often improved loss-like metrics and failed the real-versus-control test, and the bound explains why: a reader translating a token-keyed row into the residual stream cannot carry context the window does not determine.
 
-The less comfortable lesson is that a claim is only as trustworthy as the check behind it. @tbl-audit lists every case we found in which a change was made, a claim written, and the falsifying check either absent or silently skipped, with the full table in @sec-audit-app. None was found by re-reading code; each was found by making the failure detectable --- invariant assertions, regression tests that fail on the specific bug, a flag that converts a silent skip into a failure, and manifests recording a fingerprint of what was measured. The durable fix was always the detection mechanism rather than the correction, which is why we report the detection column and not only the fix. Three of these were failures of the pipeline's *account of itself* rather than of the experiment --- the arm count, the items scored, and an offline reproduction that averaged over a matrix diagonal --- and in each the model's numbers were right while our description of our own artifacts was wrong. That asymmetry is why this paper reports an equivalence margin rather than a claim of identical distributions.
+The less comfortable lesson is that a claim is only as trustworthy as the check behind it. @tbl-audit lists every case we found in which a change was made, a claim written, and the falsifying check either absent or silently skipped, with the full table in @sec-audit-app. None was found by re-reading code; each was found by making the failure detectable --- invariant assertions, regression tests that fail on the specific bug, a flag that converts a silent skip into a failure, and manifests recording a fingerprint of what was measured. Three of these were failures of the pipeline's *account of itself* rather than of the experiment --- the arm count, the items scored, and an offline reproduction that averaged over a matrix diagonal --- and in each the model's numbers were right while our description of our own artifacts was wrong. That asymmetry is why this paper reports an equivalence margin rather than a claim of identical distributions.
 
-Finally, a failure that is not a mistake. Our last experiment pre-registered a prediction --- that the injected vector would be more nearly constant for a task whose window is mostly a fixed instruction suffix than for tasks whose windows carry query text --- and it was wrong: within-task similarity came out at $0.9994$ and $0.9992$, a difference of $+0.0002$ that a permutation test over task labels declined to distinguish from noise ($p = 0.27$). Fixing the statistic and its refutation condition in advance bought us something other than protection from a wrong result: it made the wrong result legible, and the failure pointed straight at the near-constant read-out, which is a stronger finding than the prediction would have been.
+Finally, a failure that is not a mistake. Our last experiment pre-registered a prediction --- that the injected vector would be more nearly constant for a task whose window is mostly a fixed instruction suffix --- and it was wrong: within-task similarity came out at $0.9994$ and $0.9992$, a difference of $+0.0002$ that a permutation test over task labels declined to distinguish from noise ($p = 0.27$). Fixing the statistic and its refutation condition in advance made the wrong result legible, and it pointed straight at the near-constant read-out, which is a stronger finding than the prediction would have been.
 
 
 = Limitations
 
-+ The code results are directional rather than benchmark-scale: HumanEval is 50 problems and #text("pass@k") covers 10 problems with 3 samples, with no confidence interval on either. TriviaQA sits at $0.005$ exact match, so the paper reports a boundary rather than a positive result, and the LLM-judge scores carry run-to-run variance and are secondary evidence.
-+ The unsaturated regime that reveals the corpus's surface prior is 600 items on one backbone under a different training recipe, while the saturated null it qualifies is measured on two backbones. Extending the unsaturated regime to more backbones and larger samples is the most direct further test of the layering result, and we have not done it.
-+ Content-independence is consistent with two mechanisms --- a window that carries nothing beyond the hidden state, and a read-out that transmits almost nothing --- and we do not fully separate them. The random-linear-map control used to argue that the collapse is the read-out's was chosen after seeing the result rather than pre-registered.
-+ The bound's rarity prediction is stated but not tested, and §3.2 shows that it is not testable by corpus counting at the window scale with the resources available to us.
-+ The conclusion is scoped to frozen-table grafts on a frozen backbone at a single mid-stack layer with a 0.8B--4B target. Co-training, learned routing, adaptive layer placement and deployment trade-offs in table size and memory bandwidth are untested; the reader-fidelity check covers the read-out but not the addressing; and the official layer-1 placement is untested rather than refuted.
-+ The equivalence result in §4.1 is exact agreement of empirical histograms at the sample's $1\/n$ resolution and does not establish that the underlying distributions are identical. HumanEval is public and we cannot rule out contamination of the base model's training data. The bound is elementary --- a data-processing inequality --- and we do not claim otherwise: its value is the window arithmetic it forces on a family that scaled without writing it down, and the experiment that tests its content prediction.
-
-Deployment cost, artifact provenance and the configurations this conclusion does not cover are in @sec-lim-ext.
+The code results are directional rather than benchmark-scale, and the unsaturated regime that reveals the corpus's surface prior is 600 items on one backbone under a different training recipe; extending it to more backbones and larger samples is the most direct further test of the layering result, and we have not done it. The bound's rarity prediction is stated but not tested, and §3.2 shows it is not testable by corpus counting at this window scale. The conclusion is scoped to frozen-table grafts on a frozen backbone at a single mid-stack layer with a 0.8B--4B target, so co-training, learned routing, adaptive layer placement, the official layer-1 placement, and deployment trade-offs in table size and memory bandwidth are untested rather than refuted. HumanEval is public and we cannot rule out contamination of the base model's training data, and the equivalence result in §4.1 is exact agreement of empirical histograms at the sample's $1\/n$ resolution rather than proof that the underlying distributions are identical. The read-out collapse is localised in §4.7, but that localisation rests on one reader checkpoint at one layer. @sec-lim-ext lists these and the remaining limitations in full.
 
 
 = Conclusion
 
 We asked what a token-keyed residual memory can carry, and the answer is set before any reader is chosen. The row identifier is a deterministic function of a short addressing window, so the memory's contribution cannot exceed what that window already determines and the hidden state has not retained. In the Engram and Qwen3.8-Flash-Next designs that window is twelve tokens rather than the two an order-3 key suggests; in V4.1-Flash, which removed the convolution, it is four.
 
-The prediction this makes about content survives a direct test. Three readers differing only in the corpus behind the table write measurably different vectors and, under the standard recipe, produce output distributions that agree exactly. Removing the answer-length ceiling completes the picture rather than breaking the bound: the corpus's surface statistics then appear in the output, which is the trigram prior the channel is permitted to carry, while passage-conditioned recall remains at zero. The memory is a channel for a corpus's surface prior and not for knowledge, and which of the two it is, is fixed by the addressing window.
+The prediction this makes about content survives a direct test. Three readers differing only in the corpus behind the table write measurably different vectors and, under the standard recipe, produce output distributions that agree exactly. Removing the answer-length ceiling completes the picture rather than breaking the bound: the corpus's surface statistics then appear, which is the trigram prior the channel is permitted to carry, while passage-conditioned recall remains at zero.
 
-The measurements that size what remains point in two directions. The read-out recovers about 59% of the trigram top-1 that explicit counts reach, and more training makes it worse; measured directly, the vector it injects is nearly a constant, with an effective dimensionality of $1.001$ against $1.480$ for the hidden state it reads. Because the table's trigram statistics sit well above the majority floor, this gap is a target rather than a verdict: the design fails for the bound's reason and for a read-out defect at the same time, and only the first is unfixable by improving the reader. Lengthening the key does not pay at matched storage on any corpus or budget we tested. What remains is therefore the complement --- retrieval, which addresses by query, and parametric adapters, which are not a memory channel --- together with the read-out itself.
+Two measurements size what remains, and they are now separable. The read-out recovers about 59% of the trigram top-1 that explicit counts reach, and at the answer position the addressed row is byte-identical across items, so the null there is forced by the premise rather than by any defect. Twelve tokens back the same read-out collapses an input of effective dimensionality $137$ to $1.02$, so the read-out defect is real as well, and only it is fixable by improving the reader. Lengthening the key does not pay at matched storage on any corpus or budget we tested. What remains is the complement --- retrieval, which addresses by query, and parametric adapters, which are not a memory channel --- together with the read-out itself.
 
-
-= Acknowledgement
-
-We thank the open-source community for the PLE/Engram, Qwen, and related memory infrastructure used in this study. This work was carried out as an independent low-resource research project.
-
-= Data Availability
-
-All source code, evaluation scripts, container definitions, evaluation cards, and checksums are publicly available in the project repository and in the Hugging Face artifact repository. The released artifact bundle includes PLE projector checkpoints, Purified OPSD MoRA adapters, projector datasets, configurations, and the raw evaluation result files, including the per-item injected vectors behind the read-out measurement. The PLE memory tables can be rebuilt from the published corpus construction scripts, and upstream Qwen model weights are not redistributed.

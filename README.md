@@ -430,7 +430,7 @@ src/qwen35_ple/    实验编排代码（config / engine / data / train / eval / 
   live_store.py    PLE 行表懒加载（LiveETStore / LiveETDataset）
 configs/           训练与推理配置
 scripts/           一次性脚本（数据构建、表资产、评测、审计）
-docs/              166 篇文档（索引见下）
+docs/              168 篇文档（索引见下）
 tests/             35 个测试文件（golden 对拍与不变量）
 paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生成）
 ```
@@ -439,7 +439,7 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 
 ## 文档索引
 
-`docs/` 共 166 篇。**不要通读**，按主题进入：
+`docs/` 共 168 篇。**不要通读**，按主题进入：
 
 **起点（想快速了解现状）**
 
@@ -451,6 +451,8 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 | `round-164-window-composition-preregistration.md` | **寻址窗口里有多少是"关于这道题的"**；BoolQ 后缀占 10/12；稀有度分层为何不可构造（预注册） |
 | `reviewer-response-r1.md` | **审稿意见逐条回复**：理论形式化、窗口感受野的可执行验证、等价性框架、统计口径补齐；一条经核实为误读；四条需新实验（附计划与成本） |
 | `round-164-window-composition-results.md` | **读出把窗口坍缩成常量**：`c` 的有效维度 1.001 vs `h` 的 1.480；随机映射基线不坍缩；预注册预测失败及其含义 |
+| `round-165-collapse-provenance-results.md` | **把塌缩拆成两个独立损失**：答案位置的寻址**逐字节常量**（每任务 1/200 条不同行），而同一个 read-out 把有效维数 137 的输入压成 1.02 —— 前者是界的前提，后者是 read-out 缺陷 |
+| `round-165-readout-repair-preregistration.md` | round-165 的预注册：塌缩溯源级联 + 端到端 read-out 替换（含反空转对照与冻结判定规则） |
 | `round-158-ngram-reference-frame.md` | **计数参照系：这张表必须打败的数字** |
 | `round-156-g0-nople-format-vs-content-and-metric-bugs.md` | 格式 vs 知识；两个指标 bug；关机事故复盘 |
 | `round-154-session-consolidation-and-handoff.md` | 会话交接总览 |

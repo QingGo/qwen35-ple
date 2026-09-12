@@ -18,7 +18,7 @@ REMOTE_ROOT=/root/autodl-tmp/qwen35-ple
 POLL_SECONDS=${POLL_SECONDS:-60}
 MAX_POLLS=${MAX_POLLS:-90}          # 90 * 60s = 90 min ceiling
 
-log() { echo "=== [r162-finish2] $* $(date -Is) ==="; }
+log() { echo "=== [r162-finish2] $* $(date +%Y-%m-%dT%H:%M:%S%z) ==="; }
 
 remote() { bash "$HERE/ssh_autodl.sh" "$@"; }
 pull() {

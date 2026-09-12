@@ -40,8 +40,9 @@ DTYPE_08="${DTYPE_08:-float32}"
 
 case "$BACKBONE" in
   0.8B) MODEL="$ROOT/models/Qwen3.5-0.8B"; DTYPE="$DTYPE_08" ;;
+  2B)   MODEL="$ROOT/models/Qwen3.5-2B";   DTYPE="bfloat16" ;;
   4B)   MODEL="$ROOT/models/Qwen3.5-4B";   DTYPE="bfloat16" ;;
-  *)    echo "unknown BACKBONE=$BACKBONE (use 0.8B or 4B)" >&2; exit 2 ;;
+  *)    echo "unknown BACKBONE=$BACKBONE (use 0.8B, 2B or 4B)" >&2; exit 2 ;;
 esac
 
 TAG="r162-${BACKBONE}"

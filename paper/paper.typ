@@ -1,15 +1,19 @@
 #import "sty/icml2024.typ": icml2024
 
 #show: icml2024.with(
-  title: [Auditable N-Gram Memory for Small Language Models],
+  title: [What a Token-Keyed Residual Memory Can Carry],
   authors: (
     ((name: "QingGo", affl: "affl1", email: "zyqingjohn@qq.com"),),
     (affl1: ("Independent Researcher",),)
   ),
   abstract: [
-    Small language models face a fundamental capacity bottleneck: they must either compress knowledge into parameters or retrieve it at inference time. Retrieval-augmented generation (RAG) is the dominant solution, but its behavior is opaque and its retrieved evidence is not fully auditable @rag2020. In this paper, we study a complementary mechanism: an #emph[auditable n-gram external memory] derived from the PLE / Engram line of sparse external-memory systems @engram2026. We attach this memory to a frozen Qwen3.5-0.8B model and introduce a small learned #emph[PLE Projector] that maps the backbone hidden state plus lexical memory features into per-token logit scale and bias corrections. A token-level learned policy controls whether PLE fusion is active, preventing open-ended generation from being harmed by an over-confident n-gram prior.
+    Sparse n-gram memory layers --- DeepSeek Engram, Qwen3.8-Flash-Next and DeepSeek-V4.1-Flash --- inject a retrieved vector into the residual stream at every token, and are being scaled on the premise that the memory supplies knowledge the parameters do not hold. We show that this channel is bounded before any reader is chosen. The row identifier is a deterministic function of a short addressing window, so the data-processing inequality gives $I("future" ; e_t | h_t) <= I("future" ; w_t | h_t)$: the memory can supply only what the window already determines and the hidden state has not retained. Depth, width, linearity and training budget do not appear. In the Engram and Qwen3.8 designs the window is not the two tokens an order-3 key suggests but twelve, because a kernel-4 dilation-3 convolution follows the gate; in V4.1-Flash the convolution was removed and the window is exactly four.
 
-    We evaluate the system across local-continuation tasks, real HumanEval @humaneval2021, real TriviaQA @triviaqa2017, and a joint system with RAG and parameter-efficient adapters @lora2022 @qlora2023 @mora2024. On 10k local-continuation data with five seeds, the learned projector improves teacher-forced NLL by $0.22$ over fixed PLE calibration with bootstrap 95% CI $[0.14, 0.33]$. On 50 HumanEval problems, greedy decoding shows that BM25+PLE recovers problem-level passes that the base model does not solve, while 10-problem #text("pass@k") sampling improves from $0.40$ to $0.70$. On 200 TriviaQA examples the 0.8B base model obtains only $0.005$ exact match, and raw PLE fusion can degrade open-ended generation @knnopen2023. We further prove a bound on the residual-injection variant of this family: because the row identifier is a deterministic function of a short addressing window, the retrieved vector can carry no more about the future than that window already determines, independently of the reader's capacity. The bound covers the Engram, Qwen3.8-Flash-Next and DeepSeek-V4.1-Flash designs alike. It explains why context-conditioned recall is out of reach for this channel and why the measurable effect of such memory is a *format* prior, and it predicts where a gain can still appear: on rare n-grams and on continuations the window determines. Our conclusion is deliberately a #emph[boundary] result: n-gram external memory is valuable as a local low-entropy code memory, but it is not a substitute for RAG or parametric adapters on general tasks.
+    We test the prediction this makes about content. Three readers differing only in the corpus feeding the table --- Wikipedia, code, STEM --- are grafted into the same frozen backbones under identical prompts. They write measurably different vectors at the answer position (pairwise cosine 0.38 to 0.49 on 4B), and under the standard recipe they produce identical output distributions: total variation exactly $0.0000$ over 1500 items on 0.8B, and on 4B a largest spread of one item out of 600, below the split-half floor of the arm that produced it. Removing the answer-format SFT that saturates every arm at 2.5 generated tokens changes the picture, and the change is the bound's other half: all four format descriptors then move outside their split-half floors and both pre-registered directional lexical predictions hold (prose markers $+0.69$, $p = 4.5 times 10^(-34)$). Suppressing the chat scaffold is content-independent; the rest of the distribution carries the corpus's surface statistics, which is exactly the trigram prior the bound permits. What never appears, ceiling or no ceiling, is passage-conditioned recall.
+
+    Two measurements fix the size of what remains. A probe of the frozen table recovers about 59% of the trigram top-1 that explicit counts reach on the same corpus, and more training makes it worse, so the loss belongs to the read-out rather than to undertraining. The obvious repair does not pay either: at matched storage a 4-gram address ties or beats 8-token, 16-token and longest-suffix memories at every budget and on every corpus.
+
+    The conclusion is a boundary rather than a result. Auditable n-gram memory is a real channel for the surface prior of a corpus and is not a channel for passage-conditioned knowledge; which of the two it is, is set by the addressing window and not by the reader, and that holds across the family.
   ],
   bibliography: bibliography("refs.bib"),
   accepted: none,
@@ -20,25 +24,24 @@
 
 = Introduction
 
-Large language models have achieved strong performance through scale, but small models remain important for cost, latency, privacy, and on-device deployment. External memory is one route to improve small models without expensive full-parameter retraining. Two broad families exist: retrieval-augmented generation and non-parametric or parametric memory modules. RAG is effective but has limitations: it retrieves documents, not token-level continuations; it can be noisy; and its evidence is not always easy to audit @rag2020. Non-parametric memory, such as kNN-LM @knnlm2020 and n-gram memory, offers a different granularity: it can directly influence the next-token distribution.
+Sparse n-gram memory is one of the few ways to add capacity to a language model without adding parameters. DeepSeek Engram, Qwen3.8-Flash-Next and DeepSeek-V4.1-Flash all hash a short token window to a row of a large disk-backed table, project that row, and inject the result into the residual stream @engram2026. Memory Grafting scales pre-training with an offline conditional memory table @memorygrafting2026, and XMemTransfer adapts a table across model families with a target-side reader @xmemtransfer2026. The premise is that the table holds associations the weights compress away, and that a large enough table behind a good enough reader will supply them.
 
-The recent DeepSeek Engram and Qwen PLE systems show that n-gram lookup can be integrated into transformer backbones with sparse, disk-backed tables @engram2026. Memory Grafting scales pre-training using an offline conditional memory table @memorygrafting2026, while XMemTransfer shows that a target-side reader can adapt a memory table across model families @xmemtransfer2026. However, most evaluations of such systems have focused on large models. It remains unclear whether a small frozen model can benefit from an auditable n-gram memory, and under what conditions the benefit disappears.
+This paper asks what such a channel can carry, and answers it in a way that does not depend on the reader. The argument is short. The row identifier is a deterministic function of a short addressing window $w_t$; the reader's contribution is a deterministic function of that row and the hidden state $h_t$. The data-processing inequality then bounds the memory's contribution to the future by the window's: $I("future" ; e_t | h_t) <= I("future" ; w_t | h_t)$. Reader depth, width, linearity and training budget do not appear because they cannot. The bound is elementary; what is not elementary is that it was not written down for a family that three production systems are scaling, and that the window it depends on is not the one the headline key order suggests.
 
-This paper addresses the following research questions:
+That last point is worth stating precisely, because it is where the bound becomes useful rather than obvious. An order-3 key reads two tokens, but the Engram and Qwen3.8 readers follow the gate with a depthwise convolution of kernel 4 and dilation 3, so the contribution at a position draws on memory rows up to nine positions back, each of which reads two tokens further: the true window is twelve tokens, not two. DeepSeek-V4.1-Flash removed that convolution, so its window is exactly four. The family spans a factor of three in the one quantity that bounds it, and that quantity is visible only by reading the convolution parameters.
 
-- Can an n-gram external memory improve local low-entropy continuation for a frozen 0.8B model?
-- Can a small learned projector outperform fixed calibration @logopinion1986?
-- Can a token-level policy make PLE safe for open-ended generation @knnopen2023?
-- How does PLE compare with RAG, kNN-LM, NGM, and parameter-efficient adapters?
-- What are the precise boundaries of PLE usefulness?
+The bound makes a sharp and testable prediction about content, and we test it on two backbones. Train three readers that differ only in the corpus feeding the table --- Wikipedia, code and STEM text --- and graft each into the same frozen model at the same layer under the same prompts. If the memory carried corpus content, the three should answer differently. Under the standard recipe they do not: on 0.8B over 1500 items per arm the answer-label distribution, the leading-surface distribution and their joint differ by a total-variation distance of exactly $0.0000$, and on 4B the largest cross-corpus spread is a single item out of 600. This is not a failed manipulation. The three readers write visibly different vectors at the answer position, and each is best on its own corpus in a cross-evaluation; the corpus changes the part of the trigram statistic the weights already encode, and under this recipe that part leaves no trace.
 
-Our contributions are as follows.
+It would be a mistake to stop there, and we did not. Every arm in that experiment collapses to a two-token answer, so "no format difference" could mean "no room for one". Removing the answer-format supervision that causes the collapse changes the conclusion, and the change is the bound's other half rather than a counterexample to it: all four format descriptors move outside their split-half floors and both pre-registered directional lexical predictions hold, with the Wikipedia reader emitting far more prose markers than the code reader. The layering is exactly what the bound predicts. Suppression of the chat scaffold is content-independent --- all three readers suppress it and differ from one another by at most $0.01$ --- while the rest of the distribution carries the corpus's surface statistics. That dependence *is* the trigram prior the channel is permitted to carry. What never appears, with or without the ceiling, is passage-conditioned recall; the knowledge probes that require the passage return zero.
 
-+ We introduce the #emph[PLE Projector], a small MLP that maps hidden states, memory statistics, and task identity to per-token scale/bias in logit space. The projector is trained with a frozen backbone using next-token cross-entropy and is zero-initialized to be inert at the start of training.
-+ We introduce a token-level learned policy that acts as a safety gate, learned from per-token observations rather than hand-written rules @bitterlesson2019.
-+ We provide a systematic comparison on real benchmarks, including HumanEval and TriviaQA, as well as training-free baselines kNN-LM and official NGM @ngm2026.
-+ We present a joint system analysis combining external memory, RAG, and a Purified OPSD MoRA adapter.
-+ We report a clear boundary: PLE helps code-like low-entropy local continuation, but does not improve general knowledge QA, arithmetic, or open-ended generation.
+Our contributions are these.
+
++ We state and prove a bound on what a token-keyed residual memory can carry, in a conditional form that accounts for the gate's dependence on the hidden state, and we identify the addressing window of each production design in the family --- twelve tokens for Engram and Qwen3.8-Flash-Next, four for V4.1-Flash.
++ We test its content prediction directly on two frozen backbones with three corpus-matched readers, and show that the three inject measurably different vectors while producing identical output distributions.
++ We show that the null is scoped rather than absolute: removing the answer-length ceiling reveals the corpus's surface prior, exactly where the bound says it should be, while passage-conditioned recall remains at zero.
++ We measure the ceiling from the other side, probing the frozen table directly and finding that the read-out recovers about 59% of the trigram top-1 explicit counts reach, a loss that does not improve with more training.
++ We falsify the obvious repair. At matched storage, longer keys do not pay on any corpus or budget tested, so the short window is not the constraint that binds.
++ We report the audit that made these results checkable, including ten occasions on which a claim stood because the check that would have falsified it did not exist or silently skipped.
 
 = Related Work
 
@@ -66,6 +69,68 @@ Adaptive retrieval methods such as Self-RAG @selfrag2023 and FAIR-RAG @fairrag20
 
 LoRA @lora2022, QLoRA @qlora2023, and MoRA @mora2024 provide compact parametric updates. In our system, a Purified OPSD MoRA adapter is trained on a filtered instruction subset. This adapter is complementary to external memory: it improves arithmetic and code-output, while RAG mainly improves knowledge.
 
+= What a Token-Keyed Residual Memory Can Carry
+
+== N-Gram Addressable Memory
+
+Let a context be a token sequence $c = (c_1, ..., c_t)$. We maintain sparse counts for each n-gram of order $n$:
+
+$ p_m(y | c) = "count"(c, y) / sum_y "count"(c, y). $
+
+The memory also returns the longest matched order and an external value index that can be audited. This memory is non-parametric, transparent, and can be rebuilt from any corpus.
+
+== The Bound
+
+The Engram / PLE line injects a retrieved vector into the residual stream. It is worth stating precisely what such a channel can carry, because the answer does not depend on the reader.
+
+Let $w_t$ denote the addressing window ending at position $t$, and let the row identifier be a deterministic function of it, $a_t = A(w_t)$, so that the retrieved memory is $e_t = E(a_t)$. The contribution to the residual stream is $c_t = F(h_t, e_{t-r..t})$, where the backbone hidden state $h_t$ enters through the gate as the query and $r$ is the reach of the short causal convolution that follows the gate. In the Engram and Qwen3.8 designs the row id reads the last $n - 1$ tokens and the convolution has kernel 4 with dilation 3, so the convolution at a position reads memory rows up to nine positions back, each row itself reading two tokens further, and the window reaches eleven tokens back --- twelve tokens in all, not the two that $n = 3$ alone would suggest. Because $e_t$ is a deterministic function of the window, the data-processing inequality gives
+
+$ I("future" ; e_t | h_t) <= I("future" ; w_t | h_t). $
+
+Three consequences follow.
+
+First, the bound is independent of the reader. Depth, width, linearity and training budget do not appear in it, so no reader, however expressive, can exceed it. This turns our earlier failures with hidden-state readers and direct residual injection from an empirical observation into a necessary one.
+
+Second, it constrains addressing rather than capacity. The memory can only supply what the window already determines and the hidden state has not retained, so no context-conditioned recall is possible when the determining information lies outside the window. For a question answered from a passage, the window at the answer position carries the prompt's format, not its content; the memory may still sharpen *how* the answer is emitted, which is the format effect we measure, but not *which* answer is correct.
+
+Third, it does not say the memory is useless. Backbone weights are a lossy compression of the training corpus, and rare n-gram statistics are among what is compressed away. The bound leaves room for precisely that, and it predicts where: gains should concentrate on rare n-grams and on continuations the window determines, and should vanish elsewhere. Our measurements agree --- knowledge probes that require the passage return zero, the measurable residual is a format prior, and code is markedly more predictable and more memorisable than prose.
+
+== Scope: The Family, Not One Implementation
+
+The scope is the family, not one implementation. DeepSeek Engram and Qwen3.8-Flash-Next address with 2- and 3-grams and keep the convolution, giving a window of roughly eleven tokens; DeepSeek-V4.1-Flash uses 2-, 3- and 4-grams but removed the convolution, so its window is exactly four tokens and is in that respect the tightest of the three. Enlarging the table does not relax the bound; only a query-dependent address, as in retrieval, would.
+
+= Does Memory Content Reach the Output?
+
+The bound makes a sharp and testable prediction about content, and we tested it directly on two backbones. Train three readers that differ only in the corpus feeding the table --- Wikipedia, code, and STEM text --- and graft each into the same backbone at the same layer under the same prompts. If the memory carried corpus content, the three should answer differently.
+
+== Under the Standard Recipe, They Do Not
+
+The bound also makes a sharp prediction about *content*, which we tested directly on two backbones. Train three readers that differ only in the corpus feeding the table --- Wikipedia, code, and STEM text --- and graft each into the same backbone at the same layer under the same prompts. If the memory carried corpus content, the three should answer differently. Under the standard recipe they do not. On Qwen3.5-0.8B in fp32, over 1500 items per arm, the answer-label distribution, the leading-surface distribution and their joint all differ by a total-variation distance of exactly 0.0000, and every pre-registered directional lexical prediction fails, with zero discordant pairs for code markers. On Qwen3.5-4B in bf16 --- the backbone on which the format effect was first observed --- the same null holds over 600 items per arm: the largest cross-corpus spread is a single item, below the split-half floor of the arm that produced it. What the corpus changes is the part of the trigram statistic the backbone weights already encode, and under this recipe that part leaves no trace in the output.
+
+== The Manipulation Reached the Injection Point
+
+That the null is not a failed manipulation is established independently of the output. The three readers write measurably different vectors at the answer position (pairwise cosine similarity 0.73 to 0.76, relative $L_2$ distance 0.69 to 0.78, norms within a factor of 1.10), and in a $3 times 3$ cross-evaluation each is best on its own corpus. The frozen tensors are bit-identical across arms and the adapter-norm ratios span only $0.886$ to $1.045$, well inside the threefold bound that would make the arms incomparable.
+
+== The Effect Is Large, and Larger on the Bigger Backbone
+
+The contrast with the zero-injection arm shows the channel is not merely inert, and the effect is far larger on the 4B backbone. There, zero injection makes the model emit chat scaffolding on 95.8% of items (mean 31.2 generated tokens), while injecting a reader trained on any of the three corpora suppresses it to 0.0% (mean 2.6 tokens), with not one of the 600 items sharing its first token with the zero-injection arm ($p = 1.6 times 10^(-173)$, McNemar exact). On 0.8B the same shift moves scaffolding from 19.5% to 0.0% and changes the first generated token on all 1500 items ($p = 1.3 times 10^(-88)$); the reader-disabled and no-reader arms are bit-identical, so the noise floor is exactly zero rather than merely small. The graft therefore does something large and reproducible --- it pushes the model off the chat template --- but that shift does not depend on what the table contains.
+
+== Removing the Ceiling
+
+This null has a scope, and testing it changes what the result means. On both backbones the injected arms saturate at 2.5 to 2.7 generated tokens, so "no format difference" could mean "no room for one". We therefore ran the regime that removes the saturation --- no answer-format SFT, where generated length returns to 11 to 21 tokens --- over four arms (the three corpora plus the zero-injection reference) on 600 items. The content dependence appears. All four format descriptors move outside each arm's own split-half sampling floor (leading-surface total variation 0.1433 against a floor of 0.0237; first-token 0.4983 against 0.2176), and both pre-registered directional lexical predictions hold: the code reader emits more code markers ($+0.0333$, one-sided $p = 3.9 times 10^(-4)$) and the Wikipedia reader emits far more prose markers ($+0.6933$, $p = 4.5 times 10^(-34)$), where under saturation both predictions had failed outright.
+
+== The Layering Is What the Bound Predicts
+
+So the correct statement is layered rather than absolute, and it is the layering the bound predicts. Suppressing the chat scaffold is content-independent --- all three readers suppress it, and they differ from each other by at most $0.01$. The rest of the output distribution is content-dependent, and that dependence *is* the trigram prior the bound allows the channel to carry: a reader trained on Wikipedia supplies Wikipedia-like surface statistics, one trained on code supplies code-like ones. What never appears, with or without the ceiling, is passage-conditioned recall --- the knowledge probes that require the passage return zero. The channel carries the corpus prior and nothing above it.
+
+== How Much Prior Is Actually There
+
+The bound permits the memory to carry a corpus's rare n-gram statistics, so the useful question is how much of that prior the frozen table actually holds and how much of it the read-out recovers. We probe the raw 2560-dimensional rows directly, on held-out windows, against explicit counts on the same corpus as a reference frame. Majority-class prediction gives a floor of $0.0537$ top-1. A count bigram reaches $0.2264$ and a count trigram $0.2535$. A ridge probe on the frozen rows reaches $0.1280$; an MLP reaches $0.1502$ at its best epoch and $0.1225$ at 24 epochs, so additional training makes it worse rather than better. Shuffled-row controls collapse below the majority floor at $0.0459$ and $0.0373$. The table therefore does hold a recoverable trigram prior --- well above the floor and destroyed by shuffling --- but the read-out recovers only about 59% of what explicit counts reach, and that gap is a property of the read-out rather than of undertraining.
+
+== The Obvious Repair Does Not Pay
+
+Nor does lengthening the key. Replacing the 4-gram address with 8-token, 16-token and longest-suffix memories at matched storage ties or loses at every budget and training size on both corpora, so the short window costs nothing measurable. That the window can be widened without gain, while the corpus the table is built from cannot be changed without gain either, is the same statement twice: the channel's output is fixed by what the window already determines.
+
 = Problem Setting
 
 We consider a frozen small language model with next-token distribution $p_b(y | c)$, where $c$ is the current token context. A sparse n-gram memory provides a complementary distribution $p_m(y | c)$ that can be audited by inspecting the matched n-gram and its source document. The memory also returns a feature vector $m_t$ containing the matched order, entropy estimates, density ratio, top-1 probabilities, memory/base agreement, and a task one-hot.
@@ -82,45 +147,7 @@ When $g_t = 0$, we set $alpha_t = 0$ and $beta_t = 0$, so the system falls back 
 
 We evaluate with a strict real/control protocol. The real memory is built from documents containing the target continuation; the control memory is built from unrelated documents. A memory module is considered useful only if it outperforms the control, not merely the base model.
 
-= Background and Theory
-
-== N-Gram Addressable Memory
-
-Let a context be a token sequence $c = (c_1, ..., c_t)$. We maintain sparse counts for each n-gram of order $n$:
-
-$ p_m(y | c) = "count"(c, y) / sum_y "count"(c, y). $
-
-The memory also returns the longest matched order and an external value index that can be audited. This memory is non-parametric, transparent, and can be rebuilt from any corpus.
-
-== What a Token-Keyed Residual Memory Can Carry
-
-The Engram / PLE line injects a retrieved vector into the residual stream. It is worth stating precisely what such a channel can carry, because the answer does not depend on the reader.
-
-Let $w_t$ denote the addressing window ending at position $t$, and let the row identifier be a deterministic function of it, $a_t = A(w_t)$, so that the retrieved memory is $e_t = E(a_t)$. The contribution to the residual stream is $c_t = F(h_t, e_{t-r..t})$, where the backbone hidden state $h_t$ enters through the gate as the query and $r$ is the reach of the short causal convolution that follows the gate. In the Engram and Qwen3.8 designs the row id reads the last $n - 1$ tokens and the convolution has kernel 4 with dilation 3, so the convolution at a position reads memory rows up to nine positions back, each row itself reading two tokens further, and the window reaches eleven tokens back --- twelve tokens in all, not the two that $n = 3$ alone would suggest. Because $e_t$ is a deterministic function of the window, the data-processing inequality gives
-
-$ I("future" ; e_t | h_t) <= I("future" ; w_t | h_t). $
-
-Three consequences follow.
-
-First, the bound is independent of the reader. Depth, width, linearity and training budget do not appear in it, so no reader, however expressive, can exceed it. This turns our earlier failures with hidden-state readers and direct residual injection from an empirical observation into a necessary one.
-
-Second, it constrains addressing rather than capacity. The memory can only supply what the window already determines and the hidden state has not retained, so no context-conditioned recall is possible when the determining information lies outside the window. For a question answered from a passage, the window at the answer position carries the prompt's format, not its content; the memory may still sharpen *how* the answer is emitted, which is the format effect we measure, but not *which* answer is correct.
-
-Third, it does not say the memory is useless. Backbone weights are a lossy compression of the training corpus, and rare n-gram statistics are among what is compressed away. The bound leaves room for precisely that, and it predicts where: gains should concentrate on rare n-grams and on continuations the window determines, and should vanish elsewhere. Our measurements agree --- knowledge probes that require the passage return zero, the measurable residual is a format prior, and code is markedly more predictable and more memorisable than prose.
-
-The bound also makes a sharp prediction about *content*, which we tested directly on two backbones. Train three readers that differ only in the corpus feeding the table --- Wikipedia, code, and STEM text --- and graft each into the same backbone at the same layer under the same prompts. If the memory carried corpus content, the three should answer differently. Under the standard recipe they do not. On Qwen3.5-0.8B in fp32, over 1500 items per arm, the answer-label distribution, the leading-surface distribution and their joint all differ by a total-variation distance of exactly 0.0000, and every pre-registered directional lexical prediction fails, with zero discordant pairs for code markers. On Qwen3.5-4B in bf16 --- the backbone on which the format effect was first observed --- the same null holds over 600 items per arm: the largest cross-corpus spread is a single item, below the split-half floor of the arm that produced it. What the corpus changes is the part of the trigram statistic the backbone weights already encode, and under this recipe that part leaves no trace in the output.
-
-That the null is not a failed manipulation is established independently of the output. The three readers write measurably different vectors at the answer position (pairwise cosine similarity 0.73 to 0.76, relative $L_2$ distance 0.69 to 0.78, norms within a factor of 1.10), and in a $3 times 3$ cross-evaluation each is best on its own corpus. The frozen tensors are bit-identical across arms and the adapter-norm ratios span only $0.886$ to $1.045$, well inside the threefold bound that would make the arms incomparable.
-
-The contrast with the zero-injection arm shows the channel is not merely inert, and the effect is far larger on the 4B backbone. There, zero injection makes the model emit chat scaffolding on 95.8% of items (mean 31.2 generated tokens), while injecting a reader trained on any of the three corpora suppresses it to 0.0% (mean 2.6 tokens), with not one of the 600 items sharing its first token with the zero-injection arm ($p = 1.6 times 10^(-173)$, McNemar exact). On 0.8B the same shift moves scaffolding from 19.5% to 0.0% and changes the first generated token on all 1500 items ($p = 1.3 times 10^(-88)$); the reader-disabled and no-reader arms are bit-identical, so the noise floor is exactly zero rather than merely small. The graft therefore does something large and reproducible --- it pushes the model off the chat template --- but that shift does not depend on what the table contains.
-
-This null has a scope, and testing it changes what the result means. On both backbones the injected arms saturate at 2.5 to 2.7 generated tokens, so "no format difference" could mean "no room for one". We therefore ran the regime that removes the saturation --- no answer-format SFT, where generated length returns to 11 to 21 tokens --- over four arms (the three corpora plus the zero-injection reference) on 600 items. The content dependence appears. All four format descriptors move outside each arm's own split-half sampling floor (leading-surface total variation 0.1433 against a floor of 0.0237; first-token 0.4983 against 0.2176), and both pre-registered directional lexical predictions hold: the code reader emits more code markers ($+0.0333$, one-sided $p = 3.9 times 10^(-4)$) and the Wikipedia reader emits far more prose markers ($+0.6933$, $p = 4.5 times 10^(-34)$), where under saturation both predictions had failed outright.
-
-So the correct statement is layered rather than absolute, and it is the layering the bound predicts. Suppressing the chat scaffold is content-independent --- all three readers suppress it, and they differ from each other by at most $0.01$. The rest of the output distribution is content-dependent, and that dependence *is* the trigram prior the bound allows the channel to carry: a reader trained on Wikipedia supplies Wikipedia-like surface statistics, one trained on code supplies code-like ones. What never appears, with or without the ceiling, is passage-conditioned recall --- the knowledge probes that require the passage return zero. The channel carries the corpus prior and nothing above it.
-
-The scope is the family, not one implementation. DeepSeek Engram and Qwen3.8-Flash-Next address with 2- and 3-grams and keep the convolution, giving a window of roughly eleven tokens; DeepSeek-V4.1-Flash uses 2-, 3- and 4-grams but removed the convolution, so its window is exactly four tokens and is in that respect the tightest of the three. Enlarging the table does not relax the bound; only a query-dependent address, as in retrieval, would.
-
-Nor does lengthening the key. Replacing the 4-gram address with 8-token, 16-token and longest-suffix memories at matched storage ties or loses at every budget and training size on both corpora, so the short window costs nothing measurable. That the window can be widened without gain, while the corpus the table is built from cannot be changed without gain either, is the same statement twice: the channel's output is fixed by what the window already determines.
+= Background
 
 == Real versus Control
 
@@ -137,6 +164,7 @@ This is a log-opinion-pool formulation. Without calibration, an unweighted n-gra
 == Why Hidden-State Alignment Is Insufficient
 
 A common assumption is that external memory should be projected into the backbone's hidden space. Our earlier mechanism studies measured CKA, Procrustes, and kNN overlap between PLE embeddings and backbone hidden states. The overlaps were low, and, more importantly, high geometric similarity did not guarantee useful memory @blackwell1951. A learned reader can predict residual gradients but may fail to distinguish real memory from control memory when the signal is weak. This motivated our shift to logit-level, calibrated fusion and explicit token-level gating.
+
 
 = Method
 
@@ -214,7 +242,10 @@ All experiments use Qwen3.5-0.8B as the frozen backbone. When adapters are used,
 
 We use 5 seeds for both the 100-sample and 10k projector experiments. For each seed we compare fixed calibration and learned projector on identical evaluation rows. Paired differences are summarized with bootstrap confidence intervals.
 
-= Results
+= System Results Under the Bound
+
+The results in this section were collected before the bound was stated, and they are reported here because the bound changes what they are evidence for. Read against it, they separate by mechanism rather than by task: the experiments that go through the residual stream behave as the bound requires, and the ones that do not go through it are unaffected by it. We take that separation to be the useful reading, and we mark it explicitly in the analysis below.
+
 
 == Local Continuation
 
@@ -395,7 +426,7 @@ Fixed calibration selects one scale and bias for all tokens. A learned projector
 
 Our joint experiments show that PLE, RAG, and adapters are not substitutes. RAG supplies document-level evidence, PLE supplies token-level continuity, and adapters supply parametric capability @rag2020 @lora2022. The combination is useful, but PLE is only one small component.
 
-== Historical Negative Results
+= A Note on Method: Ten Times the Check Was Not Run
 
 Earlier in this project we attempted hidden-state readers, MLP readers, and direct residual injection. These approaches often improved loss-like metrics but failed the real-vs-control test @blackwell1951. The bound above explains why they had to: a reader translating a token-keyed row into the residual stream cannot carry context the window does not determine, so the real and control arms converge once the reader is well trained. The lesson is twofold --- a memory module must be evaluated by whether it uses actual memory content rather than by loss alone, and a channel must be checked against its information-theoretic ceiling before its capacity is scaled. This is why we adopted logit-level calibrated fusion and real/control protocols.
 
@@ -403,6 +434,10 @@ A second and less comfortable lesson came from auditing those results. Ten times
 
 Two further mistakes of the same family surfaced during that audit and were caught within minutes --- not because the code was read more carefully, but because the checks had by then been made to run: a constant copied from the wrong fixture, and a skip flag applied to a 65 MB asset that is not in the repository. We report both families because they carry different lessons. The first says that a claim is only as trustworthy as the check behind it; the second says that once the checks are real, ordinary carelessness stops being able to hide.
 
+
+The bound does not partition these mechanisms the way one might expect, and the correction matters. Logit-level fusion of an n-gram memory is *also* a function of the addressing window, so the bound applies to it exactly as it applies to the residual graft; what the projector gets is not an exemption but a better interface. The permitted prior is the same in both cases. The graft loses it twice --- once through a read-out that recovers only about 59% of the trigram top-1 explicit counts reach, and again through a residual-stream bottleneck in which a single vector must be disentangled by the backbone before it can affect any logit. The logit correction loses it once, and spends it in the basis where it is used.
+
+That reframing is testable against our own numbers, and it holds. The projector's gain is confined to low-entropy local continuation --- precisely the region the window determines, which is the only region the bound leaves open --- and it is absent on knowledge tasks, where the determining information lies outside the window. Two mechanisms escape the bound, and only two: retrieval, which addresses by query rather than by a fixed token window, and parametric adapters, which are not a memory channel at all. PLE, RAG and adapters are therefore not three points on one axis of strength but three different interfaces to three different resources, and only the first of them is bounded in the way this paper describes.
 = Limitations
 
 + HumanEval is limited to 50 problems, although the pass sets are already informative.

@@ -372,6 +372,43 @@
           ],
         )
 
+    Replacing the read-out with one that does not collapse does not change the null.
+    With the injection norm held at production's, a random projection of $e_t$
+    ($cos("real", "shuf") = 0.371$) and an ungated read-out ($0.996$) both leave
+    the gold answer's likelihood indistinguishable between real and permuted rows:
+    the paired difference in nats is $-0.010$ $[-0.127, +0.097]$ and $+0.032$
+    $[-0.046, +0.106]$. A positive control that injects the gold token's own
+    embedding does move the distribution (TV $= 0.295$ against the PLE-off arm),
+    so the injection path is live and the null is not a dead channel. Production
+    itself is significantly negative ($-0.232$ $[-0.271, -0.195]$): at the answer
+    position a random row makes the gold answer more likely than the correct one,
+    which is what a content-free format prior should look like. This experiment
+    is a real-versus-permuted contrast at the answer position, so it tests whether
+    that row's identity matters, not whether item-specific content can reach the
+    output; by the previous paragraph there is none there to transmit.
+
+    #figure(
+          table(
+            columns: 6,
+            align: center,
+            [variant], [PR], [$cos("r","s")$], [dNLL], [95\% CI], [TV vs off],
+            [production], [1.001], [0.9966], [$-0.2324$], [$[-0.271,-0.195]$], [0.704],
+            [centered], [1.075], [0.5689], [$-1.2778$], [$[-1.486,-1.079]$], [0.581],
+            [random proj], [1.027], [0.3705], [$-0.0104$], [$[-0.127,+0.097]$], [0.316],
+            [oracle ungated], [1.000], [0.9962], [$+0.0320$], [$[-0.046,+0.106]$], [0.388],
+            [positive control], [18.415], [1.0000], [$0.0000$], [$[0,0]$], [0.295],
+          ),
+          caption: [
+            Repairing the read-out does not make table content useful. dNLL is
+            $"NLL"("shuffled") - "NLL"("real")$, so positive would mean the real row
+            helps; every non-collapsing variant spans zero. The positive control
+            moves the output, so the null is not an inert injection path. The
+            centered arms are an uncalibrated direction amplified back to
+            production norm, so their large negative value is a perturbation
+            artefact rather than evidence about content.
+          ],
+        )
+
     Two caveats. A participation ratio measures how many directions the variation
     spreads over, not how much information is present, so every claim here is about
     the shape of the variation rather than its quantity. And offset 12 is a
@@ -542,7 +579,7 @@ That gap is not a small correction, and measuring the injected vector directly s
 
 The measurement is 600 items at the same layer and dtype as the arms. The participation ratio is $(sum lambda)^2 \/ sum lambda^2$ over the eigenvalues of the covariance of the 600 injected vectors, with 95% intervals from 2000 bootstrap resamples. It gives $1.0014$ $[1.0012, 1.0015]$ for $c_t$ against $1.480$ $[1.433, 1.535]$ for $h_t$, so the two are separated by far more than resampling error. The injected vector is also close to orthogonal to the state that produced it (mean cosine $0.04$) and its norm is $0.53 plus-minus 0.33$ against $1.33 plus-minus 0.06$ for that state --- a mean ratio of $0.40$ with a coefficient of variation of $0.62$. The collapse is therefore not a shut gate: the injection is comparable in magnitude to the state it modifies, and the gate opens onto the same direction every time.
 
-Two explanations remain, and they are separable. The reader's arithmetic is $e_t -> "value proj" -> "branch sum" -> c_t$, and measuring it at positions further back varies its input. At the answer position the addressed row is not merely similar across items but byte-identical: all 200 items of each task address the same row, because every prompt ends in the same template trigram, so the bound's right-hand side is zero there and the null is forced by its premise. Twelve tokens back, the same read-out is fed a genuinely item-specific row --- $190$ of $200$ distinct, effective dimensionality $136.7$ --- and still emits $1.02$, discarding about $99.3\%$ of the effective dimensionality available to it: a factor of ten in the gate and value path, a further factor of three in the output projection. Appendix J gives the ladder and the figure. This also corrects the argument above, since the random-linear-map control maps the hidden state and never the addressed row.
+Two explanations remain, and they are separable. The reader's arithmetic is $e_t -> "value proj" -> "branch sum" -> c_t$, and measuring it at positions further back varies its input. At the answer position the addressed row is not merely similar across items but byte-identical: all 200 items of each task address the same row, because every prompt ends in the same template trigram, so the bound's right-hand side is zero there and the null is forced by its premise. Twelve tokens back, the same read-out is fed a genuinely item-specific row --- $190$ of $200$ distinct, effective dimensionality $136.7$ --- and still emits $1.02$, discarding about $99.3\%$ of the effective dimensionality available to it: a factor of ten in the gate and value path, a further factor of three in the output projection. Appendix J gives the ladder and the figure. This also corrects the argument above, since the random-linear-map control maps the hidden state and never the addressed row. Replacing the read-out with one that does not collapse leaves the null unchanged (Appendix J).
 
 == The Obvious Repair Does Not Pay
 

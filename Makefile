@@ -1,4 +1,4 @@
-.PHONY: help sync lint test check paper paper-diagrams
+.PHONY: help sync lint test check paper paper-diagrams paper-figures
 
 help: ## 显示帮助
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -17,7 +17,10 @@ test: ## pytest 冒烟
 paper-diagrams: ## 从 Diagram Design HTML 重新导出 SVG
 	python3 scripts/extract_dd_svgs.py
 
-paper: paper-diagrams ## 编译论文 PDF
+paper-figures: ## 从实验产物重新生成全部论文图（矢量 SVG）
+	uv run python scripts/make_paper_figures.py
+
+paper: paper-diagrams paper-figures ## 编译论文 PDF
 	/usr/local/bin/typst compile paper/paper.typ paper.pdf
 
 check: lint test ## lint + test

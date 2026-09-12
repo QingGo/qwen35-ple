@@ -432,7 +432,7 @@ configs/           训练与推理配置
 scripts/           一次性脚本（数据构建、表资产、评测、审计）
 docs/              165 篇文档（索引见下）
 tests/             35 个测试文件（golden 对拍与不变量）
-paper/             paper.typ + figures（编译产物 paper.pdf）
+paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生成）
 ```
 
 ---
@@ -527,5 +527,5 @@ round-157/158 满足该条件 **对于「冻结嫁接」这一配置**。
 ## 公开 Artifact
 
 - Hugging Face：[DefEki/qwen35-ple-auditable-ngram-memory](https://huggingface.co/DefEki/qwen35-ple-auditable-ngram-memory)
-- 论文源码 `paper/paper.typ`，编译产物 `paper.pdf`
+- 论文源码 `paper/paper.typ`，编译产物 `paper.pdf`；`make paper` 会先重生成全部图（`scripts/make_paper_figures.py`，全部从 `outputs/` 的实验产物出图），再编译
 - 可复现清单 `docs/reproducibility-manifest.md`，评测卡 `docs/evaluation-card-paper.md`

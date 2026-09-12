@@ -121,6 +121,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--reader", action="append", required=True, metavar="NAME=PATH")
+    parser.add_argument(
+        "--control",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "reader NAME gets control (row-permuted) rows, reproducing the "
+            "round-162 wiki-shuf condition: same checkpoint, same addressing, "
+            "shuffled e_t.  Permutation seed is seed*1000 + item index, matching "
+            "run_phase0's control path exactly."
+        ),
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument("--vectors-dir", default=None, help="optional .npy dump per reader")
     args = parser.parse_args(argv)
@@ -173,10 +185,15 @@ def main(argv: list[str] | None = None) -> int:
 
         contribs: list[np.ndarray] = []
         hiddens: list[np.ndarray] = []
+        use_control = name in set(args.control)
         with torch.no_grad():
-            for item in items:
+            for idx, item in enumerate(items):
                 ids = p0._qa_prompt_ids(tokenizer, item, PROMPT, BOOLQ_PROMPT)
                 et = store.fetch(np.asarray(ids, dtype=np.int64))
+                if use_control:
+                    # Same permutation run_phase0 applies in its control mode.
+                    perm_rng = np.random.default_rng(args.seed * 1000 + idx)
+                    et = et[perm_rng.permutation(len(et))]
                 model._current_ple_e_t = (
                     torch.from_numpy(et[None, :, :]).float().to(args.device)
                 )
@@ -206,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         verdicts[name] = verdict
         per_reader[name] = {
             "checkpoint": path,
+            "control_rows": use_control,
             "n": len(items),
             "S_c_boolq": s_c_boolq,
             "S_c_short": s_c_short,
@@ -248,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         "prompt_template": PROMPT,
         "boolq_prompt_template": BOOLQ_PROMPT,
         "n_permutations": N_PERMUTATIONS,
+        "control_readers": list(args.control),
         "n_boolq": n_boolq,
         "n_short": n_short,
         "tasks": {t: int((tasks == t).sum()) for t in sorted(set(tasks))},

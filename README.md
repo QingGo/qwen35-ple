@@ -184,6 +184,26 @@ NLL gap（正 = 长窗口更好）在 CODE / WIKI 上、四档语料规模、三
 低频 n-gram 统计恰恰是被压掉的部分 —— 表能补上权重丢掉的。而 0.8B 的权重比
 6B active 的权重丢掉**更多**，所以原则上小模型应该**更**受益，不是更少。
 
+**窗口有多大、里面有多少是"关于这道题的"（round 164，本地测量，无需 GPU）**：
+
+生产几何下 `c_t` 依赖 `t-11 .. t` 共 **12 个 token**（`pad_len=(4-1)*3=9`，加
+`ngram_size=3` 的回看）。但窗口取自**答案位置**，因此它包含模板的固定后缀：
+
+| 任务 | 后缀 token | 窗口内逐条槽位 | 后缀占比 |
+|---|---|---|---|
+| boolq | **10 / 12** | **2** | 0.833 |
+| nq | 3 / 12 | 9 | 0.250 |
+| triviaqa | 3 / 12 | 9 | 0.250 |
+
+**对 BoolQ 这种长指令模板，注入向量 83% 由模板决定，只有 2 个 token 随题目变化。**
+这把界的可用空间进一步压小，也给"格式效应远大于内容效应"提供了一个结构性的解释。
+
+> 同轮还有一个**否定的设计结论**：本轮最初打算按"窗口 n-gram 的语料稀有度"分层
+> （界的正面预测）。该设计在 1M–3M token 的参考语料上**不可构造** —— 在表的寻址
+> 阶数 k=3 上 93% 的条目计数为 0，分位数退化。更根本地：**在窗口尺度（k=9..12）上，
+> "这段上下文模型见没见过"根本无法用数语料估计，因为任何可负担的语料里几乎每个
+> 12-gram 都是唯一的。** 详见 `docs/round-164-window-composition-preregistration.md` §4。
+
 **9. 原版验证过、而我们从未测过的配置**（这是"为什么他们行"的核心）：
 
 | 配置 | 原版三家 | 本仓库 |
@@ -380,7 +400,7 @@ src/qwen35_ple/    实验编排代码（config / engine / data / train / eval / 
   live_store.py    PLE 行表懒加载（LiveETStore / LiveETDataset）
 configs/           训练与推理配置
 scripts/           一次性脚本（数据构建、表资产、评测、审计）
-docs/              158 篇文档（索引见下）
+docs/              164 篇文档（索引见下）
 tests/             35 个测试文件（golden 对拍与不变量）
 paper/             paper.typ + figures（编译产物 paper.pdf）
 ```
@@ -389,7 +409,7 @@ paper/             paper.typ + figures（编译产物 paper.pdf）
 
 ## 文档索引
 
-`docs/` 共 163 篇。**不要通读**，按主题进入：
+`docs/` 共 164 篇。**不要通读**，按主题进入：
 
 **起点（想快速了解现状）**
 
@@ -398,6 +418,7 @@ paper/             paper.typ + figures（编译产物 paper.pdf）
 | `round-157-why-the-graft-is-a-prior-not-a-knowledge-channel.md` | **可证明的天花板 + 为何它只能承载先验**（建议先读） |
 | `round-162-format-prior.md` | **决定性的否证：格式迁移真实但内容无关**（六臂，预注册 + 机械判决） |
 | `round-163-reader-forward-golden.md` | **读出实现与官方数学位级对拍**；官方 config 权威值；官方挂载点在第 1 层 |
+| `round-164-window-composition-preregistration.md` | **寻址窗口里有多少是"关于这道题的"**；BoolQ 后缀占 10/12；稀有度分层为何不可构造（预注册，Part B 待跑） |
 | `round-158-ngram-reference-frame.md` | **计数参照系：这张表必须打败的数字** |
 | `round-156-g0-nople-format-vs-content-and-metric-bugs.md` | 格式 vs 知识；两个指标 bug；关机事故复盘 |
 | `round-154-session-consolidation-and-handoff.md` | 会话交接总览 |

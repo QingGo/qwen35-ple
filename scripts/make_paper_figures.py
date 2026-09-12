@@ -77,6 +77,8 @@ def house_style() -> None:
         "xtick.major.size": 2.4,
         "ytick.major.size": 2.4,
         "svg.fonttype": "path",
+        # fixed salt + no date, so regeneration is byte-stable
+        "svg.hashsalt": "qwen35-ple",
         "figure.dpi": 300,
         "savefig.bbox": "tight",
         "savefig.pad_inches": 0.02,
@@ -89,7 +91,10 @@ def _load(path: str) -> dict:
 
 def _save(fig, out: Path, name: str) -> None:
     out.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out / name)
+    # The figures are committed, so regeneration must not create a spurious
+    # diff: matplotlib otherwise stamps a generation date into the SVG header
+    # and every `make paper` shows all seven files as modified.
+    fig.savefig(out / name, metadata={"Date": None})
     plt.close(fig)
     print(f"[figs] wrote {out / name}")
 
@@ -131,13 +136,13 @@ def figure_window_and_bound(cfg: dict, out: Path) -> None:
     strip(y1, window, colors)
     ax.annotate("", xy=(11 - window + 1 - bw / 2, y1 + bh + 0.22),
                 xytext=(11 + bw / 2, y1 + bh + 0.22),
-                arrowprops=dict(arrowstyle="-", color=CONV, lw=1.0))
+                arrowprops={"arrowstyle": "-", "color": CONV, "lw": 1.0})
     ax.text(5.5, y1 + bh + 0.30,
             f"short conv reaches {conv_reach} more  (kernel {kernel}, dilation {ngram})",
             ha="center", va="bottom", fontsize=6.8, color=CONV)
     ax.annotate("", xy=(11 - ngram + 1 - bw / 2, y1 - 0.24),
                 xytext=(11 + bw / 2, y1 - 0.24),
-                arrowprops=dict(arrowstyle="-", color=KEY, lw=1.0))
+                arrowprops={"arrowstyle": "-", "color": KEY, "lw": 1.0})
     ax.text(10.1, y1 - 0.34, f"row id reads {ngram}", ha="center", va="top",
             fontsize=6.8, color=KEY)
     ax.text(-0.9, y1 + bh / 2, "Engram\nQwen3.8", ha="right", va="center",
@@ -290,7 +295,7 @@ def figure_readout_collapse(va: dict, out: Path) -> None:
     errs = [0.0, float(np.std(rand)), 0.0]
     cols = [GRID, GRID, ACCENT]
     ax.bar(range(3), vals, 0.62, color=cols, zorder=2,
-           yerr=errs, error_kw=dict(lw=0.7, capsize=2, ecolor=INK))
+           yerr=errs, error_kw={"lw": 0.7, "capsize": 2, "ecolor": INK})
     ax.axhline(1.0, color=INK, ls=":", lw=0.7, zorder=1)
     ax.text(2.45, 0.93, "rank 1", fontsize=6.0, color=MUTED, ha="right", va="top")
     for i, v in enumerate(vals):

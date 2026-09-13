@@ -430,7 +430,7 @@ src/qwen35_ple/    实验编排代码（config / engine / data / train / eval / 
   live_store.py    PLE 行表懒加载（LiveETStore / LiveETDataset）
 configs/           训练与推理配置
 scripts/           一次性脚本（数据构建、表资产、评测、审计）
-docs/              183 篇文档（索引见下）
+docs/              184 篇文档（索引见下）
 tests/             35 个测试文件（golden 对拍与不变量）
 paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生成）
 ```
@@ -439,7 +439,7 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 
 ## 文档索引
 
-`docs/` 共 183 篇。**不要通读**，按主题进入：
+`docs/` 共 184 篇。**不要通读**，按主题进入：
 
 **起点（想快速了解现状）**
 
@@ -471,6 +471,7 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 | `round-167-synthesis-surprises-and-new-directions.md` | **七条意外结论 + 一个统一解释 + 四个新方向**：塌缩是**目标的最优解**（saddle-to-saddle simplicity bias），所以初始化/深度都不是原因；下一步是**让记忆变得必要**而不是修读出 |
 | `round-167-design-making-memory-necessary.md` | **怎么让记忆变得必要（具体设计）**：秩 1 够是因为目标允许；冻结表下唯一可行构造是**窗口遮蔽 + 剂量反应**（W ∈ {0,1,2,4,8,12}），三个独立读数 + 预注册判据。含「这套设计不能证明什么」 |
 | `round-167-design-corpus-selection-by-marginal-advantage.md` | **能否"选主干 PPL 高、记忆 PPL 低"的语料？**两篇文献给出警告（kNN-LM 对低频 target **更差**）与 PLE 的关键区别（哈希检索永不失败）；修正判据为三条件交集，并给出**不需要训练**的第一步：先量 `margin = L_bb − L_cnt` 的分布 |
+| `round-167-design-finding-the-key.md` | **必要更正：不是"信息不在"，是"读不出来"**（密码学视角）。把问题改成**如何找到正确的密钥**，列出 7 个可搜的解码器维度（族/容量/时间/初始化/目标/官方共训读出/输入集合），并给出唯一判决：**CMI 随解码能力是否饱和**。含与密码学的**不类比** |
 | `gpu-utilisation-playbook.md` | **GPU 利用率手册**：≥50% 标准、四类诊断矩阵、本轮修掉的两个浪费（按 token 批处理、绕过 lm_head）、并发模式、提速必须先证等价 |
 
 **契约与设计**：`integration-contract.md`（唯一权威）、`qwen35-ple-design.md`、`roadmap.md`

@@ -91,6 +91,23 @@ class VerdictInputs:
         }
 
 
+def _injection_count(report: dict[str, Any]) -> int | None:
+    """Injection count from a run_phase0 report, or ``None`` if absent.
+
+    ``run_phase0`` records it under ``results[i]["ple_injection"]["injected"]``.
+    The first version of this loader looked for a top-level ``injected`` key,
+    found nothing, defaulted to zero and returned UNDERPOWERED for a run that had
+    injected 5,268 times -- a false verdict produced entirely by reading a field
+    that does not exist.  Absence must be reported, never defaulted.
+    """
+    for result in report.get("results") or []:
+        injection = result.get("ple_injection")
+        if isinstance(injection, dict) and isinstance(injection.get("injected"), int):
+            return int(injection["injected"])
+    top = report.get("injected")
+    return int(top) if isinstance(top, int) else None
+
+
 def _metric_mean(metrics: dict[str, Any], tasks: tuple[str, ...] = RULE_TASKS) -> float | None:
     values = [metrics[t] for t in tasks if isinstance(metrics.get(t), (int, float))]
     if not values:
@@ -113,7 +130,7 @@ def collect_inputs(
     out = VerdictInputs(modes=list(modes), n_seeds={m: 0 for m in modes})
     for mode in modes:
         gate_fracs: list[float] = []
-        injected_total = 0
+        injections: list[int] = []
         for seed in seeds:
             gate = gate_reports.get((mode, seed))
             if gate is None:
@@ -127,13 +144,9 @@ def collect_inputs(
             ]
             if fracs:
                 gate_fracs.append(sum(fracs) / len(fracs))
-            sc = gate.get("injected")
-            if isinstance(sc, int):
-                injected_total += sc
         out.open_frac[mode] = (
             float(sum(gate_fracs) / len(gate_fracs)) if gate_fracs else float("nan")
         )
-        out.injected[mode] = injected_total
 
         for arm in ("real", "control"):
             values: list[float] = []
@@ -148,6 +161,11 @@ def collect_inputs(
                 if not details:
                     out.missing.append(f"eval:{mode}:{arm}:seed{seed}")
                     continue
+                count = _injection_count(report)
+                if count is None:
+                    out.missing.append(f"injection:{mode}:{arm}:seed{seed}")
+                else:
+                    injections.append(count)
                 metrics = (details[0].get("qa_exact") or {}).get("metrics") or {}
                 value = _metric_mean(metrics)
                 if value is None:
@@ -165,6 +183,7 @@ def collect_inputs(
             out.per_seed[f"{mode}:{arm}"] = rows
             if values:
                 out.n_seeds[mode] = max(out.n_seeds.get(mode, 0), len(values))
+        out.injected[mode] = sum(injections)
     return out
 
 

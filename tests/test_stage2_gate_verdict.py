@@ -241,3 +241,51 @@ def test_markdown_reports_every_quantity_the_rule_read():
     assert "gate_open_frac_all_entries" in md
     assert "gain vs the arm's own control" in md
     assert "frozen in the pre-registration" in md
+
+
+# --------------------------------------------------------------------------
+# injection provenance
+# --------------------------------------------------------------------------
+def _eval_report_with_injection(triviaqa: float, nq: float, injected: int) -> dict:
+    """Both arms, because the loader walks both and reports a missing one."""
+    report = _eval_report(triviaqa, nq)
+    report["summary"]["control"] = report["summary"]["real"]
+    report["results"] = [{"ple_injection": {"injected": injected}}]
+    return report
+
+
+def test_injection_is_read_from_the_run_report_not_invented():
+    evals = {("scalar", arm, s): _eval_report_with_injection(0.1, 0.2, 1000)
+             for arm in ("real", "control") for s in SEEDS}
+    gates = {("scalar", s): _gate_report(0.95) for s in SEEDS}
+    got = collect_inputs(evals, gates, modes=["scalar"], seeds=SEEDS)
+    assert got.injected["scalar"] == 6000
+    assert got.missing == []
+
+
+def test_absent_injection_metadata_is_missing_not_zero():
+    """The false UNDERPOWERED: a report with no injection field at all.
+
+    The first loader defaulted this to 0 and declared the run a silent no-op,
+    discarding a finished experiment that had injected 5,268 times.
+    """
+    evals = {
+        (mode, arm, s): _eval_report(0.1, 0.2)
+        for mode in MODES for arm in ("real", "control") for s in SEEDS
+    }
+    for report in evals.values():
+        report["summary"]["control"] = report["summary"]["real"]
+    gates = {(m, s): _gate_report(0.95) for m in MODES for s in SEEDS}
+    got = collect_inputs(evals, gates, modes=MODES, seeds=SEEDS)
+    assert any(m.startswith("injection:scalar") for m in got.missing)
+    assert apply_rule(got)["label"] == "INCOMPLETE"
+
+
+def test_injection_count_falls_back_to_a_top_level_field():
+    """Forward compatibility only: the gate report that exists today has no such
+    key, which is exactly why the loader must not default a missing field to 0."""
+    from qwen35_ple.stage2_gate_verdict import _injection_count
+    assert _injection_count({"injected": 7}) == 7
+    assert _injection_count({"results": [{"ple_injection": {"injected": 5}}]}) == 5
+    assert _injection_count({}) is None
+    assert _injection_count({"results": [{}]}) is None

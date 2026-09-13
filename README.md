@@ -430,7 +430,7 @@ src/qwen35_ple/    实验编排代码（config / engine / data / train / eval / 
   live_store.py    PLE 行表懒加载（LiveETStore / LiveETDataset）
 configs/           训练与推理配置
 scripts/           一次性脚本（数据构建、表资产、评测、审计）
-docs/              178 篇文档（索引见下）
+docs/              179 篇文档（索引见下）
 tests/             35 个测试文件（golden 对拍与不变量）
 paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生成）
 ```
@@ -439,7 +439,7 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 
 ## 文档索引
 
-`docs/` 共 178 篇。**不要通读**，按主题进入：
+`docs/` 共 179 篇。**不要通读**，按主题进入：
 
 **起点（想快速了解现状）**
 
@@ -466,6 +466,7 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 | `round-167-stage1-effective-depth-preregistration.md` | **Stage 1a 预注册**：PLE 开/关的 effective depth。三种结局与判定规则在看数字前冻结 |
 | `round-167-stage1a-effective-depth-results.md` | **Stage 1a 结果：嫁接没有释放有效深度**。三骨干无一 `DEPTH_FREED`；凡位移出现处 `real` 与 `shuf` 完全相同 → 效应来自注入形状而非内容。含 6× 吞吐记录（按 token 批处理 + 绕过 lm_head） |
 | `round-167-stage1b-preregistration.md` | **Stage 1b 预注册**：塌缩是初始化/深度的（配方）还是架构的？四变体，判定规则在读取任何 PR 前冻结 |
+| `round-167-stage1b-results.md` | **Stage 1b 结果：塌缩是架构的，且不是零初始化造成的**。`nozero` 与 `prod` 逐阶段完全相同 → 证伪「零初始化」假设链；`e_t→value_proj` 的 6.53× 衰减在四变体上相同，因为它**冻结** |
 | `gpu-utilisation-playbook.md` | **GPU 利用率手册**：≥50% 标准、四类诊断矩阵、本轮修掉的两个浪费（按 token 批处理、绕过 lm_head）、并发模式、提速必须先证等价 |
 
 **契约与设计**：`integration-contract.md`（唯一权威）、`qwen35-ple-design.md`、`roadmap.md`

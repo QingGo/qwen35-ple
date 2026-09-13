@@ -430,7 +430,7 @@ src/qwen35_ple/    实验编排代码（config / engine / data / train / eval / 
   live_store.py    PLE 行表懒加载（LiveETStore / LiveETDataset）
 configs/           训练与推理配置
 scripts/           一次性脚本（数据构建、表资产、评测、审计）
-docs/              181 篇文档（索引见下）
+docs/              182 篇文档（索引见下）
 tests/             35 个测试文件（golden 对拍与不变量）
 paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生成）
 ```
@@ -439,7 +439,7 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 
 ## 文档索引
 
-`docs/` 共 181 篇。**不要通读**，按主题进入：
+`docs/` 共 182 篇。**不要通读**，按主题进入：
 
 **起点（想快速了解现状）**
 
@@ -469,6 +469,7 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 | `round-167-stage1b-results.md` | **Stage 1b 结果：塌缩是架构的，且不是零初始化造成的**。`nozero` 与 `prod` 逐阶段完全相同 → 证伪「零初始化」假设链；`e_t→value_proj` 的 6.53× 衰减在四变体上相同，因为它**冻结** |
 | `round-167-stage2-gate-selectivity-preregistration.md` | **Stage 2.2 预注册**：gate 饱和是不是 always-on 伤害的原因？`scalar`(官方, 每分支一个标量) vs `per_dim`(每维独立)。判定规则先冻结 |
 | `round-167-synthesis-surprises-and-new-directions.md` | **七条意外结论 + 一个统一解释 + 四个新方向**：塌缩是**目标的最优解**（saddle-to-saddle simplicity bias），所以初始化/深度都不是原因；下一步是**让记忆变得必要**而不是修读出 |
+| `round-167-design-making-memory-necessary.md` | **怎么让记忆变得必要（具体设计）**：秩 1 够是因为目标允许；冻结表下唯一可行构造是**窗口遮蔽 + 剂量反应**（W ∈ {0,1,2,4,8,12}），三个独立读数 + 预注册判据。含「这套设计不能证明什么」 |
 | `gpu-utilisation-playbook.md` | **GPU 利用率手册**：≥50% 标准、四类诊断矩阵、本轮修掉的两个浪费（按 token 批处理、绕过 lm_head）、并发模式、提速必须先证等价 |
 
 **契约与设计**：`integration-contract.md`（唯一权威）、`qwen35-ple-design.md`、`roadmap.md`

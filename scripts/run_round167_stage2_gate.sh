@@ -38,7 +38,9 @@ MODES="${MODES:-scalar per_dim}"
 ITEMS="${ITEMS:-data/qa-standard/eval-600b.jsonl}"
 MAX_ITEMS="${MAX_ITEMS:-600}"
 TRAIN_CONCURRENCY="${TRAIN_CONCURRENCY:-3}"
-EVAL_CONCURRENCY="${EVAL_CONCURRENCY:-1}"
+EVAL_CONCURRENCY="${EVAL_CONCURRENCY:-2}"
+# Only start a memory-heavy job when this much is genuinely free.
+EVAL_MIN_FREE_MIB="${EVAL_MIN_FREE_MIB:-9000}"
 TARGET_UTIL="${TARGET_UTIL:-50}"
 OUT="${OUT:-$ROOT/outputs/round167/stage2-gate}"
 LOG="${LOG:-$ROOT/logs/round167-stage2-gate.log}"
@@ -78,6 +80,38 @@ trap 'kill $SAMPLER 2>/dev/null' EXIT
 wait_for_slot() {
   local limit="$1"
   while [ "$(jobs -rp | wc -l)" -ge "$((limit + 1))" ]; do sleep 5; done
+}
+
+# Track the PIDs we actually want to join.  A bare `wait` also waits on the
+# infinite utilisation sampler and therefore deadlocks the queue -- which is
+# exactly what happened on this script's first launch.
+JOB_PIDS=()
+
+launch() {
+  "$@" &
+  JOB_PIDS+=("$!")
+}
+
+wait_all() {
+  local p
+  for p in "${JOB_PIDS[@]:-}"; do wait "$p" 2>/dev/null; done
+  JOB_PIDS=()
+}
+
+# Memory-gated launch.  A fixed concurrency is the wrong control for a bursty
+# job: the evaluation was measured at a median of 5 GiB / 26% utilisation but a
+# PEAK of 15 GiB / 88%, so two jobs fit most of the time and collide rarely.
+# Waiting for real free memory turns that into a self-regulating depth -- and
+# since the idle time is CPU-bound preparation between GPU bursts, overlapping a
+# second job is precisely what fills the gaps.
+wait_for_mem() {
+  local need="${1:-9000}"
+  local free
+  while :; do
+    free="$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits)"
+    [ "${free:-0}" -ge "$need" ] && break
+    sleep 5
+  done
 }
 
 train_reader() {
@@ -125,7 +159,7 @@ eval_reader() {
     --modes real control \
     "${tflag[@]}" \
     --qa-exact-match --qa-gold-nll --qa-gold-nll-spaced --qa-norm-stats \
-    --qa-max-new-tokens 32 --qa-batch-size 4 --qa-batch-max-tokens 2048 \
+    --qa-max-new-tokens 32 --qa-batch-size 4 --qa-batch-max-tokens 1024 \
     --qa-prompt-template "$PROMPT" --qa-boolq-prompt-template "$BOOLQ_PROMPT" \
     --qa-file "$ITEMS" --qa-max-items "$MAX_ITEMS" \
     --output "$out" >>"$LOG" 2>&1
@@ -156,30 +190,32 @@ log "queue start modes='$MODES' seeds='$SEEDS' steps=$STEPS train_conc=$TRAIN_CO
 for mode in $MODES; do
   for seed in $SEEDS; do
     wait_for_slot "$TRAIN_CONCURRENCY"
-    train_reader "$mode" "$seed" &
+    launch train_reader "$mode" "$seed"
   done
 done
-wait
+wait_all
 log "stage A (training) complete"
 
 for mode in $MODES; do
   for seed in $SEEDS; do
     for tmpl in raw chat; do
       wait_for_slot "$EVAL_CONCURRENCY"
-      eval_reader "$mode" "$seed" "$tmpl" &
+      wait_for_mem "$EVAL_MIN_FREE_MIB"
+      launch eval_reader "$mode" "$seed" "$tmpl"
     done
   done
 done
-wait
+wait_all
 log "stage B (evaluation) complete"
 
 for mode in $MODES; do
   for seed in $SEEDS; do
     wait_for_slot "$EVAL_CONCURRENCY"
-    gate_stats "$mode" "$seed" &
+    wait_for_mem "$EVAL_MIN_FREE_MIB"
+    launch gate_stats "$mode" "$seed"
   done
 done
-wait
+wait_all
 
 kill "$SAMPLER" 2>/dev/null
 PYTHONPATH=src "$PY" scripts/gpu_util_probe.py --trace "$UTIL_TRACE" \

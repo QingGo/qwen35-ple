@@ -1988,6 +1988,22 @@ def main() -> int:
     parser.add_argument("--bridge-hidden", type=int, default=None)
     parser.add_argument("--out-mlp", action="store_true")
     parser.add_argument("--out-hidden", type=int, default=None)
+    # Round 167 Stage 0.3 (TD-3a): make the read-out initialisation perturbable.
+    # The default preserves the historical behaviour exactly, so every existing
+    # queue and checkpoint is unaffected; `--no-zero-init-out` is the new arm.
+    parser.add_argument(
+        "--zero-init-out",
+        dest="zero_init_out",
+        action="store_true",
+        default=True,
+        help="zero-initialise the read-out output projection (default; official design)",
+    )
+    parser.add_argument(
+        "--no-zero-init-out",
+        dest="zero_init_out",
+        action="store_false",
+        help="train the read-out output projection from a real init (round 167 Stage 1b)",
+    )
     parser.add_argument("--short-conv", action="store_true")
     parser.add_argument("--hc-mult", type=int, default=4)
     parser.add_argument("--kernel-size", type=int, default=4)

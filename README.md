@@ -430,7 +430,7 @@ src/qwen35_ple/    实验编排代码（config / engine / data / train / eval / 
   live_store.py    PLE 行表懒加载（LiveETStore / LiveETDataset）
 configs/           训练与推理配置
 scripts/           一次性脚本（数据构建、表资产、评测、审计）
-docs/              170 篇文档（索引见下）
+docs/              175 篇文档（索引见下）
 tests/             35 个测试文件（golden 对拍与不变量）
 paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生成）
 ```
@@ -439,7 +439,7 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 
 ## 文档索引
 
-`docs/` 共 170 篇。**不要通读**，按主题进入：
+`docs/` 共 175 篇。**不要通读**，按主题进入：
 
 **起点（想快速了解现状）**
 
@@ -459,6 +459,11 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 | `round-156-g0-nople-format-vs-content-and-metric-bugs.md` | 格式 vs 知识；两个指标 bug；关机事故复盘 |
 | `round-154-session-consolidation-and-handoff.md` | 会话交接总览 |
 | `round-153-goal-tech-debt-and-development-plan.md` | 目标精确化、技术债、停止规则 |
+| `round-167-ultimate-goal-tech-debt-and-plan-v2.md` | **目标第三版 + 本 session 新增 8 类技术债 + 四阶段计划**：目标加入"机制轴"（Engram 的收益在有效深度上，而我们从没测过）；新债以**测量效度债**（长度混淆）与**提案执行债**（决定性对照被写下三次、执行零次）为首 |
+| `round-167-stage0-debt-results.md` | **Stage 0 还债结果**：0.1 当场抓到两件事 —— 一个我写错的指标声明，以及**论文 0.8B 格式论断的失效**（校正后 share +1.157）；4B 的那条被校正**加强**（share −0.016） |
+| `unexecuted-controls.md` | **未执行对照登记册**：三份历史 TODO 合并，分栏未执行 12 / 已完成 14 / 已否决 4，每项带成本 |
+| `live-claims.md` | **活结论清单**：每条带配置四元组（表冻结/可训练 × 主干冻结/共训 × 单/双层 × 饱和/非饱和）；最强活正结论是 4B 格式迁移与 `code>wiki` |
+| `round-167-stage1-effective-depth-preregistration.md` | **Stage 1a 预注册**：PLE 开/关的 effective depth。三种结局与判定规则在看数字前冻结 |
 
 **契约与设计**：`integration-contract.md`（唯一权威）、`qwen35-ple-design.md`、`roadmap.md`
 
@@ -488,15 +493,20 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 - 端侧存储基准、无效臂审计、计数参照系、表探针
 - 自动关机 finisher（含生产者存活检测与失败即关机）
 
-**已知技术债（按优先级）**
+**已知技术债（按优先级，完整清单见 `docs/round-167-ultimate-goal-tech-debt-and-plan-v2.md` §3）**
 
 | 优先级 | 项 |
 |---|---|
-| P0 | 跨分布扫描未完成：4.94 的天花板是自然文本的，代码/结构化语料待测 |
-| P0 | gold NLL 的空格主口径尚未成为默认（现为诊断 flag） |
-| P1 | 真实 vLLM / SGLang 引擎 A/B 未做 |
-| P1 | 端侧只测了 NVMe；USB SSD / SD 与移动端功耗未测 |
-| P2 | `docs/` 158 篇缺少系列化的归档策略，检索成本偏高 |
+| **P0** | **测量效度债**：指标必须附"只动滋扰变量"的扰动测试（round-166 长度混淆使 0.8B 的 +0.6933 虚高 40%） |
+| **P0** | **评价轴债**：effective depth 自 round-26 起只是 TODO，而 Engram 的机制主张与收益都在这一轴 |
+| **P0** | **配置空间债**：官方设计的 5 个关键量（可训练表 / 共训 / gate 选择性 / 读出初始化 / 双层注入）**5 个未被扰动**；`zero_init_out` 还是字面量，不可测 |
+| P1 | **提案执行债**：round-20 / round-146 / session-log 三次写出同一份决定性对照清单，执行零次 |
+| P1 | 文献读入债：Memory Grafting 被记反（它是换 memory value 的内容）；TokenMem 在诊断出病之前被否决 |
+| P1 | 停止规则误触发：round-153 的停止规则只在「冻结嫁接」子空间成立，被读成方向级关闭 |
+| P1 | 正面结果埋没：oracle headroom（raw +0.06 / chat +0.06，round-146 原文口径）与 `code>wiki` 三骨干存活未被继承 |
+| P1 | 参数侧 iso-budget 曲线仍未做（round-153 起列为最大缺口）；真实 vLLM / SGLang A/B 未做 |
+| P2 | 端侧只测了 NVMe；USB SSD / SD 与移动端功耗未测 |
+| P2 | 范围声明：论断未统一标注配置子空间四元组（表冻结/可训练 × 主干冻结/共训 × 单/双层 × 饱和/非饱和） |
 
 **停止规则（修订版）**
 

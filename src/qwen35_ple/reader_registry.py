@@ -439,6 +439,13 @@ def reader_config_from_args(
     if reader_name == OFFICIAL_SOURCE_QWEN_V1:
         # run_phase0's official path currently uses the OfficialSourceQwenReader
         # defaults for hc/kernel/dilation; keep checkpoint config in sync.
+        #
+        # Round 167 Stage 0.3 (TD-3a): ``zero_init_out`` used to be the literal
+        # ``True`` here, so the read-out initialisation was not merely untested --
+        # it was untestable without editing this file.  It now reads the CLI arg
+        # and *defaults to True*, so no existing run changes behaviour and every
+        # historical checkpoint still loads under the default.  ``out_mlp`` /
+        # ``out_hidden`` already provide the read-out depth knob.
         return {
             "d_target": d_target,
             "d_source": 2560,
@@ -447,7 +454,13 @@ def reader_config_from_args(
             "kernel_size": 4,
             "dilation": 3,
             "freeze_source": True,
-            "zero_init_out": True,
+            # `None` means "unset" (a caller that builds a partial namespace), so
+            # it must fall back to the official default rather than bool(None).
+            "zero_init_out": (
+                True
+                if getattr(args, "zero_init_out", None) is None
+                else bool(args.zero_init_out)
+            ),
             "bridge_mlp": bool(getattr(args, "bridge_mlp", False)),
             "bridge_hidden": getattr(args, "bridge_hidden", None),
             "out_mlp": bool(getattr(args, "out_mlp", False)),

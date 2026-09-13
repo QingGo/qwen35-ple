@@ -4,7 +4,7 @@
 #
 # Pre-registration: docs/round-167-stage2-gate-selectivity-preregistration.md
 #
-# Design (mirrors round-162's real/control structure so the arms are comparable):
+# Design (mirrors round-162's real/control structure so arms are comparable):
 #
 #   for mode in scalar per_dim; for seed in 0 1 2:
 #       train ONE reader with --gate-mode $mode          (mixed50, 500 steps)
@@ -13,11 +13,15 @@
 #
 # so 6 trainings, 12 evaluations and 6 gate reports.
 #
-# UTILISATION (round-167 standing rule, >= 50%).  A single arm measures ~23%
-# utilisation at ~5 GiB of 24 GiB (OCCUPANCY_BOUND: the job cannot fill the card
-# but several can), so trainings and evaluations run CONCURRENCY-deep rather
-# than serially.  The queue probes before and after and refuses to be silent
-# about a miss.
+# UTILISATION (round-167 standing rule, >= 50%).  Concurrency depth is PER PHASE
+# and measured, not assumed:
+#
+#   * training peaks near 5 GiB  -> 3 fit on a 24 GiB card (measured 91-99%)
+#   * generation peaks near 13 GiB (KV cache + 248k-way logits) -> only 1 fits
+#
+# A single shared limit OOM'd stage B with "Process 89891 has 12.81 GiB in use".
+# Utilisation is sampled CONTINUOUSLY across the queue and summarised at the end,
+# because a probe taken between phases sees an idle GPU and always reads 0%.
 #
 # Usage:  bash scripts/run_round167_stage2_gate.sh
 set -uo pipefail
@@ -33,8 +37,8 @@ SEEDS="${SEEDS:-0 1 2}"
 MODES="${MODES:-scalar per_dim}"
 ITEMS="${ITEMS:-data/qa-standard/eval-600b.jsonl}"
 MAX_ITEMS="${MAX_ITEMS:-600}"
-# Memory headroom: ~5 GiB per training job on a 24 GiB card -> 3 is safe.
-CONCURRENCY="${CONCURRENCY:-3}"
+TRAIN_CONCURRENCY="${TRAIN_CONCURRENCY:-3}"
+EVAL_CONCURRENCY="${EVAL_CONCURRENCY:-1}"
 TARGET_UTIL="${TARGET_UTIL:-50}"
 OUT="${OUT:-$ROOT/outputs/round167/stage2-gate}"
 LOG="${LOG:-$ROOT/logs/round167-stage2-gate.log}"
@@ -58,31 +62,28 @@ if ! flock -n 9; then
 fi
 log "lock held (or waived)"
 
-# --- utilisation gate ------------------------------------------------------
-probe() {
-  local tag="$1"
-  PYTHONPATH=src "$PY" scripts/gpu_util_probe.py --seconds 20 --require "$TARGET_UTIL" \
-    --json "$OUT/util-$tag.json" >>"$LOG" 2>&1
-  local rc=$?
-  # A miss is recorded loudly but does not kill a half-finished queue: the
-  # results are worth more than the gate, and round-167's rule is "diagnose",
-  # not "abort".
-  [ $rc -ne 0 ] && log "UTILISATION BELOW ${TARGET_UTIL}% at $tag (see util-$tag.json)"
-  return 0
-}
+UTIL_TRACE="$OUT/util-trace.csv"
+: >"$UTIL_TRACE"
+(
+  while true; do
+    nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits \
+      >>"$UTIL_TRACE" 2>/dev/null
+    sleep 3
+  done
+) &
+SAMPLER=$!
+trap 'kill $SAMPLER 2>/dev/null' EXIT
 
-# Run up to $CONCURRENCY background jobs, waiting for the oldest when full.
+# The sampler is itself a background job, so the ceiling is limit + 1.
 wait_for_slot() {
-  while [ "$(jobs -rp | wc -l)" -ge "$CONCURRENCY" ]; do sleep 5; done
+  local limit="$1"
+  while [ "$(jobs -rp | wc -l)" -ge "$((limit + 1))" ]; do sleep 5; done
 }
 
 train_reader() {
   local mode="$1" seed="$2"
   local ckpt="$OUT/reader-$mode-seed$seed.pt"
-  if [ -f "$ckpt" ]; then
-    log "train $mode seed$seed: exists, skip"
-    return 0
-  fi
+  if [ -f "$ckpt" ]; then log "train $mode seed$seed: exists, skip"; return 0; fi
   PYTHONPATH=src "$PY" -u scripts/run_phase0.py \
     --reader official --layer 2 --bridge-mlp --out-mlp \
     --gate-mode "$mode" \
@@ -109,8 +110,7 @@ eval_reader() {
   local ckpt="$OUT/reader-$mode-seed$seed.pt"
   local out="$OUT/eval-$mode-seed$seed-$tmpl.json"
   if [ -f "$out" ] && grep -q '"answers"' "$out" 2>/dev/null; then
-    log "eval $mode seed$seed [$tmpl]: exists, skip"
-    return 0
+    log "eval $mode seed$seed [$tmpl]: exists, skip"; return 0
   fi
   local tflag=()
   [ "$tmpl" = "chat" ] && tflag=(--qa-chat-template)
@@ -125,7 +125,7 @@ eval_reader() {
     --modes real control \
     "${tflag[@]}" \
     --qa-exact-match --qa-gold-nll --qa-gold-nll-spaced --qa-norm-stats \
-    --qa-max-new-tokens 32 --qa-batch-size 8 --qa-batch-max-tokens 4096 \
+    --qa-max-new-tokens 32 --qa-batch-size 4 --qa-batch-max-tokens 2048 \
     --qa-prompt-template "$PROMPT" --qa-boolq-prompt-template "$BOOLQ_PROMPT" \
     --qa-file "$ITEMS" --qa-max-items "$MAX_ITEMS" \
     --output "$out" >>"$LOG" 2>&1
@@ -139,8 +139,7 @@ gate_stats() {
   local ckpt="$OUT/reader-$mode-seed$seed.pt"
   local out="$OUT/gate-$mode-seed$seed.json"
   [ -f "$out" ] && { log "gate $mode seed$seed: exists, skip"; return 0; }
-  # analyze_reader_gate.py takes --max-tokens (prompt budget), not --max-items,
-  # and has no --backbone-dtype; it loads the model itself.
+  # analyze_reader_gate.py takes --max-tokens (a prompt budget), not --max-items.
   PYTHONPATH=src "$PY" -u scripts/analyze_reader_gate.py \
     --model "$MODEL" --model-dir "$ROOT/models/qwen38_ple" \
     --reader-checkpoint "$ckpt" --layer 2 \
@@ -152,41 +151,40 @@ gate_stats() {
   return $rc
 }
 
-log "queue start modes='$MODES' seeds='$SEEDS' concurrency=$CONCURRENCY steps=$STEPS"
-probe "start"
+log "queue start modes='$MODES' seeds='$SEEDS' steps=$STEPS train_conc=$TRAIN_CONCURRENCY eval_conc=$EVAL_CONCURRENCY"
 
-# --- Stage A: train 6 readers, CONCURRENCY at a time -----------------------
 for mode in $MODES; do
   for seed in $SEEDS; do
-    wait_for_slot
+    wait_for_slot "$TRAIN_CONCURRENCY"
     train_reader "$mode" "$seed" &
   done
 done
 wait
 log "stage A (training) complete"
-probe "after-train"
 
-# --- Stage B: evaluate each reader, raw + chat -----------------------------
 for mode in $MODES; do
   for seed in $SEEDS; do
     for tmpl in raw chat; do
-      wait_for_slot
+      wait_for_slot "$EVAL_CONCURRENCY"
       eval_reader "$mode" "$seed" "$tmpl" &
     done
   done
 done
 wait
 log "stage B (evaluation) complete"
-probe "after-eval"
 
-# --- Stage C: gate statistics ---------------------------------------------
 for mode in $MODES; do
   for seed in $SEEDS; do
-    wait_for_slot
+    wait_for_slot "$EVAL_CONCURRENCY"
     gate_stats "$mode" "$seed" &
   done
 done
 wait
+
+kill "$SAMPLER" 2>/dev/null
+PYTHONPATH=src "$PY" scripts/gpu_util_probe.py --trace "$UTIL_TRACE" \
+  --require "$TARGET_UTIL" --json "$OUT/util-summary.json" >>"$LOG" 2>&1
+log "utilisation summary written (see util-trace.csv / util-summary.json)"
 
 log "queue DONE"
 touch "$OUT/STAGE2GATE_DONE"

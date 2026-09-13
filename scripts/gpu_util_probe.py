@@ -54,6 +54,7 @@ __all__ = [
     "UNDER_BATCHED",
     "classify",
     "sample",
+    "summarise_trace",
 ]
 
 OVERHEAD_BOUND = "OVERHEAD_BOUND"
@@ -133,6 +134,37 @@ def sample(seconds: float, interval: float = 2.0) -> dict:
     }
 
 
+def summarise_trace(path: str | Path) -> dict:
+    """Summarise a ``utilization.gpu,memory.used`` CSV trace.
+
+    Sampling *during* a queue is the only way to measure it: a probe taken
+    between phases sees an idle GPU and always reports 0%.
+    """
+    util: list[float] = []
+    used: list[float] = []
+    for line in Path(path).read_text().splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 2:
+            continue
+        try:
+            util.append(float(parts[0]))
+            used.append(float(parts[1]))
+        except ValueError:
+            continue
+    if not util:
+        return {"available": False, "error": "empty utilisation trace"}
+    ordered = sorted(util)
+    return {
+        "available": True,
+        "n_samples": len(util),
+        "util_median": float(statistics.median(util)),
+        "util_mean": float(statistics.mean(util)),
+        "util_p10": float(ordered[len(ordered) // 10]),
+        "util_max": float(ordered[-1]),
+        "memory_used_mib_peak": max(used) if used else None,
+    }
+
+
 def classify(stats: dict, target: float = 50.0) -> dict:
     """Map a sample onto the case that determines the fix."""
     if not stats.get("available"):
@@ -205,7 +237,39 @@ def main() -> int:
     ap.add_argument("--interval", type=float, default=2.0)
     ap.add_argument("--require", type=float, default=None, help="exit 1 below this %%")
     ap.add_argument("--json", default=None)
+    ap.add_argument(
+        "--trace",
+        default=None,
+        help="summarise an existing utilisation trace CSV instead of sampling",
+    )
     args = ap.parse_args()
+
+    if args.trace:
+        stats = summarise_trace(args.trace)
+        verdict = classify(stats, target=args.require if args.require is not None else 50.0)
+        if stats.get("available"):
+            peak = stats.get("memory_used_mib_peak") or 0.0
+            print(
+                f"utilisation trace: n={stats['n_samples']} "
+                f"median={stats['util_median']:.0f}% mean={stats['util_mean']:.0f}% "
+                f"p10={stats['util_p10']:.0f}% peak_mem={peak / 1024:.1f}GiB "
+                f"=> {verdict['verdict']}"
+            )
+        else:
+            print(f"utilisation trace: {stats.get('error')}")
+        if args.json:
+            pth = Path(args.json)
+            pth.parent.mkdir(parents=True, exist_ok=True)
+            pth.write_text(json.dumps({"stats": stats, "diagnosis": verdict}, indent=2) + "\n")
+        if args.require is not None and stats.get("available") and (
+            stats["util_median"] < args.require
+        ):
+            print(
+                f"UTILISATION GATE: {stats['util_median']:.0f}% < {args.require:.0f}%",
+                file=sys.stderr,
+            )
+            return 1
+        return 0
 
     stats = sample(args.seconds, args.interval)
     verdict = classify(stats, target=args.require if args.require is not None else 50.0)

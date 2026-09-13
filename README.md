@@ -430,7 +430,7 @@ src/qwen35_ple/    实验编排代码（config / engine / data / train / eval / 
   live_store.py    PLE 行表懒加载（LiveETStore / LiveETDataset）
 configs/           训练与推理配置
 scripts/           一次性脚本（数据构建、表资产、评测、审计）
-docs/              175 篇文档（索引见下）
+docs/              176 篇文档（索引见下）
 tests/             35 个测试文件（golden 对拍与不变量）
 paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生成）
 ```
@@ -439,7 +439,7 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 
 ## 文档索引
 
-`docs/` 共 175 篇。**不要通读**，按主题进入：
+`docs/` 共 176 篇。**不要通读**，按主题进入：
 
 **起点（想快速了解现状）**
 
@@ -464,6 +464,7 @@ paper/             paper.typ + figures（矢量 SVG，make paper-figures 重生�
 | `unexecuted-controls.md` | **未执行对照登记册**：三份历史 TODO 合并，分栏未执行 12 / 已完成 14 / 已否决 4，每项带成本 |
 | `live-claims.md` | **活结论清单**：每条带配置四元组（表冻结/可训练 × 主干冻结/共训 × 单/双层 × 饱和/非饱和）；最强活正结论是 4B 格式迁移与 `code>wiki` |
 | `round-167-stage1-effective-depth-preregistration.md` | **Stage 1a 预注册**：PLE 开/关的 effective depth。三种结局与判定规则在看数字前冻结 |
+| `round-167-stage1a-effective-depth-results.md` | **Stage 1a 结果：嫁接没有释放有效深度**。三骨干无一 `DEPTH_FREED`；凡位移出现处 `real` 与 `shuf` 完全相同 → 效应来自注入形状而非内容。含 6× 吞吐记录（按 token 批处理 + 绕过 lm_head） |
 
 **契约与设计**：`integration-contract.md`（唯一权威）、`qwen35-ple-design.md`、`roadmap.md`
 

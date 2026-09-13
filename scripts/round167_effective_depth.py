@@ -186,6 +186,16 @@ def main() -> int:
     ap.add_argument("--backbone-dtype", default="float32")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--max-items", type=int, default=200)
+    # Batched forwards are the difference between a 9%-utilised GPU and a busy
+    # one: at batch 1 an item's forward is ~30 tokens, which cannot fill a 4090.
+    # Right padding keeps the reader's causal convolution within each item, so
+    # batching is numerically equivalent to the batch-1 path.
+    ap.add_argument("--batch-size", type=int, default=32)
+    # Items are not the right batching unit here: BoolQ prompts run to ~300
+    # tokens while NQ prompts are ~20, so a fixed item count either wastes the
+    # GPU on short items or OOMs on a batch of long ones.  Cap total tokens per
+    # batch instead, the same convention run_phase0 uses.
+    ap.add_argument("--batch-tokens", type=int, default=8192)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--output", required=True)
     args = ap.parse_args()
@@ -221,9 +231,14 @@ def main() -> int:
 
     n_layers = len(model.model.layers)
     norm, head = _resolve_head(model)
+    # The logit lens must run the model's own final norm and head in the
+    # *backbone's* dtype: feeding an fp32 hidden state to a bf16 head fails with
+    # "expected mat1 and mat2 to have the same dtype" (round 167, 2B run).  Only
+    # the resulting logits are cast to fp32, for the numpy math below.
+    param_dtype = next(head.parameters()).dtype
     print(
         f"[r167-1a] {len(items)} items, {n_layers} layers, layer={args.layer}, "
-        f"PLE scale={scale:.6g}",
+        f"PLE scale={scale:.6g}, head dtype={param_dtype}",
         flush=True,
     )
 
@@ -256,79 +271,199 @@ def main() -> int:
     # same switch ``run_phase0`` uses for its ple-off arm.
     handles.append(install_reader_hook(model, args.layer, reader, None))
 
-    # kl[cond][l], overlap[cond][l], and the three cosine families.
-    kl = {c: [[] for _ in range(n_layers + 1)] for c in CONDITIONS}
-    ov = {c: [[] for _ in range(n_layers + 1)] for c in CONDITIONS}
-    cos_layer = {c: [[] for _ in range(n_layers)] for c in CONDITIONS}
-    cos_attn = {c: [[] for _ in range(n_layers)] for c in CONDITIONS}
-    cos_mlp = {c: [[] for _ in range(n_layers)] for c in CONDITIONS}
-    tasks: list[str] = []
-    injection_deltas: list[float] = []
+    # Precompute every item's token ids, answer position and both row sets, so
+    # the batched loop below does no tokenisation or disk work.
+    prepared: list[tuple[list[int], np.ndarray, np.ndarray, str]] = []
+    for idx, item in enumerate(items):
+        ids = p0._qa_prompt_ids(tokenizer, item, PROMPT, BOOLQ_PROMPT)
+        et = store.fetch(np.asarray(ids, dtype=np.int64))
+        perm = np.random.default_rng(args.seed * 1000 + idx).permutation(len(ids))
+        prepared.append((ids, et, et[perm], str(item.get("task", "unknown"))))
+
+    n = len(prepared)
+    n_l = n_layers + 1
+    kl_acc = {c: np.full((n, n_l), np.nan) for c in CONDITIONS}
+    ov_acc = {c: np.full((n, n_l), np.nan) for c in CONDITIONS}
+    cos_layer_acc = {c: np.full((n, n_layers), np.nan) for c in CONDITIONS}
+    cos_attn_acc = {c: np.full((n, n_layers), np.nan) for c in CONDITIONS}
+    cos_mlp_acc = {c: np.full((n, n_layers), np.nan) for c in CONDITIONS}
+    tv_acc = np.full(n, np.nan)
+    d_model = int(store.fetch(np.asarray(prepared[0][0], dtype=np.int64)).shape[-1])
+
+    pad_id = tokenizer.pad_token_id
+    if pad_id is None:
+        pad_id = 0
 
     with torch.no_grad():
-        for idx, item in enumerate(items):
-            ids = p0._qa_prompt_ids(tokenizer, item, PROMPT, BOOLQ_PROMPT)
-            pos = len(ids) - 1
-            et = store.fetch(np.asarray(ids, dtype=np.int64))
-            perm = np.random.default_rng(args.seed * 1000 + idx).permutation(len(ids))
-            tasks.append(str(item.get("task", "unknown")))
+        # Build token-budgeted batches: at most ``batch_size`` items and at most
+        # ``batch_tokens`` tokens (always at least one item, so a single
+        # over-budget prompt still runs).
+        batches: list[list[int]] = []
+        cur: list[int] = []
+        cur_tokens = 0
+        for i, (ids, _e, _s, _t) in enumerate(prepared):
+            length = len(ids)
+            if cur and (
+                len(cur) >= args.batch_size or cur_tokens + length > args.batch_tokens
+            ):
+                batches.append(cur)
+                cur, cur_tokens = [], 0
+            cur.append(i)
+            cur_tokens += length
+        if cur:
+            batches.append(cur)
 
-            prev_final: np.ndarray | None = None
+        for batch_i, idxs in enumerate(batches):
+            chunk = [prepared[i] for i in idxs]
+            start = idxs[0]
+            b = len(chunk)
+            lens = [len(c[0]) for c in chunk]
+            t_max = max(lens)
+            ids_t = torch.full((b, t_max), pad_id, dtype=torch.long, device=args.device)
+            mask_t = torch.zeros((b, t_max), dtype=torch.long, device=args.device)
+            for j, (ids, _e, _s, _t) in enumerate(chunk):
+                ids_t[j, : lens[j]] = torch.tensor(ids, dtype=torch.long)
+                mask_t[j, : lens[j]] = 1
+            # Right padding keeps the reader's causal convolution inside each
+            # item: the answer position's 12-token window never reaches the pad
+            # region, which sits at indices >= len(ids).  Same convention as
+            # run_phase0's batched evaluation.
+            pos_idx = torch.tensor([length - 1 for length in lens], device=args.device)
+            rows = torch.arange(b, device=args.device)
+
+            logp_final_by_cond: dict[str, torch.Tensor] = {}
             for cond in CONDITIONS:
                 contrib.clear()
                 if cond == "off":
                     model._current_ple_e_t = None
                 else:
-                    et_cur = et if cond == "real" else et[perm]
-                    model._current_ple_e_t = (
-                        torch.from_numpy(et_cur[None]).float().to(args.device)
+                    et_batch = torch.zeros(
+                        (b, t_max, d_model), dtype=torch.float32, device=args.device
                     )
+                    for j, (_ids, e_real, e_shuf, _t) in enumerate(chunk):
+                        src = e_real if cond == "real" else e_shuf
+                        et_batch[j, : lens[j]] = torch.from_numpy(
+                            np.ascontiguousarray(src)
+                        ).float()
+                    model._current_ple_e_t = et_batch
 
-                out = model(
-                    input_ids=torch.tensor([ids], dtype=torch.long, device=args.device),
+                # Call the *text backbone*, not the causal-LM wrapper.  The
+                # wrapper's lm_head projects every position to the 248,320-way
+                # vocabulary, which for a batch of long BoolQ prompts is a
+                # ~10 GiB allocation we then throw away: this script computes its
+                # own logits from the hidden states.  Calling ``model.model``
+                # skips it and saves both memory and most of the runtime.
+                text_model = getattr(model, "model", model)
+                out = text_model(
+                    input_ids=ids_t,
+                    attention_mask=mask_t,
                     output_hidden_states=True,
                 )
-                hs = out.hidden_states  # tuple of [1, T, D], length n_layers+1
+                hs = out.hidden_states  # tuple of [B, T, D]
+                if hs is None:  # pragma: no cover - guards a silent mis-call
+                    raise RuntimeError("backbone returned no hidden states")
 
-                h_final = hs[-1][0, pos].float()
-                logits_final = head(norm(h_final[None]))[0].float().cpu().numpy()
-                p_final = np.exp(logits_final - logits_final.max())
-                p_final /= p_final.sum()
+                h_final = hs[-1][rows, pos_idx].to(param_dtype)  # [B, D]
+                logits_final = head(norm(h_final[None]))[0].float()  # [B, V]
+                logp_final = torch.log_softmax(logits_final, dim=-1)
+                logp_final_by_cond[cond] = logp_final
+                p_final = logp_final.exp()
+                top_final = torch.topk(logits_final, TOP_K, dim=-1).indices  # [B, K]
 
-                if cond == "off":
-                    prev_final = p_final
-                elif prev_final is not None:
-                    injection_deltas.append(
-                        float(np.abs(p_final - prev_final).sum())
+                # Logit lens per layer, entirely on the GPU.  Doing this on the
+                # CPU per layer was the other half of the round-167 throughput
+                # problem: 25 layers x 200 items x 3 conditions of a 248k-way
+                # argsort.
+                for l in range(n_l):
+                    h_l = hs[l][rows, pos_idx].to(param_dtype)  # [B, D]
+                    logits_l = head(norm(h_l[None]))[0].float()
+                    logp_l = torch.log_softmax(logits_l, dim=-1)
+                    kl_acc[cond][start : start + b, l] = (
+                        (p_final * (logp_final - logp_l)).sum(dim=-1).cpu().numpy()
                     )
+                    top_l = torch.topk(logits_l, TOP_K, dim=-1).indices
+                    shared = (
+                        (top_l.unsqueeze(2) == top_final.unsqueeze(1))
+                        .any(dim=2)
+                        .sum(dim=1)
+                        .float()
+                        / TOP_K
+                    )
+                    ov_acc[cond][start : start + b, l] = shared.cpu().numpy()
 
-                for l in range(n_layers + 1):
-                    h_l = hs[l][0, pos].float()
-                    logits_l = head(norm(h_l[None]))[0].float().cpu().numpy()
-                    p_l = np.exp(logits_l - logits_l.max())
-                    p_l /= p_l.sum()
-                    kl[cond][l].append(logit_lens_kl(p_final, p_l))
-                    ov[cond][l].append(top_k_overlap(logits_l, logits_final))
-
+                # Residual-cosine instruments need h_l, h_{l+1} and the two
+                # sublayer contributions; gather the answer position and move
+                # only [B, D] to the CPU, which is negligible.
+                h_pos = np.stack(
+                    [
+                        hs[l][rows, pos_idx].float().cpu().numpy().astype(np.float64)
+                        for l in range(n_l)
+                    ]
+                )  # [L+1, B, D]
+                a_pos = {
+                    l: contrib[f"attn_{l}"][rows, pos_idx]
+                    .float()
+                    .cpu()
+                    .numpy()
+                    .astype(np.float64)
+                    for l in range(n_layers)
+                    if f"attn_{l}" in contrib
+                }
+                m_pos = {
+                    l: contrib[f"mlp_{l}"][rows, pos_idx]
+                    .float()
+                    .cpu()
+                    .numpy()
+                    .astype(np.float64)
+                    for l in range(n_layers)
+                    if f"mlp_{l}" in contrib
+                }
                 for l in range(n_layers):
-                    h_l = hs[l][0, pos].float().cpu().numpy().astype(np.float64)
-                    h_next = hs[l + 1][0, pos].float().cpu().numpy().astype(np.float64)
-                    a_l = contrib.get(f"attn_{l}")
-                    m_l = contrib.get(f"mlp_{l}")
-                    if a_l is not None:
-                        a_np = a_l[0, pos].float().cpu().numpy().astype(np.float64)
-                        cos_attn[cond][l].append(cosine(a_np, h_l))
-                    if m_l is not None:
-                        m_np = m_l[0, pos].float().cpu().numpy().astype(np.float64)
-                        pre = h_l + (a_np if a_l is not None else 0.0)
-                        cos_mlp[cond][l].append(cosine(m_np, pre))
-                    cos_layer[cond][l].append(cosine(h_next - h_l, h_l))
+                    for j in range(b):
+                        h_l = h_pos[l, j]
+                        h_next = h_pos[l + 1, j]
+                        a_l = a_pos.get(l)
+                        m_l = m_pos.get(l)
+                        if a_l is not None:
+                            a_np = a_l[j]
+                            cos_attn_acc[cond][start + j, l] = cosine(a_np, h_l)
+                            if m_l is not None:
+                                cos_mlp_acc[cond][start + j, l] = cosine(
+                                    m_l[j], h_l + a_np
+                                )
+                        cos_layer_acc[cond][start + j, l] = cosine(h_next - h_l, h_l)
 
-            if (idx + 1) % 25 == 0:
-                print(f"[r167-1a] {idx + 1}/{len(items)}", flush=True)
+            # Off-vs-real total variation in the final distribution, per item.
+            tv = (
+                (logp_final_by_cond["off"].exp() - logp_final_by_cond["real"].exp())
+                .abs()
+                .sum(dim=-1)
+            )
+            tv_acc[start : start + b] = tv.cpu().numpy()
+
+            done = min(start + b, n)
+            print(
+                f"[r167-1a] batch {batch_i + 1}/{len(batches)} items {done}/{n} "
+                f"(b={b}, tokens={sum(len(c[0]) for c in chunk)})",
+                flush=True,
+            )
 
     for h in handles:
         h.remove()
+
+    kl = {c: [list(kl_acc[c][:, l]) for l in range(n_l)] for c in CONDITIONS}
+    ov = {c: [list(ov_acc[c][:, l]) for l in range(n_l)] for c in CONDITIONS}
+    cos_layer = {
+        c: [list(cos_layer_acc[c][:, l]) for l in range(n_layers)] for c in CONDITIONS
+    }
+    cos_attn = {
+        c: [list(cos_attn_acc[c][:, l]) for l in range(n_layers)] for c in CONDITIONS
+    }
+    cos_mlp = {
+        c: [list(cos_mlp_acc[c][:, l]) for l in range(n_layers)] for c in CONDITIONS
+    }
+    tasks = [p[3] for p in prepared]
+    injection_deltas = [float(x) for x in tv_acc[np.isfinite(tv_acc)]]
 
     def _mean(rows: list[list[float]]) -> list[float]:
         return [float(np.nanmean(v)) if len(v) else float("nan") for v in rows]

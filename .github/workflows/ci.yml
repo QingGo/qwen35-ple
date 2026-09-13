@@ -69,6 +69,7 @@ jobs:
           bash -n scripts/run_round152_g0_4b.sh
           bash -n scripts/run_round167_stage1a.sh
           bash -n scripts/run_round167_stage1b.sh
+          bash -n scripts/run_round167_stage2_gate.sh
           bash -n scripts/round152_finish.sh
           bash -n scripts/round162_finish.sh
 

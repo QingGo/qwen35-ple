@@ -149,8 +149,16 @@ def _load_model(model_path: str, device: str):
     return tokenizer, model
 
 
-def _gate_stats(gate: torch.Tensor) -> dict[str, float]:
-    """gate: [B, T, hc, 1] or [B, T, branches]."""
+def _gate_stats(gate: torch.Tensor, per_entry: float | None = None) -> dict[str, float]:
+    """gate: [B, T, hc, 1] or [B, T, branches].
+
+    Round 167 Stage 2.2: ``per_entry`` carries the fraction of *raw* gate
+    entries above 0.5 when the reader runs a per-dimension gate.  For the
+    official scalar gate the tensor is already one entry per (token, branch), so
+    the two agree; for ``per_dim`` the tensor here is a per-branch mean and
+    ``per_entry`` is the finer, comparable statistic.  Added additively so
+    existing scalar reports are unchanged.
+    """
     values = gate.detach().float().reshape(-1)
     if values.numel() == 0:
         return {
@@ -165,6 +173,9 @@ def _gate_stats(gate: torch.Tensor) -> dict[str, float]:
         "mean": float(values.mean().item()),
         "max": float(values.max().item()),
         "open_frac": float((values > 0.5).float().mean().item()),
+        "open_frac_all_entries": (
+            float(per_entry) if per_entry is not None else float((values > 0.5).float().mean().item())
+        ),
         "frac_gt_0p1": float((values > 0.1).float().mean().item()),
         "frac_gt_0p5": float((values > 0.5).float().mean().item()),
         "frac_gt_0p9": float((values > 0.9).float().mean().item()),
@@ -230,7 +241,9 @@ def main() -> int:
                     "reader did not expose last_gate; "
                     "use a checkpoint from the current reader implementation"
                 )
-            stats = _gate_stats(gate)
+            stats = _gate_stats(
+                gate, per_entry=getattr(reader, "last_gate_open_fraction", None)
+            )
             contrib = getattr(model, "_last_reader_contribution", None)
             hidden_t = getattr(model, "_last_reader_hidden", None)
             contrib_norm = float("nan")
@@ -263,6 +276,7 @@ def main() -> int:
                     "gate_mean": stats["mean"],
                     "gate_max": stats["max"],
                     "gate_open_frac": stats["open_frac"],
+                    "gate_open_frac_all_entries": stats["open_frac_all_entries"],
                     "gate_frac_gt_0p1": stats["frac_gt_0p1"],
                     "gate_frac_gt_0p5": stats["frac_gt_0p5"],
                     "gate_frac_gt_0p9": stats["frac_gt_0p9"],
@@ -292,6 +306,9 @@ def main() -> int:
             "gate_max": float(np.mean([r["gate_max"] for r in task_rows])),
             "gate_open_frac": float(
                 np.mean([r["gate_open_frac"] for r in task_rows])
+            ),
+            "gate_open_frac_all_entries": float(
+                np.mean([r["gate_open_frac_all_entries"] for r in task_rows])
             ),
             "gate_mean_tail32": float(
                 np.mean([r["gate_mean_tail32"] for r in task_rows])

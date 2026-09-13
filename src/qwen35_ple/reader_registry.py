@@ -176,6 +176,7 @@ def get_registry() -> Any:
         bridge_hidden: int | None = None,
         out_mlp: bool = False,
         out_hidden: int | None = None,
+        gate_mode: str = "scalar",
         eps: float = 1e-6,
         source_state: dict[str, Any] | None = None,
         path: str | Path | None = None,
@@ -199,6 +200,7 @@ def get_registry() -> Any:
                     bridge_hidden=bridge_hidden,
                     out_mlp=out_mlp,
                     out_hidden=out_hidden,
+                    gate_mode=gate_mode,
                     eps=eps,
                 )
                 reader.load_state_dict(loaded["state_dict"])
@@ -219,6 +221,7 @@ def get_registry() -> Any:
             bridge_hidden=bridge_hidden,
             out_mlp=out_mlp,
             out_hidden=out_hidden,
+            gate_mode=gate_mode,
             eps=eps,
             source_state=source_state,
             **kwargs,
@@ -465,6 +468,7 @@ def reader_config_from_args(
             "bridge_hidden": getattr(args, "bridge_hidden", None),
             "out_mlp": bool(getattr(args, "out_mlp", False)),
             "out_hidden": getattr(args, "out_hidden", None),
+            "gate_mode": str(getattr(args, "gate_mode", "scalar") or "scalar"),
         }
     if reader_name == ENGRAM_V1:
         return {

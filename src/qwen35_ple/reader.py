@@ -502,6 +502,7 @@ class OfficialSourceQwenReader(torch.nn.Module):
         bridge_hidden: int | None = None,
         out_mlp: bool = False,
         out_hidden: int | None = None,
+        gate_mode: str = "scalar",
         eps: float = 1e-6,
     ):
         super().__init__()
@@ -509,6 +510,16 @@ class OfficialSourceQwenReader(torch.nn.Module):
         self.d_source = d_source
         self.d_mem = d_mem
         self.hc = hc
+        # Round 167 Stage 2.2 (TD-3 gate selectivity).  The official gate
+        # collapses the query/key product over all ``d_source`` dimensions to a
+        # single scalar per branch, so it can only scale the whole value vector
+        # up or down -- 4 scalars controlling 2560 dimensions.  Round-146
+        # measured that this gate saturates open after SFT (0.77-0.98), which
+        # makes injection always-on and *hurts* open QA.  ``per_dim`` keeps the
+        # product elementwise, giving the gate full selectivity instead.
+        if gate_mode not in ("scalar", "per_dim"):
+            raise ValueError(f"gate_mode must be 'scalar' or 'per_dim', got {gate_mode!r}")
+        self.gate_mode = gate_mode
         self.kernel_size = kernel_size
         self.dilation = dilation
         self.src_dim = hc * d_source
@@ -559,6 +570,8 @@ class OfficialSourceQwenReader(torch.nn.Module):
         self.last_gate_raw: torch.Tensor | None = None
         # Optional causal ablation: force every token/branch gate to this value.
         self.gate_override: float | None = None
+        # Fraction of gate entries above 0.5; the selectivity statistic.
+        self.last_gate_open_fraction: float | None = None
 
         if source_state is not None:
             self.load_source_state(source_state, strict=True)
@@ -584,6 +597,7 @@ class OfficialSourceQwenReader(torch.nn.Module):
         bridge_hidden: int | None = None,
         out_mlp: bool = False,
         out_hidden: int | None = None,
+        gate_mode: str = "scalar",
     ) -> OfficialSourceQwenReader:
         """Create the reader and load official source tensors from a .pt/.bin file.
 
@@ -605,6 +619,7 @@ class OfficialSourceQwenReader(torch.nn.Module):
             bridge_hidden=bridge_hidden,
             out_mlp=out_mlp,
             out_hidden=out_hidden,
+            gate_mode=gate_mode,
         )
 
     def load_source_state(
@@ -664,13 +679,30 @@ class OfficialSourceQwenReader(torch.nn.Module):
         query = self.query_bridge(h)                   # [B,T,4*2560]
         query_normed = self.norm_query(query).view(b, t, self.hc, self.d_source)
 
-        score = (key_normed * query_normed).sum(-1, keepdim=True) / math.sqrt(self.d_source)
+        # Round 167 Stage 2.2: the only difference between the two modes is the
+        # reduction.  ``scalar`` (official) sums the query/key product over the
+        # 2560 source dimensions, leaving one gate per branch; ``per_dim`` keeps
+        # it elementwise, so every dimension is gated independently.  Nothing
+        # else changes, which is what makes the selectivity variable isolable.
+        product = key_normed * query_normed
+        if self.gate_mode == "per_dim":
+            score = product / math.sqrt(self.d_source)     # [B,T,4,2560]
+        else:
+            score = product.sum(-1, keepdim=True) / math.sqrt(self.d_source)
         score = score.abs().clamp_min(1e-6).sqrt() * score.sign()
-        gate = torch.sigmoid(score)                    # [B,T,4,1]
+        gate = torch.sigmoid(score)
         if self.gate_override is not None:
             gate = torch.full_like(gate, float(self.gate_override))
         self.last_gate_raw = gate
-        self.last_gate = gate.detach()
+        # Keep the headline diagnostic comparable across modes: a per-token,
+        # per-branch mean.  The selectivity statistic is the open fraction,
+        # which is the quantity round-146 found saturated (0.77-0.98).
+        self.last_gate_open_fraction = float((gate > 0.5).float().mean().item())
+        self.last_gate = (
+            gate.detach().mean(-1, keepdim=True)
+            if self.gate_mode == "per_dim"
+            else gate.detach()
+        )
 
         value = self.value_proj(e_t)                   # [B,T,2560]
         gated = gate * value.unsqueeze(2)              # [B,T,4,2560]

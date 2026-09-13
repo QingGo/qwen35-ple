@@ -1998,6 +1998,15 @@ def main() -> int:
         default=True,
         help="zero-initialise the read-out output projection (default; official design)",
     )
+    # Round 167 Stage 2.2: gate selectivity.  ``scalar`` is the official gate
+    # (one gate per branch, summed over all source dimensions); ``per_dim``
+    # gates every source dimension independently.  Default preserves behaviour.
+    parser.add_argument(
+        "--gate-mode",
+        choices=("scalar", "per_dim"),
+        default="scalar",
+        help="read-out gate reduction: official scalar or per-dimension selective",
+    )
     parser.add_argument(
         "--no-zero-init-out",
         dest="zero_init_out",

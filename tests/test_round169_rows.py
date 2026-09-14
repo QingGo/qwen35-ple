@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
@@ -155,3 +156,105 @@ def test_every_start_keeps_the_window_inside_the_stream():
     for s in starts:
         assert s + B + 1 <= t.size, "window runs past the end of the stream"
         assert s - 2 >= 0, "row window starts before the stream"
+
+
+# --------------------------------------------------------------------------- #
+# The per-position record: the artifact the band table cannot replace.
+# --------------------------------------------------------------------------- #
+EVAL = _load("scripts/round169_eval_rows.py", "round169_eval_rows")
+
+
+def _record_inputs(n: int = 6):
+    score = np.arange(100, 100 + n, dtype=np.int64)
+    rowid = np.arange(7, 7 + n, dtype=np.int64)
+    delta = np.linspace(-0.5, 0.5, n).astype(np.float32)
+    lf = np.full(n, 2.5, dtype=np.float32)
+    lt = lf - delta
+    ln = np.full(n, 2.7, dtype=np.float32)
+    ctx = np.arange(1, n + 1, dtype=np.int64)
+    return score, rowid, delta, lf, lt, ln, ctx
+
+
+def test_the_record_is_parallel_to_the_scored_positions():
+    score, rowid, delta, lf, lt, ln, ctx = _record_inputs()
+    rec = EVAL.per_position_record(score, rowid, delta, lf, lt, ln, ctx)
+    assert set(rec) == {
+        "score", "rowid", "delta", "nll_frozen", "nll_trained", "nll_none", "context_count",
+    }
+    for key, arr in rec.items():
+        assert arr.shape == (score.size,), key
+    assert np.array_equal(rec["score"], score)
+    assert np.array_equal(rec["rowid"], rowid)
+
+
+def test_the_record_keeps_the_eval_sign_convention():
+    # delta = frozen - trained everywhere in this project, and the B1 verdict is
+    # read in that convention.  A record that silently flipped it would reverse
+    # every conclusion drawn from it.
+    score, rowid, _, lf, lt, ln, ctx = _record_inputs()
+    delta = lf - lt
+    rec = EVAL.per_position_record(score, rowid, delta, lf, lt, ln, ctx)
+    assert np.allclose(rec["delta"], rec["nll_frozen"] - rec["nll_trained"], atol=1e-6)
+
+
+def test_context_count_is_optional_but_checked_when_present():
+    score, rowid, delta, lf, lt, ln, _ = _record_inputs()
+    without = EVAL.per_position_record(score, rowid, delta, lf, lt, ln)
+    assert "context_count" not in without
+    with_ctx = EVAL.per_position_record(score, rowid, delta, lf, lt, ln, np.ones(score.size))
+    assert "context_count" in with_ctx
+
+
+def test_the_record_carries_every_key_the_interference_join_needs():
+    # "rowid" and "snapshot_index" are different keys on purpose: training moves
+    # the bank by snapshot index, while a position reaches the shard table by row
+    # id.  A record that kept only one of them could not tell "this position's own
+    # trigram was trained" apart from "this position inherited a row it never
+    # voted for", which is the whole question the record exists to answer.
+    score, rowid, delta, lf, lt, ln, ctx = _record_inputs()
+    snap = np.arange(1000, 1000 + score.size, dtype=np.int64)
+    code = np.arange(500, 500 + score.size, dtype=np.int64)
+    rec = EVAL.per_position_record(score, rowid, delta, lf, lt, ln, ctx, snap=snap, code=code)
+    assert set(rec) == {
+        "score", "rowid", "snapshot_index", "trigram_code",
+        "delta", "nll_frozen", "nll_trained", "nll_none", "context_count",
+    }
+    assert np.array_equal(rec["snapshot_index"], snap)
+    assert np.array_equal(rec["trigram_code"], code)
+    # rowid and snapshot_index must not be silently interchangeable
+    assert not np.array_equal(rec["rowid"], rec["snapshot_index"])
+
+
+def test_the_extra_keys_are_optional():
+    score, rowid, delta, lf, lt, ln, _ = _record_inputs()
+    bare = EVAL.per_position_record(score, rowid, delta, lf, lt, ln)
+    assert "snapshot_index" not in bare and "trigram_code" not in bare
+
+
+def test_a_misaligned_optional_field_is_rejected_too():
+    score, rowid, delta, lf, lt, ln, ctx = _record_inputs(n=6)
+    with pytest.raises(ValueError, match="snapshot_index"):
+        EVAL.per_position_record(
+            score, rowid, delta, lf, lt, ln, ctx, snap=np.arange(3, dtype=np.int64)
+        )
+
+
+def test_a_misaligned_field_is_rejected_rather_than_written():
+    # The failure mode this guards: a record whose arrays disagree in length
+    # still saves, still loads, and silently joins the wrong delta to the wrong
+    # row id -- which is exactly the species of bug that produced this project's
+    # earlier "19,996/20,000 bound disagreements".
+    score, rowid, delta, lf, lt, ln, ctx = _record_inputs(n=6)
+    with pytest.raises(ValueError, match="expected 6"):
+        EVAL.per_position_record(score, rowid, delta, lf, lt, ln, ctx[:5])
+
+
+def test_the_record_round_trips_through_npz(tmp_path):
+    score, rowid, delta, lf, lt, ln, ctx = _record_inputs()
+    rec = EVAL.per_position_record(score, rowid, delta, lf, lt, ln, ctx)
+    path = tmp_path / "eval-real-lr3.162e-4.deltas.npz"
+    np.savez_compressed(path, **rec)
+    back = np.load(path)
+    assert sorted(back.files) == sorted(rec)
+    for key in rec:
+        assert np.array_equal(back[key], rec[key]), key

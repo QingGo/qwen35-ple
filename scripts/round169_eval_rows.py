@@ -69,6 +69,52 @@ def paired_stats(delta: np.ndarray) -> dict:
     return {"n": n, "mean": mean, "se": se, "t": (mean / se if se > 0 else None)}
 
 
+def per_position_record(score, rowid, delta, lf, lt, ln, ctx=None, snap=None, code=None) -> dict:
+    """The per-position record written next to the primary JSON.
+
+    A band mean cannot answer the question the band means raised.  At lr=1e-4 the
+    1-9 bands come out worse while the >=10 bands come out better, and the ~150k
+    scored positions whose trigram context has a TRAIN count of zero come out
+    worse than either -- yet their own row can still have been moved, because a
+    position reaches a row through the hash of its trigram and not through its
+    own identity.  That is the interference question, and it needs one row per
+    scored position plus every key the join could be made on:
+
+    ``rowid``  the row id in the shard table (``rowids_from_tokens``);
+    ``snap``   the index into ``E0``/the trained bank -- the embedding row that
+               training actually moved, which is NOT the same key as ``rowid``;
+    ``code``   the trigram hash whose bucket decided whether the position was
+               addressed at all;
+    ``ctx``    the train count of the position's own trigram context, so a
+               position can be split into "its own trigram was trained" vs
+               "it inherited a row it never voted for".
+
+    Every field is parallel to ``score``: index ``i`` of any array describes
+    stream position ``score[i]``.
+    """
+    rec = {
+        "score": np.asarray(score, dtype=np.int64),
+        "rowid": np.asarray(rowid, dtype=np.int64),
+        "delta": np.asarray(delta, dtype=np.float32),
+        "nll_frozen": np.asarray(lf, dtype=np.float32),
+        "nll_trained": np.asarray(lt, dtype=np.float32),
+        "nll_none": np.asarray(ln, dtype=np.float32),
+    }
+    if ctx is not None:
+        rec["context_count"] = np.asarray(ctx, dtype=np.int64)
+    if snap is not None:
+        rec["snapshot_index"] = np.asarray(snap, dtype=np.int64)
+    if code is not None:
+        rec["trigram_code"] = np.asarray(code, dtype=np.int64)
+    n = rec["delta"].size
+    for key, arr in rec.items():
+        if arr.size != n:
+            raise ValueError(
+                f"per-position record field {key!r} has {arr.size} entries, expected {n}"
+            )
+    return rec
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--snapshot-dir", required=True)
@@ -267,6 +313,7 @@ def main() -> int:
     log(f"wrote {out_path} (primary result)")
 
     # ---- section 4: the frequency-stratified prediction ------------------- #
+    ctx = None
     if args.counts_npz:
         try:
             c = np.load(args.counts_npz)
@@ -304,6 +351,28 @@ def main() -> int:
         log("by context frequency: " + ", ".join(
             f"{k}: n={v['n']} d={v['mean']:+.5f}" for k, v in by_band.items()
         ))
+
+    # ---- section 5: the per-position record ------------------------------- #
+    # Written after the primary result and wrapped, so an extra artifact can
+    # never cost the thing that took the GPU time.
+    try:
+        rec = per_position_record(
+            score, all_rowids[score], delta, lf, lt, ln, ctx,
+            snap=j_all[score], code=codes[score],
+        )
+        rec_path = out_path.parent / f"{out_path.stem}.deltas.npz"
+        np.savez_compressed(rec_path, **rec)
+        result["per_position_record"] = {
+            "path": rec_path.name,
+            "fields": sorted(rec),
+            "n": int(score.size),
+        }
+        flush()
+        log(f"wrote {rec_path.name} ({score.size:,} positions, fields: {', '.join(sorted(rec))})")
+    except Exception as exc:  # noqa: BLE001 - an extra artifact must never lose the result
+        result["per_position_record_error"] = f"{type(exc).__name__}: {exc}"
+        flush()
+        log(f"WARNING: could not write the per-position record ({exc}); primary result kept")
 
     flush()
     log(f"final write {out_path}")

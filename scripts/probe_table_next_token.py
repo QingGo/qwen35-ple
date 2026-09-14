@@ -918,6 +918,72 @@ def sample_positions(
     return cand
 
 
+def split_aligned_positions(
+    aligned: np.ndarray,
+    eval_tokens: np.ndarray,
+    *,
+    keep_targets: np.ndarray,
+    train_frac: float,
+    temp_frac: float,
+    min_kept: int = 1_000,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+    """Slice a caller-supplied position set into (fit, temperature, eval).
+
+    Returns ``(probe_train_pos, probe_val_pos, eval_pos, meta)``.
+
+    The split is CONTIGUOUS, never random: the caller's positions are ordered
+    along one stream, and a contiguous boundary is what keeps a single trigram
+    from landing on both sides of it in adjacent positions.
+
+    ``temp_frac`` is taken from the END of the fit block, so the fit block
+    remains exactly the frozen ``train_frac`` of the set.  The temperature set is
+    therefore a subset of the fit set, which makes the reported "val" NLL
+    optimistic.  That is harmless for the verdict: it is decided on top-1, top-1
+    is ``argmax``, and no temperature can change an argmax.
+
+    A target outside ``keep_targets`` is dropped rather than scored, because
+    ``cls`` is zero-initialised and an out-of-vocab target would silently be
+    scored as ``vocab[0]``.  The probe and the count baseline share the
+    restriction, so the ratio stays honest; ``meta`` reports how many were lost.
+    """
+    n_raw = int(aligned.size)
+    if n_raw == 0:
+        raise ValueError("no aligned positions")
+    t_eval = int(eval_tokens.size)
+    lo, hi = aligned.min(), aligned.max()
+    if lo < 2 or hi + 1 >= t_eval:
+        raise ValueError(
+            f"positions do not fit the eval stream: range [{lo}, {hi}] vs "
+            f"T_eval={t_eval} (need 2 <= t and t + 1 < T_eval)"
+        )
+    if not 0.0 < train_frac < 1.0:
+        raise ValueError(f"train_frac must lie in (0, 1), got {train_frac}")
+    if not 0.0 <= temp_frac < train_frac:
+        raise ValueError(f"temp_frac must lie in [0, train_frac), got {temp_frac}")
+
+    keep = np.isin(eval_tokens[aligned + 1], keep_targets)
+    aligned = aligned[keep]
+    n_kept = int(aligned.size)
+    if n_kept < min_kept:
+        raise ValueError(f"only {n_kept} positions survive the top-K filter")
+
+    cut_train = round(train_frac * n_kept)
+    cut_temp = round((train_frac - temp_frac) * n_kept)
+    meta = {
+        "n_positions_raw": n_raw,
+        "n_positions_kept": n_kept,
+        "n_dropped_target_outside_topk": n_raw - n_kept,
+        "train_frac": float(train_frac),
+        "eval_frac": 1.0 - float(train_frac),
+        "temp_frac": float(temp_frac),
+        "cut_train": cut_train,
+        "cut_temp": cut_temp,
+        "contiguous_split": True,
+        "temperature_set_is_a_subset_of_the_probe_fit_set": True,
+    }
+    return aligned[:cut_train], aligned[cut_temp:cut_train], aligned[cut_train:], meta
+
+
 def stream_context(tokens: np.ndarray, positions: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """(w1, w2) = (token[t], token[t-1]) -- the context the n-gram heads hash."""
     return (
@@ -1053,6 +1119,33 @@ def main() -> int:
         help="token budget of the PURE_WIKI split being reproduced (manifest: 1000000)",
     )
     ap.add_argument("--resume", action="store_true", help="resume from --state-file")
+    # ---- aligned mode (round-168 Stage 1.5g) ------------------------------ #
+    # ADDITIVE ONLY: with none of these flags set, every code path below is the
+    # historical one.  They exist so this instrument can be re-run on the exact
+    # position set Stage 1.5c/1.5e/1.5f scored, which is the whole point of the
+    # alignment rung: the old ~59% came from a different position sample, a
+    # different candidate set and a different split, so it is not comparable.
+    ap.add_argument(
+        "--eval-tokens", default="",
+        help="exact eval token stream (.npy).  Empty = rebuild the PURE_WIKI "
+             "held-out stream as before.",
+    )
+    ap.add_argument(
+        "--aligned-positions", default="",
+        help="(.npy of int64) positions into --eval-tokens, supplied by the "
+             "caller.  Empty = sample positions as before.",
+    )
+    ap.add_argument(
+        "--aligned-train-frac", type=float, default=0.60,
+        help="fraction of --aligned-positions used to fit the probe (contiguous "
+             "prefix; the frozen 60/40 split of Stage 1.5g)",
+    )
+    ap.add_argument(
+        "--aligned-temp-frac", type=float, default=0.10,
+        help="fraction of the aligned set, taken from the END of the train block, "
+             "used to fit the temperature.  This cannot move the verdict: top-1 is "
+             "argmax and therefore temperature-invariant.",
+    )
     ap.add_argument("--checkpoint-every", type=int, default=5, help="chunks between state saves")
     ap.add_argument(
         "--json-every", type=int, default=1,
@@ -1173,54 +1266,71 @@ def main() -> int:
     if train_usable < 100_000:
         raise SystemExit("train stream too short for the requested dev split")
 
-    # ---- EVAL stream (held out from PURE_WIKI) ---------------------------- #
-    texts, heldout_idx, split_stats = build_heldout_indices(
-        wikitext_path=Path(args.wikitext), tokenizer=tokenizer,
-        qa_exclude=Path(args.qa_exclude), budget=args.budget_tokens, seed=0,
-        expected_records=exp_records, expected_tokens=exp_tokens,
-        max_source_records=args.max_source_records or None,
-    )
-    cont = containment_check(
-        texts, heldout_idx, Path(args.pure_wiki_corpus),
-        sample=args.containment_sample, rng=rng,
-    )
-    report["heldout_split"] = {**split_stats, "containment_check": cont}
-    log(f"held-out split: {split_stats}")
-    log(f"containment check: {cont}")
-    if not split_stats["reproduction_matches_manifest"]:
-        report["warnings"].append(
-            "PURE_WIKI selection reproduction != manifest (note: the manifest's "
-            "'records' counts 512-token SHARDS, so it legitimately over-counts source "
-            "records; the contamination filter below is the authoritative check)"
-        )
+    eos = int(tokenizer.eos_token_id) if tokenizer.eos_token_id is not None else 248044
 
-    # The replication is only a proxy for "not in the graft corpus".  Verify it
-    # directly against the decoded corpus text and drop whatever fails.
-    if args.no_contamination_filter:
-        report["heldout_split"]["contamination_filter"] = {"skipped": True}
-        report["warnings"].append("contamination filter DISABLED by flag")
+    # ---- EVAL stream ------------------------------------------------------ #
+    # Aligned mode supplies the stream verbatim.  Rebuilding the PURE_WIKI
+    # held-out stream here would produce a DIFFERENT token sequence, so the
+    # caller-supplied positions would index the wrong tokens -- silently.
+    if args.eval_tokens:
+        eval_tokens = np.load(args.eval_tokens).astype(np.int64).reshape(-1)
+        T_eval = int(eval_tokens.size)
+        report["heldout_split"] = {
+            "mode": "external_eval_stream",
+            "eval_npy": str(args.eval_tokens),
+            "eval_stream_tokens": T_eval,
+            "heldout_reconstruction": "SKIPPED: the caller supplied the stream",
+            "containment_check": "SKIPPED: not applicable to a supplied stream",
+        }
+        log(f"eval stream (external): {T_eval} tokens from {args.eval_tokens}")
     else:
-        heldout_idx, filt = contamination_filter(
-            texts, heldout_idx, Path(args.pure_wiki_corpus),
-            window=args.contam_window, min_chars=args.contam_min_chars,
+        # ---- EVAL stream (held out from PURE_WIKI) ------------------------ #
+        texts, heldout_idx, split_stats = build_heldout_indices(
+            wikitext_path=Path(args.wikitext), tokenizer=tokenizer,
+            qa_exclude=Path(args.qa_exclude), budget=args.budget_tokens, seed=0,
+            expected_records=exp_records, expected_tokens=exp_tokens,
+            max_source_records=args.max_source_records or None,
         )
-        report["heldout_split"]["contamination_filter"] = filt
-        if filt.get("contamination_rate_of_tested", 0) > 0.005:
+        cont = containment_check(
+            texts, heldout_idx, Path(args.pure_wiki_corpus),
+            sample=args.containment_sample, rng=rng,
+        )
+        report["heldout_split"] = {**split_stats, "containment_check": cont}
+        log(f"held-out split: {split_stats}")
+        log(f"containment check: {cont}")
+        if not split_stats["reproduction_matches_manifest"]:
             report["warnings"].append(
-                f"{filt['dropped_contaminated']} held-out records were actually inside "
-                f"PURE_WIKI and have been excluded ({filt['contamination_rate_of_tested']:.2%})"
+                "PURE_WIKI selection reproduction != manifest (note: the manifest's "
+                "'records' counts 512-token SHARDS, so it legitimately over-counts source "
+                "records; the contamination filter below is the authoritative check)"
             )
 
-    eos = int(tokenizer.eos_token_id) if tokenizer.eos_token_id is not None else 248044
-    eval_ids: list[int] = []
-    for i in heldout_idx.tolist():
-        eval_ids.extend(tokenizer.encode(texts[i], add_special_tokens=False))
-        eval_ids.append(eos)
-    eval_tokens = np.asarray(eval_ids, dtype=np.int64)
-    del eval_ids, texts
-    T_eval = int(eval_tokens.size)
-    report["heldout_split"]["eval_stream_tokens"] = T_eval
-    log(f"eval stream: {T_eval} tokens from {heldout_idx.size} held-out records")
+        # The replication is only a proxy for "not in the graft corpus".  Verify it
+        # directly against the decoded corpus text and drop whatever fails.
+        if args.no_contamination_filter:
+            report["heldout_split"]["contamination_filter"] = {"skipped": True}
+            report["warnings"].append("contamination filter DISABLED by flag")
+        else:
+            heldout_idx, filt = contamination_filter(
+                texts, heldout_idx, Path(args.pure_wiki_corpus),
+                window=args.contam_window, min_chars=args.contam_min_chars,
+            )
+            report["heldout_split"]["contamination_filter"] = filt
+            if filt.get("contamination_rate_of_tested", 0) > 0.005:
+                report["warnings"].append(
+                    f"{filt['dropped_contaminated']} held-out records were actually inside "
+                    f"PURE_WIKI and have been excluded ({filt['contamination_rate_of_tested']:.2%})"
+                )
+
+        eval_ids: list[int] = []
+        for i in heldout_idx.tolist():
+            eval_ids.extend(tokenizer.encode(texts[i], add_special_tokens=False))
+            eval_ids.append(eos)
+        eval_tokens = np.asarray(eval_ids, dtype=np.int64)
+        del eval_ids, texts
+        T_eval = int(eval_tokens.size)
+        report["heldout_split"]["eval_stream_tokens"] = T_eval
+        log(f"eval stream: {T_eval} tokens from {heldout_idx.size} held-out records")
 
     # ---- candidate vocabulary (from TRAIN only) --------------------------- #
     counts = np.bincount(train_tokens, minlength=tokenizer.vocab_size + 8)
@@ -1233,17 +1343,56 @@ def main() -> int:
     )
 
     # ---- positions and rowids --------------------------------------------- #
-    probe_train_pos = sample_positions(
-        train_tokens, n=args.n_probe_train, lo=2, hi=train_usable - 1,
-        keep_targets=vocab, rng=rng,
-    )
-    probe_val_pos = sample_positions(
-        train_tokens, n=args.n_probe_val, lo=train_usable, hi=T_train - 1,
-        keep_targets=vocab, rng=rng,
-    )
-    eval_pos = sample_positions(
-        eval_tokens, n=args.n_eval, lo=2, hi=T_eval - 1, keep_targets=vocab, rng=rng
-    )
+    # ``probe_stream`` is the stream the probe's positions index.  Normally that
+    # is the train stream.  In aligned mode all three position sets are drawn
+    # from the ONE stream the caller supplied, because that is exactly what makes
+    # this rung comparable to the margin measurements of Stage 1.5c/1.5e.
+    probe_stream = train_tokens
+    if args.aligned_positions:
+        if not args.eval_tokens:
+            raise SystemExit("--aligned-positions requires --eval-tokens")
+        try:
+            probe_train_pos, probe_val_pos, eval_pos, aligned_meta = split_aligned_positions(
+                np.load(args.aligned_positions).astype(np.int64).reshape(-1),
+                eval_tokens,
+                keep_targets=vocab,
+                train_frac=args.aligned_train_frac,
+                temp_frac=args.aligned_temp_frac,
+            )
+        except ValueError as exc:
+            raise SystemExit(f"--aligned-positions: {exc}") from exc
+        probe_stream = eval_tokens
+        report["aligned"] = {
+            "positions_npy": str(args.aligned_positions),
+            "eval_npy": str(args.eval_tokens),
+            **aligned_meta,
+            "why_a_subset_temperature_set_is_harmless": (
+                "the temperature is fitted on the last aligned-temp-frac of the train "
+                "block, i.e. inside the probe's fit set, so the 'val' NLL column is "
+                "optimistic. The verdict quantity R is top-1, and top-1 is argmax, "
+                "which is temperature-invariant -- so this choice cannot move the verdict."
+            ),
+        }
+        log(
+            f"ALIGNED: {aligned_meta['n_positions_kept']:,}/"
+            f"{aligned_meta['n_positions_raw']:,} positions kept "
+            f"({aligned_meta['n_dropped_target_outside_topk']} dropped, target outside "
+            f"K={args.topk}); probe-train={aligned_meta['cut_train']:,} "
+            f"temp=[{aligned_meta['cut_temp']:,},{aligned_meta['cut_train']:,}) "
+            f"eval={aligned_meta['n_positions_kept'] - aligned_meta['cut_train']:,}"
+        )
+    else:
+        probe_train_pos = sample_positions(
+            train_tokens, n=args.n_probe_train, lo=2, hi=train_usable - 1,
+            keep_targets=vocab, rng=rng,
+        )
+        probe_val_pos = sample_positions(
+            train_tokens, n=args.n_probe_val, lo=train_usable, hi=T_train - 1,
+            keep_targets=vocab, rng=rng,
+        )
+        eval_pos = sample_positions(
+            eval_tokens, n=args.n_eval, lo=2, hi=T_eval - 1, keep_targets=vocab, rng=rng
+        )
     del counts
     n_tr, n_va, n_ev = len(probe_train_pos), len(probe_val_pos), len(eval_pos)
     log(f"positions: probe-train={n_tr} probe-val={n_va} eval={n_ev}")
@@ -1258,11 +1407,11 @@ def main() -> int:
         )
 
     t0 = time.time()
-    rd_tr = rowids_at_positions(train_tokens, probe_train_pos, window=args.rowid_window)
-    rd_va = rowids_at_positions(train_tokens, probe_val_pos, window=args.rowid_window)
+    rd_tr = rowids_at_positions(probe_stream, probe_train_pos, window=args.rowid_window)
+    rd_va = rowids_at_positions(probe_stream, probe_val_pos, window=args.rowid_window)
     rd_ev = rowids_at_positions(eval_tokens, eval_pos, window=args.rowid_window)
     rowid_secs = time.time() - t0
-    causal = verify_causality(train_tokens)
+    causal = verify_causality(probe_stream)
     log(f"rowids in {rowid_secs:.1f}s; causality={causal}; peak RSS {rss_mb():.0f} MiB")
     if not all(v for k, v in causal.items() if isinstance(v, bool)):
         report["warnings"].append(f"causality check failed: {causal}")
@@ -1271,8 +1420,8 @@ def main() -> int:
     cls_size = int(max(tokenizer.vocab_size, int(train_tokens.max()), int(eval_tokens.max()))) + 8
     cls = np.zeros(cls_size, dtype=np.int64)
     cls[vocab] = np.arange(len(vocab), dtype=np.int64)
-    l_tr = cls[train_tokens[probe_train_pos + 1]]
-    l_va = cls[train_tokens[probe_val_pos + 1]]
+    l_tr = cls[probe_stream[probe_train_pos + 1]]
+    l_va = cls[probe_stream[probe_val_pos + 1]]
     l_ev = cls[eval_tokens[eval_pos + 1]]
     train_prior = np.bincount(l_tr, minlength=args.topk).astype(np.float64)
     train_prior /= train_prior.sum()
@@ -1337,7 +1486,7 @@ def main() -> int:
         "seen_trigram_contexts": int(len(cnt.tri_ctx)),
     }
 
-    va_w1, va_w2 = stream_context(train_tokens, probe_val_pos)
+    va_w1, va_w2 = stream_context(probe_stream, probe_val_pos)
     ev_w1, ev_w2 = stream_context(eval_tokens, eval_pos)
 
     cnt_va, cnt_ev = {}, {}

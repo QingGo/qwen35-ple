@@ -67,10 +67,31 @@ EP1_JSON=$OUT/eval-real-e1-lr1e-3.json
 REF_LR_TAG=lr1e-4
 REF_DELTA=-0.0027166083372815774
 
-FAILED=()
-STEPS=()
+# say() writes to the log FILE and never to stdout, and fail()/step() write to
+# files rather than to shell arrays.  This is a correctness requirement, not a
+# style choice, and it cost this run its stopping rule:
+#
+#   D1=$(run_point 3.162e-4 lr3.162e-4)
+#
+# captures EVERYTHING the call prints.  With say() on stdout, D1 held the
+# progress text ("... START train-lr3.162e-4 (mem 52 GB, gpu 0%) ... END ...")
+# followed by the number, and the frozen rule below then evaluated
+# ``awk -v a="$D1" 'BEGIN{... a+0 ...}'`` -- where awk reads a leading "[0" as
+# 0.  Zero beats every negative delta, so the ladder climbed to a second point
+# after a first point that had already lost to lr=1e-4.  The run only stopped
+# because a human read the delta and killed the arm.
+#
+# The same subshell silently discarded FAILED+=() from inside run_point, so the
+# killed arm was reported as "all steps ok".  Both failures are one bug: state
+# and logging that live in a subshell.
+QUEUE_LOG=${QUEUE_LOG:-$LOGD/phase2-queue.log}
+FAILFILE=$OUT/.phase2-failures
+STEPSFILE=$OUT/.phase2-steps
 
-say() { echo "[$(date +%H:%M:%S)] $*"; }
+say() { echo "[$(date +%H:%M:%S)] $*" >> "$QUEUE_LOG"; }
+step() { echo "$1" >> "$STEPSFILE"; }
+fail() { echo "$1" >> "$FAILFILE"; }
+nfail() { if [ -s "$FAILFILE" ]; then sort -u "$FAILFILE" | wc -l | tr -d ' '; else echo 0; fi; }
 mem_gb() { awk '{printf "%d", $1/1073741824}' /sys/fs/cgroup/memory.current; }
 
 wait_mem() {
@@ -104,8 +125,8 @@ run_gpu() {  # name cmd...
   { echo "=== $name start $(date -Is) ==="; "$@"; rc=$?; echo "=== $name rc=$rc ==="; } > "$log" 2>&1
   t1=$(date +%s)
   say "END   $name rc=$rc wall=$((t1 - t0))s -> $log"
-  STEPS+=("$name rc=$rc wall=$((t1 - t0))s")
-  [ "$rc" -ne 0 ] && FAILED+=("$name")
+  step "$name rc=$rc wall=$((t1 - t0))s"
+  [ "$rc" -ne 0 ] && fail "$name"
   return 0
 }
 
@@ -134,9 +155,13 @@ delta_of() {
   "$PY" -c 'import json,sys;d=json.load(open(sys.argv[1]))["delta"]["mean"];print(repr(float(d)))' "$1" 2>/dev/null
 }
 
+# A decision rule must refuse a non-numeric input, not coerce it.  awk maps any
+# leading non-number to 0, and 0 wins against every negative delta, so a leaking
+# log line silently flips "stop" into "climb".
+is_number() { awk -v a="$1" 'BEGIN{exit !(a ~ /^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$/)}'; }
 better_than() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a+0 > b+0)}'; }
 
-run_point() {  # lr tag -> echoes the delta (empty on failure)
+run_point() {  # lr tag -> prints ONLY the delta on stdout (empty on failure)
   local lr=$1 tag=$2
   local bank=$OUT/E-real-e4-$tag.npy ej=$OUT/eval-real-$tag.json
   if [ -s "$bank" ]; then
@@ -147,7 +172,7 @@ run_point() {  # lr tag -> echoes the delta (empty on failure)
   if [ -s "$bank" ] && [ ! -s "$ej" ]; then
     run_gpu "eval-$tag" eval_bank "$bank" "$ej"
   fi
-  [ -s "$bank" ] || FAILED+=("bank-$tag")
+  [ -s "$bank" ] || fail "bank-$tag"
   delta_of "$ej"
 }
 
@@ -155,7 +180,7 @@ run_point() {  # lr tag -> echoes the delta (empty on failure)
 cd "$REPO" || exit 1
 export PYTHONPATH=src OMP_NUM_THREADS=16 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 mkdir -p "$OUT" "$EXPL" "$LOGD"
-rm -f "$DONE_MARK" "$FAIL_MARK"
+rm -f "$DONE_MARK" "$FAIL_MARK" "$FAILFILE" "$STEPSFILE"
 echo "started $(date -Is); reference $REF_LR_TAG delta=$REF_DELTA; epochs=$EPOCHS" > "$START_MARK"
 
 say "=== phase 2 (lr ladder) starting ==="
@@ -175,18 +200,26 @@ while [ ! -s "$EP1_JSON" ]; do
 done
 say "phase 1 step 1 landed: $(delta_of "$EP1_JSON" || echo 'unparseable') nats (frozen - trained)"
 
-# ---- 2. stop phase 1 before it starts a 15-minute, 6.5 GB code snapshot -----
-# The queue deletes E0 here, which is why E0 was hardlinked out of its reach
-# before this script started.  A snapshot it may already have begun is removed
+# ---- 2. stop phase 1 BEFORE waiting for anything ---------------------------
+# The order here was backwards on the first run and it deadlocked.  With
+# wait_quiet first, any job the queue starts while we wait becomes a job we wait
+# for forever -- and the only thing that can stop it is the pkill queued behind
+# the wait.  It happened: the queue launched a 4-epoch code arm three seconds
+# before this script noticed step 1 had landed, and the log repeated "waiting for
+# 1 in-flight job(s)" with no error for ten minutes of wasted GPU.
+#
+# So: kill the producers first, then wait for their orphans to drain.
+# The queue deletes E0 in this window, which is why E0 was hardlinked out of its
+# reach before this script started.  A partial snapshot it began is removed
 # below; those artifacts are rebuilt when code/stem are un-deferred.
-wait_quiet
 if pgrep -f '[r]un_round169_overnight.sh' > /dev/null 2>&1; then
   say "stopping the phase 1 queue (code/stem deferred: a diverged configuration is not worth replicating)"
   pkill -f '[r]un_round169_overnight.sh' 2>/dev/null || true
-  sleep 5
 fi
 pkill -f '[r]ound169_row_snapshot' 2>/dev/null || true
-sleep 3
+pkill -f '[r]ound169_train_rows' 2>/dev/null || true
+pkill -f '[r]ound169_eval_rows' 2>/dev/null || true
+sleep 5
 wait_quiet
 for d in "$EXPL/code" "$EXPL/stem"; do
   [ -d "$d" ] && { say "  clearing partial snapshot $d"; rm -rf "$d"; }
@@ -212,9 +245,9 @@ df -h /root/autodl-tmp | tail -1
 # bands gaining while the rare bands lose slightly; whatever the aggregate does
 # here decides whether a second, higher point is worth the GPU time.
 D1=$(run_point 3.1622776601683795e-4 lr3.162e-4)
-if [ -z "$D1" ]; then
-  FAILED+=("point-lr3.162e-4")
-  say "lr=3.162e-4 produced no delta; the ladder cannot continue"
+if ! is_number "$D1"; then
+  fail "point-lr3.162e-4"
+  say "lr=3.162e-4 produced no usable delta (got '$D1'); the ladder cannot continue"
 else
   say "LADDER lr=3.162e-4  delta=$D1   (lr=1e-4 was $REF_DELTA; positive delta means training helped)"
   if better_than "$D1" "$REF_DELTA"; then
@@ -222,7 +255,12 @@ else
     # the next point brackets it from the other side.
     say "curve is improving with lr -- climbing to the next point"
     D2=$(run_point 5.623413251903491e-4 lr5.623e-4)
-    [ -z "$D2" ] && FAILED+=("point-lr5.623e-4") || say "LADDER lr=5.623e-4  delta=$D2"
+    if is_number "$D2"; then
+      say "LADDER lr=5.623e-4  delta=$D2"
+    else
+      fail "point-lr5.623e-4"
+      say "lr=5.623e-4 produced no usable delta (got '$D2')"
+    fi
   else
     say "delta did not improve on lr=1e-4, so the curve is monotone over this range:"
     say "the best point on the lr axis is at or below 1e-4, where it is still $REF_DELTA."
@@ -234,8 +272,8 @@ fi
 say "=== summary over every artifact present ==="
 { "$PY" scripts/round169_summarize.py --root "$OUT" --exploratory "$EXPL" \
     --out "$OUT/OVERNIGHT_SUMMARY.md"; rc=$?; } > "$LOGD/phase2-summary.log" 2>&1
-STEPS+=("summary rc=${rc:-?}")
-[ "${rc:-1}" -ne 0 ] && FAILED+=("summary")
+step "summary rc=${rc:-?}"
+[ "${rc:-1}" -ne 0 ] && fail "summary"
 
 {
   echo "# Round 169 phase 2 roll-up (lr ladder)"
@@ -245,6 +283,7 @@ STEPS+=("summary rc=${rc:-?}")
   echo "delta = frozen - trained; POSITIVE means training the rows helped."
   echo "Reference: lr=1e-4, $EPOCHS epochs -> $REF_DELTA (aggregate cost 1.5% of injection gain)."
   echo "lr=1e-3, $EPOCHS epochs -> -0.33127, but its mean_loss rose every epoch (3.055 -> 4.141): diverged."
+  echo "lr=1e-3, 1 epoch    -> -0.26370: 80% of the damage is in the first pass."
   echo
   echo "## Ladder"
   for tag in lr1e-4 lr3.162e-4 lr5.623e-4; do
@@ -255,10 +294,10 @@ STEPS+=("summary rc=${rc:-?}")
   done
   echo
   echo "## Steps"
-  for s in "${STEPS[@]}"; do echo "* $s"; done
+  if [ -s "$STEPSFILE" ]; then sed 's/^/* /' "$STEPSFILE"; else echo "* (none recorded)"; fi
   echo
   echo "## Failures"
-  if [ ${#FAILED[@]} -eq 0 ]; then echo "* none"; else for f in "${FAILED[@]}"; do echo "* $f"; done; fi
+  if [ "$(nfail)" = "0" ]; then echo "* none"; else sort -u "$FAILFILE" | sed 's/^/* /'; fi
   echo
   echo "## Result files present"
   for f in "$OUT"/eval-*.json; do [ -s "$f" ] && echo "* $f"; done
@@ -266,13 +305,13 @@ STEPS+=("summary rc=${rc:-?}")
 
 say "ROLLUP:"; head -40 "$OUT/PHASE2_ROLLUP.md" 2>/dev/null
 
-if [ ${#FAILED[@]} -eq 0 ]; then
+if [ "$(nfail)" = "0" ]; then
   echo "OK" > "$DONE_MARK"
   say "*** PHASE 2 DONE (all steps ok) ***"
 else
-  printf '%s\n' "${FAILED[@]}" > "$FAIL_MARK"
+  sort -u "$FAILFILE" > "$FAIL_MARK"
   echo "OK_WITH_FAILURES" > "$DONE_MARK"
-  say "*** PHASE 2 DONE with ${#FAILED[@]} failure(s): ${FAILED[*]} ***"
+  say "*** PHASE 2 DONE with $(nfail) failure(s): $(sort -u "$FAILFILE" | tr '\n' ' ') ***"
 fi
 say "the local collector pulls artifacts and then shuts the box down"
 exit 0

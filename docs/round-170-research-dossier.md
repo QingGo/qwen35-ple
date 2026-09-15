@@ -172,3 +172,150 @@ oracle surprisal 门控给 **+0.207**。
 - Product-Key Memory: arXiv [1907.05242](https://www.alphaxiv.org/abs/1907.05242)
 - XMemTransfer: arXiv [2608.17050](https://huggingface.co/papers/2608.17050)
 - PSGD: [lixilinx/psgd_torch](https://deepwiki.com/lixilinx/psgd_torch/2.3-mathematical-foundations)
+
+---
+
+# 第二轮(16 轮检索):换掉框架之后才看得见的东西
+
+第一轮我一直在找"更好的 PLE 变体"。**第一性原理下我们的装置不是 PLE,而是:**
+
+```text
+冻结 LM + 外部存储 + 在某个地址上把存储内容注入残差流
+```
+
+一旦这样说,该读的文献就变成**半参数/非参数记忆的整个分支**,而不是 PLE 的亲戚。
+换框之后,最重要的东西出现了。
+
+## 8. kNN-LM:冻结模型 + 零训练,+2.9 困惑度
+
+Khandelwal et al., *Generalization through Memorization*,
+[arXiv 1911.00172](https://ar5iv.labs.arxiv.org/html/1911.00172)
+
+```text
+datastore:(f(c_i), w_i)   f = 末层 FFN 输入(过 layernorm)← 整个前缀的表示
+推理:p(y|x) = λ·p_kNN(y|x) + (1−λ)·p_LM(y|x)      ← 在【logit 层】插值
+```
+
+| | 困惑度 |
+|---|---|
+| 基线 LM(Baevski & Auli) | 18.65 |
+| **+ kNN-LM(零训练)** | **16.12** |
+| + kNN-LM + continuous cache | **15.79** |
+
+**换算成 nats**:`ln(18.65) − ln(16.12)` = **+0.146 nats**;含 continuous cache = **+0.166 nats**。
+
+> **⇒ 我们实测的 +0.17593 nats 与 kNN-LM 的 +0.146 nats 是同一量级。**
+> **我们的数字不小。小的是我们把增益锁进了一个 3-token 窗口。**
+
+其他关键读数:
+
+- **"retrieving nearest neighbors from the corpus outperforms training on it"**:
+  在 100M 上训练 + 从 3B 建 datastore → **13.73**,胜过**在 3B 上训练**(15.17)。
+- datastore 从 512K 涨到 3B,**单调改善且未饱和**;且 **最优 λ 随 datastore 变大而上升**
+  (模型越依赖非参数部分)。
+- **帮助的正是长尾**:"particularly helpful in predicting rare patterns, such as factual
+  knowledge"、人名、近重复句。
+- 键的选择很讲究:**末层 FFN 输入、过 layernorm** 最好(17.96 → 16.06)。
+- `k=1024`,`λ=0.25`(域内)/ `0.65`(域适应)。
+
+### 8.1 为什么这不违反我们的界 —— 而这正是重点
+
+| | 键是什么 | 受我们的界约束? |
+|---|---|---|
+| **我们的嫁接** | ≤3 个 token 的哈希 ⇒ `I(Y;e\|h_t) ≤ I(Y;w_t\|h_t)` | ✅ 受 |
+| **kNN-LM** | 末层 FFN 输入 = **整个前缀**经注意力的函数 | ❌ **不受** |
+
+论文自己的结论已经写了:*"Two mechanisms escape the bound, and only two:
+**retrieval, which addresses by query rather than by a fixed window**, and parametric adapters."*
+
+**⇒ kNN-LM 就是那条"检索逃逸路线",它在冻结模型上零训练即可工作,
+而且它擅长的地方恰好是我们实测增益所在的地方(高 surprisal 长尾)。**
+
+## 9. 尾部的"第三种修法":我们只找到过两种
+
+| 修法 | 做什么 | 出处 |
+|---|---|---|
+| 表 = **函数的输出**(相似 n-gram 共享参数) | SCONE | [2502.01637](https://ar5iv.labs.arxiv.org/html/2502.01637) |
+| 表 = **teacher 的隐状态** | Memory Grafting | [2605.20948](https://ar5iv.labs.arxiv.org/html/2605.20948) |
+| **表 = 按频率聚类的低秩分解**(+ adaptive softmax) | **Adaptive Input Representations** | Baevski & Auli 2019,[1809.10853](https://ar5iv.labs.arxiv.org/html/1809.10853) |
+| **按频率缩放每个参数的学习率** | **Frequency-Aware SGD**(**有可证收益**) | ICLR 2022,[链接](https://mlanthology.org/iclr/2022/li2022iclr-frequencyaware/) |
+
+**注意**:kNN-LM 的基线模型(Baevski & Auli)本身就是**罕见词嵌入的经典解法** ——
+按频率把词表切成簇,每簇一个低秩投影。**这是 2019 年就有的标准答案,而我们在 2026 年重新发现了问题。**
+
+**Frequency-Aware SGD** 更直接:**它把我上一轮从第一性原理推出来的"步长应随证据收缩"
+做成了有定理的算法。** 我们的"行选择"是它的一个粗糙特例。
+
+## 10. "把它按住"这件事,文献里出现了**三次**
+
+| 出处 | 说法 |
+|---|---|
+| **Ordo-M** | 记忆中会 shouting over 基座;**parameter-free positional gate 把 text damage 降 96–97%** |
+| **Engram §6.2** | 组件消融中**回退最大**的三个之一就是上下文感知门控 |
+| **TRAMS** | *Training-free Memory Selection for Long-range Language Modeling*([2023.findings-emnlp.331](https://aclanthology.org/2023.findings-emnlp.331/)) —— **免训练的记忆选择** |
+
+**加上我们自己的实测:46.3% 的位置受害、top 1% 承载 65.6%。**
+**四个独立来源说同一件事:读出不按住,记忆是净噪声源。**
+
+## 11. 被我们完全漏掉的一整类:从上下文复制
+
+| 工作 | 机制 |
+|---|---|
+| **Pointer Sentinel Mixture Models**([1609.07843](https://ar5iv.labs.arxiv.org/html/1609.07843)) | 指针网络 + 混合,专治**罕见词** |
+| **Continuous cache**(Grave et al. 2017) | 从**测试文档内部**检索,与 kNN-LM **可叠加** |
+| **infini-gram**([2401.17377](https://arxiv.org/html/2401.17377v1)) | 后缀数组上的**无界 n-gram**,5T token,无训练 |
+| **RETRO** / **GPT vs RETRO**([EMNLP 2024](https://aclanthology.org/2024.emnlp-main.1081/)) | 检索 + PEFT 的交叉 |
+
+**infini-gram 对我们特别相关**:它证明了**不做任何训练**、纯计数、无界阶数,
+就能和神经 LM 插值并改善。**它是"表"这一侧的极限形态。**
+
+## 12. 判据:我们缺的那一块,有现成的
+
+**LongTail-Swap**(Algayres et al., EMNLP 2025 Findings,
+[aclanthology](https://aclanthology.org/2025.findings-emnlp.601/)):
+
+- **只测分布的尾部** —— 模型用极少曝光学会新词的能力,像婴儿一样
+- 形式:**可接受 / 不可接受句对**,零样本,取两句平均 log 概率
+- 已有 10M / 100M 词 BabyLM 两个版本,评了 16 个模型
+- 结论:**LM 在罕见词上表现很差;而且架构差异在长尾上比在头部显著得多**
+- **代码公开,可以为任意英文语料生成** ⇒ **我们可以为自己的语料生成一份**
+
+> 这是"能力判据"的直接候选,而且**它的成功判据正好落在我们测到增益的位置上**。
+
+其他判据/严谨性来源:
+- **When Not to Trust Language Models**([ACL 2023](https://aclanthology.org/2023.acl-long.546/)):
+  参数记忆 vs 非参数记忆的边界
+- **Quantifying Variance in Evaluation Benchmarks** / [evalstats](https://github.com/ianarawjo/evalstats) /
+  seed-variance reporting:小样本评测的统计功效
+
+## 13. "冻结基座 + 小预算"的其它成熟路线(不是记忆)
+
+| 路线 | 代表 | 为什么值得看 |
+|---|---|---|
+| **激活引导** | ITI / control vectors / [Householder 伪旋转](https://ar5iv.labs.arxiv.org/html/2409.10053) | 冻结模型上的推理期干预;**方向-幅度视角**与我们的塌陷直接相关 |
+| **侧网络** | Side-tuning / [Symbiotic Tuning](https://ieeexplore.ieee.org/document/11227100) | 冻结骨干 + 小侧网络,是我们嫁接的替代架构 |
+| **权重空间编辑** | task arithmetic / [ROME / MEMIT](https://levelup.gitconnected.com/rome-vs-memit-the-evolution-of-mass-editing-transformer-memory-e3e4af2ca206) | 不改前向的"记忆" |
+| **数据质量** | Phi / "Textbooks Are All You Need" | **小模型的提升常常来自数据而非架构** |
+| **同策略蒸馏** | [CADENCE](https://huggingface.co/papers/2607.16955) / OPSD | 用 teacher 换小模型能力,与我们已有的 4B 契合 |
+| **子词正则** | BPE dropout / [2605.13436](https://arxiv-org.ezproxy.obspm.fr/html/2605.13436v1) | 直接改尾部表征 |
+| **联想记忆理论** | Modern Hopfield / [fast weights](https://ar5iv.labs.arxiv.org/html/2510.27258) | 给"注入一个向量"提供理论框架 |
+| **检索缩放律** | [log-form retrieval law, 2604.00715](https://huggingface.co/buckets/huggingchat/papers-content/tree/2604/2604.00715.md) | 检索收益的**幂律/对数律拟合** |
+
+## 14. 换框之后的结论
+
+```text
+① 我们的数字(0.176 nats)与 kNN-LM(0.146 nats)同量级 —— 不是小效应
+② 差别在【地址】:我们锁在 3-token 窗口里,kNN-LM 用整个前缀
+③ 论文自己说检索是两条逃逸路线之一 —— 而它零训练
+④ 尾部问题文献里有四种修法,我们一种没试
+⑤ "按住读出"四个独立来源,我们实测 46.3% 受害
+⑥ 判据有现成的:LongTail-Swap,可为任意语料生成
+```
+
+**⇒ 论文 B 的问题因此变了。** 原命题"纯 PLE 嫁接 + 少量训练 → 提升通用性能"
+在**冻结骨干 + 3-token 寻址**下,结构上被自己的界限制住了。
+而**同一套装置换成检索式寻址**(仍然冻结模型、仍然零/极少训练),
+文献说它能把 18.65 做到 15.79,并且**检索胜过训练**。
+
+**这不是放弃 PLE,而是把它放回它真正的位置:一个 token 键的先验通道,
+与一个查询键的检索通道互补 —— 而后者才是能力增量的来源。**

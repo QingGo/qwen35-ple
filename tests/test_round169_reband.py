@@ -144,3 +144,53 @@ def test_end_to_end_writes_both_tables_and_names_the_artifact(tmp_path, capsys):
     assert blob["own_min"] == int(own.min())
     assert blob["ctx_zero"] == int((ctx == 0).sum())
     assert "by_own_count" in blob and "by_context_count" in blob
+
+
+# --------------------------------------------------------------------------- #
+# Hard-mask prediction: an identity, not a forecast.
+# --------------------------------------------------------------------------- #
+def test_a_masked_position_contributes_exactly_zero():
+    # A held row keeps its frozen value, so frozen - trained is exactly 0 there.
+    counts = np.array([1, 1, 10, 200], dtype=np.int64)
+    delta = np.array([-0.5, -0.5, 0.25, 0.25])
+    p = REBAND.masked_prediction(counts, delta, 10)
+    assert p["n_held_frozen"] == 2
+    assert p["n_trained"] == 2
+    # the two kept positions sum to 0.5, averaged over ALL four scored positions
+    assert p["predicted_delta"] == pytest.approx(0.5 / 4)
+
+
+def test_the_prediction_is_the_kept_band_mean_times_its_share():
+    rng = np.random.default_rng(3)
+    counts = rng.integers(1, 100, size=1000).astype(np.int64)
+    delta = rng.normal(size=1000)
+    for t in (1, 2, 10, 50):
+        p = REBAND.masked_prediction(counts, delta, t)
+        keep = counts >= t
+        assert p["predicted_delta"] == pytest.approx(delta[keep].sum() / counts.size)
+        assert p["kept_band_delta"] == pytest.approx(delta[keep].mean())
+        assert p["n_trained"] + p["n_held_frozen"] == counts.size
+
+
+def test_threshold_one_trains_everything_and_reproduces_the_observed_delta():
+    # The limit: threshold 1 is a no-op, so the "prediction" must equal the
+    # aggregate that was actually measured.
+    counts = np.array([1, 2, 3, 4], dtype=np.int64)
+    delta = np.array([0.1, -0.2, 0.3, -0.4])
+    p = REBAND.masked_prediction(counts, delta, 1)
+    assert p["n_trained"] == 4 and p["n_held_frozen"] == 0
+    assert p["predicted_delta"] == pytest.approx(delta.mean())
+
+
+def test_a_threshold_above_every_count_predicts_a_dead_arm():
+    counts = np.array([1, 2, 3], dtype=np.int64)
+    delta = np.array([1.0, 2.0, 3.0])
+    p = REBAND.masked_prediction(counts, delta, 99)
+    assert p["n_trained"] == 0
+    assert p["predicted_delta"] == 0.0
+    assert p["kept_band_delta"] is None
+
+
+def test_the_prediction_refuses_misaligned_inputs():
+    with pytest.raises(ValueError, match="parallel"):
+        REBAND.masked_prediction(np.array([1, 2]), np.array([1.0]), 10)

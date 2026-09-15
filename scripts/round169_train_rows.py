@@ -55,6 +55,43 @@ def window_row_indices(pos: np.ndarray, s: int, batch_tokens: int) -> np.ndarray
     return pos[s - 2 : s + batch_tokens - 1]
 
 
+def row_weights(train_count: np.ndarray, threshold: int, power: float = 0.0) -> np.ndarray:
+    """Per-row step weights from each row's training-stream count.
+
+    WHY THIS EXISTS.  ``SparseAdam`` is scale-invariant per coordinate: on a
+    row's FIRST update ``m_hat / sqrt(v_hat) = sign(g)``, so the step is a full
+    ``lr`` no matter how weak the evidence is.  A trigram seen once therefore
+    takes one full-size step in the direction of a single noisy example, which
+    replaces a corpus-level prior with a one-sample estimate.  That is the
+    measured mechanism behind "rare contexts lose, frequent contexts gain", and
+    it is shrinkage, not convergence speed -- a *better* optimiser would drive the
+    training loss lower and move the rows further, and the harm is monotone in how
+    far the rows move.
+
+    ``threshold=0`` returns all ones: train every row, the pre-registered B1
+    behaviour, so the default reproduces the existing arms exactly.
+
+    ``power=0`` is a hard mask -- rows below the threshold never move, which is
+    the limit of shrinkage and has a useful property: their contribution to the
+    paired delta is EXACTLY zero, so the aggregate a masked arm should produce is
+    computable in advance from the frozen band table.
+
+    ``power>0`` is the smooth version, ``c**p / (c**p + k**p)``; ``p=1`` is
+    ``c/(c+k)``, the empirical-Bayes weight for a mean estimated from ``c``
+    observations.  It has to multiply the STEP and not the gradient, because Adam
+    normalises by the gradient's own RMS and a constant gradient rescaling
+    cancels exactly.
+    """
+    c = np.asarray(train_count, dtype=np.float64)
+    if threshold <= 0:
+        return np.ones(c.size, dtype=np.float32)
+    if power > 0:
+        cp = np.clip(c, 0.0, None) ** float(power)
+        kp = float(threshold) ** float(power)
+        return (cp / (cp + kp)).astype(np.float32)
+    return (c >= float(threshold)).astype(np.float32)
+
+
 class SparseAdam:
     """Adam over a row bank, updating only the rows a step actually touched.
 
@@ -62,9 +99,17 @@ class SparseAdam:
     parameters and 13.7 GB of state *every step*; with ~500 steps per epoch that
     dominates everything else.  Only a few thousand distinct rows appear in any
     batch, so the update is done on those rows alone.
+
+    ``row_scale`` is an optional [n_rows] float32 tensor of PER-ROW step weights.
+    It has to multiply the step and not the gradient: Adam divides by the
+    gradient's own RMS, so any constant rescaling of ``g`` cancels exactly and a
+    gradient-side weight would be a no-op.  This is the hook for evidence-scaled
+    updates -- a row addressed by a trigram seen once should not move as far as
+    one seen two hundred times, and the count is already on disk.
     """
 
-    def __init__(self, E, lr: float, betas=(0.9, 0.999), eps: float = 1e-8) -> None:
+    def __init__(self, E, lr: float, betas=(0.9, 0.999), eps: float = 1e-8,
+                 row_scale=None) -> None:
         import torch
 
         self.E = E
@@ -74,6 +119,12 @@ class SparseAdam:
         self.m = torch.zeros_like(E)
         self.v = torch.zeros_like(E)
         self.t = 0
+        if row_scale is not None and row_scale.numel() != E.shape[0]:
+            raise ValueError(
+                f"row_scale has {row_scale.numel()} entries but the bank has {E.shape[0]} rows"
+            )
+        self.row_scale = row_scale
+        self.rows_held = 0
 
     def step(self, idx, grad) -> float:
         """``idx`` [N] int64 (CPU), ``grad`` [N, D] float32 (CPU).  Returns grad rms."""
@@ -96,7 +147,12 @@ class SparseAdam:
         bc1 = 1.0 - self.b1**self.t
         bc2 = 1.0 - self.b2**self.t
         denom = (v / bc2).sqrt_().add_(self.eps)
-        self.E[uniq] = self.E[uniq] - self.lr * (m / bc1) / denom
+        if self.row_scale is None:
+            self.E[uniq] = self.E[uniq] - self.lr * (m / bc1) / denom
+        else:
+            w = self.row_scale[uniq].unsqueeze(1)
+            self.rows_held += int((w == 0).sum())
+            self.E[uniq] = self.E[uniq] - (self.lr * w) * (m / bc1) / denom
         self.m[uniq] = m
         self.v[uniq] = v
         return float(g.pow(2).mean().sqrt())
@@ -138,6 +194,23 @@ def main() -> int:
              "would exceed the signal in the trained arm only.",
     )
     ap.add_argument("--max-steps", type=int, default=0, help="smoke only; 0 = all")
+    ap.add_argument(
+        "--min-train-count", type=int, default=0,
+        help="train ONLY rows whose trigram occurred at least this many times in "
+             "the training stream (0 = train every row, the pre-registered B1 "
+             "behaviour). The count comes from the snapshot's "
+             "trigram-train-count.npy, so it is exact and needs no extra pass. "
+             "Rows below the threshold keep their frozen E0 value, which makes "
+             "their contribution to the paired delta EXACTLY zero -- so the "
+             "aggregate this arm should produce is computable in advance from the "
+             "frozen band table, and is pre-registered rather than discovered.",
+    )
+    ap.add_argument(
+        "--row-scale-power", type=float, default=0.0,
+        help="soft alternative to --min-train-count: weight each row's step by "
+             "c**p / (c**p + k**p) with c the row's training count and k the "
+             "threshold. p=0 is a hard mask, p=1 is shrinkage c/(c+k).",
+    )
     args = ap.parse_args()
 
     import torch
@@ -202,7 +275,25 @@ def main() -> int:
 
     install_reader_hook(model, args.layer, reader, short_conv)
 
-    opt = SparseAdam(E0.clone(), lr=args.lr)
+    row_scale = None
+    if args.min_train_count > 0:
+        train_count = np.load(snap / "trigram-train-count.npy")
+        if train_count.size != E0.shape[0]:
+            raise SystemExit(
+                f"trigram-train-count has {train_count.size} entries but the bank has "
+                f"{E0.shape[0]} rows -- the count table is not this snapshot's"
+            )
+        row_scale = torch.from_numpy(
+            row_weights(train_count, args.min_train_count, args.row_scale_power)
+        )
+        held = int((row_scale == 0).sum())
+        log(
+            f"row gating: threshold {args.min_train_count} (power {args.row_scale_power}), "
+            f"{held:,} / {row_scale.numel():,} rows held at their frozen E0 value "
+            f"({100 * held / row_scale.numel():.1f}%)"
+        )
+
+    opt = SparseAdam(E0.clone(), lr=args.lr, row_scale=row_scale)
     B = int(args.batch_tokens)
     # A window of B+1 tokens scores B predictions, at stream positions s..s+B-1.
     # The injection at stream position t is addressed by the trigram ENDING at t,
@@ -267,6 +358,9 @@ def main() -> int:
         "layer": args.layer, "batch_tokens": B, "steps_per_epoch": len(starts),
         "scale": scale, "model": args.model, "reader": args.reader,
         "snapshot_dir": str(snap), "train_tokens": args.train_tokens,
+        "min_train_count": args.min_train_count,
+        "row_scale_power": args.row_scale_power,
+        "rows_held_frozen": None if row_scale is None else int((row_scale == 0).sum()),
         "history": history,
         "changed_rows": int((delta.abs().sum(dim=1) > 0).sum()),
         "delta_rms": float(delta.pow(2).mean().sqrt()),

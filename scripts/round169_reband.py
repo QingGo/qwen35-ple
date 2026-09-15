@@ -49,6 +49,39 @@ import numpy as np
 BANDS = [(1, 1), (2, 2), (3, 4), (5, 9), (10, 49), (50, 199), (200, 10**9)]
 
 
+def masked_prediction(counts: np.ndarray, delta: np.ndarray, threshold: int) -> dict:
+    """The aggregate a hard-masked arm must produce, read off the frozen table.
+
+    A hard mask holds every row below ``threshold`` at its frozen ``E0`` value.
+    For those positions the eval substitutes the same vector in both arms, so
+    ``delta = frozen - trained`` is EXACTLY zero, not approximately.  And because
+    ``trigram_codes`` is an injection rather than a hash, each distinct trigram
+    owns its own row, so holding the low-count rows cannot change the trajectory
+    of the high-count ones -- their gradients never mix.
+
+    So this is not a forecast with error bars: it is an identity.  That is what
+    makes the masked arm worth running as a pre-registered test rather than as a
+    search -- the number is written down before the GPU starts, and either the run
+    reproduces it or the band decomposition is wrong.
+    """
+    counts = np.asarray(counts, dtype=np.int64)
+    delta = np.asarray(delta, dtype=np.float64)
+    if counts.shape != delta.shape:
+        raise ValueError(f"counts {counts.shape} and delta {delta.shape} must be parallel")
+    n = int(delta.size)
+    keep = counts >= int(threshold)
+    kept = int(keep.sum())
+    return {
+        "threshold": int(threshold),
+        "n_scored": n,
+        "n_trained": kept,
+        "frac_trained": (kept / n) if n else None,
+        "kept_band_delta": float(delta[keep].mean()) if kept else None,
+        "predicted_delta": float(delta[keep].sum() / n) if n else None,
+        "n_held_frozen": n - kept,
+    }
+
+
 def band_label(lo: int, hi: int) -> str:
     return f"[{lo},{'+' if hi >= 10**9 else hi}]"
 
@@ -129,6 +162,12 @@ def main() -> int:
     ap.add_argument("--tag", default=None, help="label for the output (default: record stem)")
     ap.add_argument("--out-json", default=None)
     ap.add_argument("--out-md", default=None)
+    ap.add_argument(
+        "--predict-thresholds", default="",
+        help="comma-separated row-count thresholds; prints, for each, the aggregate "
+             "a hard-masked arm must produce. This is an identity, not a forecast: "
+             "held rows contribute exactly zero and rows do not mix.",
+    )
     args = ap.parse_args()
 
     rec_path = Path(args.record)
@@ -157,6 +196,23 @@ def main() -> int:
     }
     result = {"tag": tag, "record": rec_path.name, "by_own_count": own_tab,
               "by_context_count": ctx_tab, **extra}
+
+    if args.predict_thresholds:
+        preds = []
+        for tok in args.predict_thresholds.split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            p = masked_prediction(own, delta, int(tok))
+            preds.append(p)
+            print(
+                f"[mask] threshold >= {p['threshold']:>6}: trains {p['n_trained']:,} / "
+                f"{p['n_scored']:,} positions ({p['frac_trained']:.1%}), "
+                f"kept-band delta {p['kept_band_delta']:+.5f} "
+                f"-> predicted aggregate delta {p['predicted_delta']:+.5f}"
+            )
+        result["masked_predictions"] = preds
+        print()
 
     print(render_markdown(tag, own_tab, ctx_tab, extra))
     if args.out_json:

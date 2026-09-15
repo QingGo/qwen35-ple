@@ -302,3 +302,60 @@ def test_the_offset_helper_accepts_the_last_representable_position():
 
 def test_the_offset_helper_handles_an_empty_score():
     assert EVAL.trigram_index(np.empty(0, dtype=np.int64), 10).size == 0
+
+
+# --------------------------------------------------------------------------- #
+# Row gating: per-row step weights from each row's training count.
+# --------------------------------------------------------------------------- #
+def test_the_default_gating_reproduces_the_existing_arms_exactly():
+    # threshold 0 must be a no-op, or every pre-registered B1 arm stops being a
+    # baseline for the gated ones.
+    c = np.array([0, 1, 2, 50, 10_000], dtype=np.int64)
+    w = TRAIN.row_weights(c, 0)
+    assert w.tolist() == [1.0] * 5
+    assert w.dtype == np.float32
+
+
+def test_the_hard_mask_holds_every_row_below_the_threshold():
+    c = np.array([0, 1, 9, 10, 11], dtype=np.int64)
+    assert TRAIN.row_weights(c, 10).tolist() == [0.0, 0.0, 0.0, 1.0, 1.0]
+    # a held row contributes exactly zero, which is what makes a masked arm's
+    # aggregate predictable in advance from the frozen band table
+    assert TRAIN.row_weights(c, 10)[:3].sum() == 0.0
+
+
+def test_shrinkage_is_monotone_and_bounded():
+    c = np.array([0, 1, 10, 100, 10_000], dtype=np.int64)
+    w = TRAIN.row_weights(c, 10, 1.0)
+    assert w[0] == 0.0
+    assert w[2] == pytest.approx(0.5)          # c == k
+    assert np.all(np.diff(w) > 0)              # monotone in evidence
+    assert np.all(w >= 0) and np.all(w < 1)    # never amplifies
+
+
+def test_shrinkage_approaches_one_for_heavily_seen_rows():
+    # The point of the weight: a row with overwhelming evidence is left alone.
+    assert TRAIN.row_weights(np.array([10**6]), 10, 1.0)[0] > 0.999
+    assert TRAIN.row_weights(np.array([10**6]), 50, 1.0)[0] > 0.999
+
+
+def test_a_larger_threshold_shrinks_every_row_more():
+    c = np.array([1, 10, 100, 1000], dtype=np.int64)
+    w10 = TRAIN.row_weights(c, 10, 1.0)
+    w50 = TRAIN.row_weights(c, 50, 1.0)
+    assert np.all(w50 <= w10)
+
+
+def test_the_scale_power_controls_how_sharp_the_gate_is():
+    c = np.array([5, 10, 20], dtype=np.int64)
+    soft = TRAIN.row_weights(c, 10, 1.0)
+    sharp = TRAIN.row_weights(c, 10, 4.0)
+    # a higher power drives the weight toward the hard mask at c != k
+    assert sharp[0] < soft[0] and sharp[2] > soft[2]
+    assert np.all((sharp >= 0) & (sharp <= 1))
+
+
+def test_the_count_table_need_not_be_sorted_or_dense():
+    # row_weights indexes by ROW, so the count vector must not be reordered.
+    c = np.array([100, 1, 50, 2], dtype=np.int64)
+    assert TRAIN.row_weights(c, 10).tolist() == [1.0, 0.0, 1.0, 0.0]

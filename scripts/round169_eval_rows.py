@@ -170,6 +170,54 @@ def top1_summary(surprisal, hits: dict, edges=None) -> dict:
     }
 
 
+def fill_unseen(E: np.ndarray, unseen_pos: np.ndarray, mode: str, *, seed: int = 0) -> None:
+    """Replace, in place, the rows injected at unseen-trigram positions.
+
+    The seen block is never touched, so every trained-row result is unaffected by
+    this ablation.
+
+    ``zero``   is any row content needed at all, or would nothing do?
+    ``shuffle`` permutes the very rows being replaced among themselves.  That
+               preserves their marginal distribution EXACTLY while destroying the
+               trigram-to-row correspondence, so real-above-shuffle is content and
+               shuffle-below-zero would mean a wrong row is worse than none.
+    ``mean``   replaces every unseen row with their average: one constant,
+               content-free vector.
+    ``real``   leaves the pretrained shard rows alone -- the default, and the arm
+               every earlier result was produced with.
+
+    A fill that silently fails to apply yields an arm identical to ``real``, which
+    reads as "content does not matter" -- a false negative in the direction that
+    kills the finding.  So the modes are exact where they can be, and the caller
+    verifies a sample afterwards.
+    """
+    if mode == "real":
+        return
+    if mode not in ("zero", "mean", "shuffle"):
+        raise ValueError(f"unknown unseen fill {mode!r}")
+    unseen_pos = np.asarray(unseen_pos)
+    if unseen_pos.size == 0:
+        return
+    if mode == "zero":
+        E[unseen_pos] = 0.0
+        return
+    if mode == "mean":
+        acc = np.zeros(E.shape[1], dtype=np.float64)
+        cnt = 0
+        for s in range(0, unseen_pos.size, 100_000):
+            e = min(unseen_pos.size, s + 100_000)
+            block = np.asarray(E[unseen_pos[s:e]], dtype=np.float64)
+            acc += block.sum(axis=0)
+            cnt += block.shape[0]
+        E[unseen_pos] = (acc / max(cnt, 1)).astype(E.dtype)
+        return
+    block = np.array(E[unseen_pos])
+    perm = np.random.default_rng(seed).permutation(unseen_pos.size)
+    for s in range(0, unseen_pos.size, 50_000):
+        e = min(unseen_pos.size, s + 50_000)
+        E[unseen_pos[s:e]] = block[perm[s:e]]
+
+
 def per_position_record(score, delta, lf, lt, ln, ctx=None, snap=None, code=None,
                         hits=None, extra=None) -> dict:
     """The per-position record written next to the primary JSON.
@@ -264,6 +312,12 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--backbone-dtype", default="float32")
+    ap.add_argument("--unseen-fill-seed", type=int, default=0)
+    ap.add_argument("--unseen-fill", choices=("real", "zero", "mean", "shuffle"),
+                    default="real",
+                    help="what to inject at positions whose trigram has no snapshot row. "
+                         "'real' (default) is the pretrained shard row and reproduces every "
+                         "earlier result; the others are the content ablation.")
     ap.add_argument("--gate-record", type=Path, default=None,
                     help="also write a second record over ALL aligned positions, carrying "
                          "the confidence features and has_train_row. The primary record is "
@@ -315,6 +369,38 @@ def main() -> int:
         for s in range(0, unseen_pos.size, 50_000):
             e = min(unseen_pos.size, s + 50_000)
             E[unseen_pos[s:e]] = fetch_e_t(args.rows_dir, all_rowids[unseen_pos[s:e]], scale=args.scale)
+    # ---- the unseen-regime ablation --------------------------------------- #
+    # Phase 8 found the injection still gains +0.041296 nats on the 690,303
+    # positions whose trigram never appeared in training, where the row comes from
+    # the PRETRAINED shard table.  That number has two readings and they mean very
+    # different things for a paper:
+    #
+    #   (a) the row's CONTENT is doing work -- real information about this trigram,
+    #       generalising beyond the fine-tuning stream;
+    #   (b) the row is a generic perturbation -- any vector through the reader
+    #       shifts the logits favourably, and the specific trigram is irrelevant.
+    #
+    # `zero` separates (b) from "nothing at all": if the gain survives on a zero
+    # row, the row was never the source.  `shuffle` permutes the very rows being
+    # injected among themselves, which preserves their marginal distribution
+    # exactly while destroying the trigram-to-row correspondence -- so real above
+    # shuffle is content, and shuffle below zero would mean a WRONG row is worse
+    # than none.  `mean` replaces every unseen row with their average.
+    #
+    # Only the unseen block is touched; the seen positions keep exactly the values
+    # they had, so the trained-row results are unaffected by this flag.
+    if args.unseen_fill != "real" and unseen_pos.size:
+        sample = np.array(E[unseen_pos[:1024]])
+        before = float(np.abs(sample).mean())
+        fill_unseen(E, unseen_pos, args.unseen_fill, seed=args.unseen_fill_seed)
+        after_sample = np.asarray(E[unseen_pos[:1024]])
+        after = float(np.abs(after_sample).mean())
+        if args.unseen_fill == "zero" and float(np.abs(after_sample).max()) != 0.0:
+            raise SystemExit("the zero fill did not take effect")
+        if args.unseen_fill == "shuffle" and np.array_equal(sample, after_sample):
+            raise SystemExit("the shuffle left the unseen block unchanged")
+        log(f"unseen fill '{args.unseen_fill}': {unseen_pos.size:,} positions "
+            f"(sample |e| {before:.3e} -> {after:.3e})")
     log(f"e_t matrix built ({E.nbytes / 1e9:.1f} GB) in {time.time() - t0:.0f}s")
 
     # Consistency: the snapshot's row for a trigram must equal the shard table's
@@ -445,10 +531,32 @@ def main() -> int:
     score, lf, lt, ln = score[ok], lf[ok], lt[ok], ln[ok]
     hf, ht, hn = hf[ok], ht[ok], hn[ok]
     delta = lf - lt
+
+    # The regime every earlier eval could not see: positions whose trigram has no
+    # E0 row, so no row training could move.  They are injected anyway (with a
+    # pretrained shard row) and they feed the autoregressive state, so their
+    # effect is real and was simply never scored.  Reported unconditionally and
+    # cheaply, so it lands next to the headline instead of in a side artifact.
+    unseen_all = np.zeros(T, dtype=bool)
+    unseen_all[unseen_pos] = True
+    upos = positions[unseen_all[positions] & np.isfinite(nll_none[positions])
+                    & np.isfinite(nll_frozen[positions])]
+    unseen_report = None
+    if upos.size:
+        ug = nll_none[upos] - nll_frozen[upos]
+        unseen_report = {
+            "n": int(upos.size),
+            "mean_nll_none": float(nll_none[upos].mean()),
+            "mean_nll_frozen": float(nll_frozen[upos].mean()),
+            "injection_gain": float(ug.mean()),
+            "frac_positive": float((ug > 0).mean()),
+        }
+
     result: dict = {
         "n_scored_positions": int(score.size),
         "n_stream_positions": T,
         "n_positions_with_trained_row": int(sub_pos.size),
+        "unseen_regime": unseen_report,
         "delta": paired_stats(delta),
         "delta_shuffled_placeholder": None,
         "mean_nll": {
@@ -462,6 +570,7 @@ def main() -> int:
         },
         "consistency": consistency,
         "config": {
+            "unseen_fill": args.unseen_fill,
             "trained_bank": str(args.trained_bank), "keep_index": str(args.keep_index),
             "tokens": str(args.tokens), "positions": str(args.positions),
             "reader": str(args.reader), "reader_kind": args.reader_kind,

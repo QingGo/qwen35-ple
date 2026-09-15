@@ -262,6 +262,82 @@ def test_a_misaligned_optional_field_is_rejected_too():
         )
 
 
+def _fill_inputs(n_seen=6, n_unseen=5, dim=4, seed=0):
+    rng = np.random.default_rng(seed)
+    E = rng.normal(size=(n_seen + n_unseen + 3, dim)).astype(np.float32)
+    seen = np.arange(1, n_seen + 1)
+    unseen = np.arange(n_seen + 2, n_seen + 2 + n_unseen)
+    return E, seen, unseen
+
+
+def test_fill_real_leaves_everything_alone():
+    E, _, unseen = _fill_inputs()
+    before = E.copy()
+    EVAL.fill_unseen(E, unseen, "real")
+    assert np.array_equal(E, before)
+
+
+def test_fill_zero_zeros_only_the_unseen_block():
+    E, seen, unseen = _fill_inputs()
+    seen_before = E[seen].copy()
+    EVAL.fill_unseen(E, unseen, "zero")
+    assert np.abs(E[unseen]).max() == 0.0
+    # The seen block carries every trained-row result, so touching it would
+    # invalidate the comparison the ablation exists to make.
+    assert np.array_equal(E[seen], seen_before)
+
+
+def test_fill_mean_gives_every_unseen_position_the_same_row():
+    E, seen, unseen = _fill_inputs()
+    want = E[unseen].astype(np.float64).mean(axis=0)
+    seen_before = E[seen].copy()
+    EVAL.fill_unseen(E, unseen, "mean")
+    assert np.allclose(E[unseen], want, atol=1e-6)
+    assert np.allclose(E[unseen][0], E[unseen][-1], atol=1e-6)
+    assert np.array_equal(E[seen], seen_before)
+
+
+def test_fill_shuffle_permutes_the_unseen_rows_without_changing_them():
+    # The distribution is preserved EXACTLY and only the trigram-to-row
+    # correspondence is destroyed -- that is what makes it the decisive control.
+    E, seen, unseen = _fill_inputs(n_unseen=40)
+    before_rows = sorted(map(tuple, E[unseen].tolist()))
+    seen_before = E[seen].copy()
+    EVAL.fill_unseen(E, unseen, "shuffle")
+    after_rows = sorted(map(tuple, E[unseen].tolist()))
+    assert before_rows == after_rows
+    assert not np.array_equal(E[unseen], np.array(before_rows, dtype=E.dtype))
+    assert np.array_equal(E[seen], seen_before)
+
+
+def test_fill_shuffle_is_reproducible_for_a_given_seed():
+    E1, _, unseen = _fill_inputs(n_unseen=30)
+    E2 = E1.copy()
+    EVAL.fill_unseen(E1, unseen, "shuffle", seed=7)
+    EVAL.fill_unseen(E2, unseen, "shuffle", seed=7)
+    assert np.array_equal(E1, E2)
+
+
+def test_fill_shuffle_actually_moves_rows():
+    E, _, unseen = _fill_inputs(n_unseen=30)
+    before = E[unseen].copy()
+    EVAL.fill_unseen(E, unseen, "shuffle")
+    assert not np.array_equal(E[unseen], before)
+
+
+def test_fill_on_an_empty_unseen_set_is_a_no_op():
+    E, _, _ = _fill_inputs()
+    before = E.copy()
+    EVAL.fill_unseen(E, np.zeros(0, dtype=np.int64), "zero")
+    assert np.array_equal(E, before)
+
+
+def test_fill_rejects_an_unknown_mode():
+    E, _, unseen = _fill_inputs()
+    with pytest.raises(ValueError, match="unknown unseen fill"):
+        EVAL.fill_unseen(E, unseen, "random_row")
+
+
 def test_extra_fields_are_merged_into_the_record():
     score, delta, lf, lt, ln, ctx = _record_inputs(n=5)
     rec = EVAL.per_position_record(

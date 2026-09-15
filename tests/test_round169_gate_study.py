@@ -278,6 +278,57 @@ def test_logistic_fit_rejects_misaligned_labels():
 
 
 # --------------------------------------------------------------------------
+# the value gate vs the classifier
+# --------------------------------------------------------------------------
+
+
+def test_ridge_recovers_a_linear_relationship():
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(4000, 3))
+    true_w = np.array([0.5, -1.25, 2.0])
+    g = 0.3 + X @ true_w
+    w = GS.ridge_fit(X, g, l2=1e-6)
+    assert w[0] == pytest.approx(0.3, abs=1e-3)
+    assert np.allclose(w[1:], true_w, atol=1e-3)
+
+
+def test_ridge_apply_is_the_predicted_gain():
+    w = np.array([1.0, 2.0])
+    assert GS.ridge_apply(w, np.array([[3.0], [4.0]])).tolist() == [7.0, 9.0]
+
+
+def test_value_and_classification_objectives_disagree_where_it_matters():
+    # One feature, three positions.  The middle one has a 45% chance of +3 and a
+    # 55% chance of -1: expected value +0.8, so it should be injected, and a
+    # classifier deciding at 0.5 will throw it away.
+    #
+    # This is the reason the value gate exists at all -- the first version of this
+    # study used the classifier and scored 0.64x, worse than doing nothing.
+    X = np.array([[0.0], [1.0], [2.0]])
+    gain = np.array([-1.0, 0.8, 2.0])
+    y = (gain > 0).astype(np.float64)
+    w_log = GS.logistic_fit(X, y, iters=4000, lr=1.0)
+    w_val = GS.ridge_fit(X, gain, l2=0.0)
+    dec_log = GS.logistic_apply(w_log, X) >= 0.5
+    dec_val = GS.ridge_apply(w_val, X) > 0.0
+    assert GS.gate_value(gain, dec_val) >= GS.gate_value(gain, dec_log)
+
+
+def test_ridge_rejects_misaligned_gain():
+    with pytest.raises(ValueError, match=r"\(n, d\)"):
+        GS.ridge_fit(np.zeros((4, 2)), np.zeros(3))
+
+
+def test_ridge_does_not_penalise_the_bias():
+    # A constant gain with a constant feature must be fitted exactly when l2 is
+    # large, which only happens if the bias escapes the penalty.
+    X = np.zeros((10, 1))
+    g = np.full(10, 5.0)
+    w = GS.ridge_fit(X, g, l2=1e6)
+    assert w[0] == pytest.approx(5.0)
+
+
+# --------------------------------------------------------------------------
 # the two regimes
 # --------------------------------------------------------------------------
 

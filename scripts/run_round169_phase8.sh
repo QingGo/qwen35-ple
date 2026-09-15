@@ -247,13 +247,15 @@ m = d["mean_nll"]
 g = d["injection_effect_vs_pure_backbone"]["frozen_minus_none"]
 print(f"- primary (39% of positions, trigram seen in training):")
 print(f"  - none {m['none_pure_backbone']:.6f} -> frozen {m['frozen_rows']:.6f}")
-print(f"  - injection gain {g['mean']:+.6f} nats, t {g['t']:+.1f}")
+print(f"  - frozen MINUS none {g['mean']:+.6f} nats (t {g['t']:+.1f}); "
+      f"the injection gain is {(-g['mean']):+.6f}")
 try:
     z = np.load(sys.argv[2])
     n = z["score"].size
     row = z["has_train_row"].astype(bool)
     gain = z["nll_none"].astype(np.float64) - z["nll_frozen"].astype(np.float64)
     print(f"- gate record: {n:,} aligned positions, {int((~row).sum()):,} with no trainable row")
+    print("  (gain = nll_none - nll_frozen, so POSITIVE means the injection helped)")
     print(f"  - SEEN     trigram: n {int(row.sum()):,}  gain {gain[row].mean():+.6f}")
     print(f"  - UNSEEN   trigram: n {int((~row).sum()):,}  gain {gain[~row].mean():+.6f}")
 except Exception as exc:

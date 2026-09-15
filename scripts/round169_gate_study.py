@@ -166,7 +166,7 @@ def standardize(train: np.ndarray, other: np.ndarray) -> tuple[np.ndarray, np.nd
 
 
 def logistic_fit(
-    X: np.ndarray, y: np.ndarray, *, l2: float = 1e-3, iters: int = 600, lr: float = 0.5
+    X: np.ndarray, y: np.ndarray, *, l2: float = 1e-3, iters: int = 250, lr: float = 0.5
 ) -> np.ndarray:
     """L2 logistic regression by gradient descent, on standardised features.
 
@@ -192,28 +192,80 @@ def logistic_fit(
     return w
 
 
+def ridge_fit(X: np.ndarray, gain: np.ndarray, *, l2: float = 1.0) -> np.ndarray:
+    """Least squares of the GAIN ITSELF, not of its sign.
+
+    This distinction is the whole reason this function exists.  The logistic gate
+    above predicts ``gain > 0`` and decides at 0.5, which maximises CLASSIFICATION
+    ACCURACY -- and that is not the quantity the project cares about.  What matters
+    is the SUM of the gain over the positions where the gate says yes.  A position
+    with a 45% chance of a +3.0 nat gain and a 55% chance of a -1.0 nat loss has
+    positive expected value and a classifier will confidently discard it.
+
+    Solving for the conditional mean and injecting when it is positive is the
+    decision rule that matches the objective.
+
+    Normal equations: with d ~ 12 features the 12x12 Gram matrix is trivial even
+    at a million rows, so no iterative solver is needed.
+    """
+    X = np.asarray(X, dtype=np.float64)
+    gain = np.asarray(gain, dtype=np.float64)
+    if X.ndim != 2 or gain.shape != (X.shape[0],):
+        raise ValueError("X must be (n, d) and gain must be (n,)")
+    Xb = np.column_stack([np.ones(X.shape[0]), X])
+    reg = np.eye(Xb.shape[1]) * l2
+    reg[0, 0] = 0.0  # never penalise the bias
+    gram = Xb.T @ Xb + reg
+    return np.linalg.solve(gram, Xb.T @ gain)
+
+
+def ridge_apply(w: np.ndarray, X: np.ndarray) -> np.ndarray:
+    """The predicted gain, so the caller can compare it against zero."""
+    Xb = np.column_stack([np.ones(np.asarray(X).shape[0]), np.asarray(X, dtype=np.float64)])
+    return Xb @ w
+
+
 def logistic_apply(w: np.ndarray, X: np.ndarray) -> np.ndarray:
     Xb = np.column_stack([np.ones(np.asarray(X).shape[0]), np.asarray(X, dtype=np.float64)])
     return 1.0 / (1.0 + np.exp(-np.clip(Xb @ w, -30.0, 30.0)))
 
 
 def best_threshold(
-    feature: np.ndarray, gain: np.ndarray, train: np.ndarray, *, higher_is_better: bool = True,
-    n_grid: int = 200,
+    feature: np.ndarray, gain: np.ndarray, train: np.ndarray, *, higher_is_better: bool = True
 ) -> tuple[float, float]:
-    """The single-feature threshold that recovers the most nats on the TRAIN fold."""
-    f = np.asarray(feature, dtype=np.float64)[train]
-    g = np.asarray(gain, dtype=np.float64)[train]
+    """The single-feature threshold that recovers the most nats on the TRAIN fold.
+
+    Evaluated by one sort and a suffix sum rather than a grid of thresholds.  The
+    grid version cost 220 billion comparisons at this record's size (11 features x
+    10 folds x 200 thresholds x 1.0M rows), which is the difference between a study
+    that runs in twenty seconds and one nobody re-runs.  The optimum of
+    ``mean(gain[f >= t])`` over t is attained at one of the observed values of f,
+    so the sort loses nothing.
+
+    Ties are handled by cutting at the FIRST occurrence of each distinct value:
+    ``f >= t`` keeps the whole tie group, so a cut inside a group is not a
+    different rule and must not be scored as one.
+    """
+    f = np.asarray(feature, dtype=np.float64)
+    g = np.asarray(gain, dtype=np.float64)
+    if f.shape != g.shape:
+        raise ValueError("feature and gain must be the same length")
+    train = np.asarray(train, dtype=bool)
+    f, g = f[train], g[train]
     if f.size == 0:
         raise ValueError("empty training fold")
-    qs = np.quantile(f, np.linspace(0.01, 0.99, n_grid))
-    best = (float(qs[0]), -np.inf)
-    for t in np.unique(qs):
-        sel = f >= t if higher_is_better else f <= t
-        val = float(g[sel].sum() / f.size)
-        if val > best[1]:
-            best = (float(t), val)
-    return best
+    if not higher_is_better:
+        t, val = best_threshold(-f, g, np.ones(f.size, dtype=bool))
+        return -t, val
+    order = np.argsort(f, kind="stable")
+    fs, gs = f[order], g[order]
+    suffix = np.concatenate([np.cumsum(gs[::-1])[::-1], [0.0]])
+    first = np.ones(fs.size, dtype=bool)
+    first[1:] = fs[1:] != fs[:-1]
+    cuts = np.flatnonzero(first)
+    vals = suffix[cuts] / fs.size
+    best = int(np.argmax(vals))
+    return float(fs[cuts[best]]), float(vals[best])
 
 
 def two_regime_report(
@@ -281,6 +333,10 @@ def main() -> int:
                     help="the all-positions record written by --gate-record")
     ap.add_argument("--features", default=",".join(DEFAULT_FEATURES))
     ap.add_argument("--k-folds", type=int, default=10)
+    ap.add_argument("--max-fit-rows", type=int, default=300_000,
+                    help="subsample the training folds when fitting the logistic gate. "
+                         "11 features do not need a million rows, and the held-out "
+                         "evaluation is unaffected because it uses every test row.")
     ap.add_argument("--oracle-tau", type=float, default=2.0)
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
@@ -341,19 +397,56 @@ def main() -> int:
         te = folds == k
         tr = ~te
         Xtr, Xte = standardize(X[tr], X[te])
-        w = logistic_fit(Xtr, y[tr])
+        if Xtr.shape[0] > args.max_fit_rows:
+            pick = np.random.default_rng(0).choice(Xtr.shape[0], args.max_fit_rows, replace=False)
+            fit_X, fit_y = Xtr[pick], y[tr][pick]
+        else:
+            fit_X, fit_y = Xtr, y[tr]
+        w = logistic_fit(fit_X, fit_y)
         dec_te = logistic_apply(w, Xte) >= 0.5
         test_dec[te] = dec_te
         train_vals.append(float(gain[tr][logistic_apply(w, Xtr) >= 0.5].sum() / max(tr.sum(), 1)))
         coefs.append(w[1:])
     gates.append({
-        "name": "logistic (all features)",
+        "name": "logistic P(gain>0) >= 0.5",
         "keep": float(test_dec.mean()),
         "test_value": gate_value(gain, test_dec),
         "train_multiple": float(np.mean(train_vals)) / uncond if uncond else float("nan"),
         "test_multiple": gate_value(gain, test_dec) / uncond if uncond else float("nan"),
-        "kind": "logistic",
+        "kind": "classification objective",
     })
+
+    # ---- the VALUE gate: inject where the predicted gain is positive --------- #
+    # Same features, same folds, same standardisation; only the objective differs.
+    # This is the rule that matches what the project is trying to maximise.
+    test_dec = np.zeros(gain.size, dtype=bool)
+    train_vals = []
+    ridge_coefs = []
+    for k in range(args.k_folds):
+        te = folds == k
+        tr = ~te
+        Xtr, Xte = standardize(X[tr], X[te])
+        if Xtr.shape[0] > args.max_fit_rows:
+            pick = np.random.default_rng(0).choice(Xtr.shape[0], args.max_fit_rows, replace=False)
+            fit_X, fit_g = Xtr[pick], gain[tr][pick]
+        else:
+            fit_X, fit_g = Xtr, gain[tr]
+        w = ridge_fit(fit_X, fit_g)
+        test_dec[te] = ridge_apply(w, Xte) > 0.0
+        train_vals.append(
+            float(gain[tr][ridge_apply(w, Xtr) > 0.0].sum() / max(tr.sum(), 1))
+        )
+        ridge_coefs.append(w[1:])
+    gates.append({
+        "name": "ridge E[gain] > 0 (value)",
+        "keep": float(test_dec.mean()),
+        "test_value": gate_value(gain, test_dec),
+        "train_multiple": float(np.mean(train_vals)) / uncond if uncond else float("nan"),
+        "test_multiple": gate_value(gain, test_dec) / uncond if uncond else float("nan"),
+        "kind": "value objective",
+    })
+    study_coefs = {nm: float(np.mean([c[i] for c in ridge_coefs]))
+                   for i, nm in enumerate(names)}
     gates.sort(key=lambda r: -r["test_multiple"])
 
     study = {
@@ -369,6 +462,7 @@ def main() -> int:
         "regimes": two_regime_report(gain, has_row),
         "logistic_coef_mean": {nm: float(np.mean([c[i] for c in coefs]))
                                for i, nm in enumerate(names)},
+        "ridge_coef_mean": study_coefs,
         "note": (
             "Every gate above uses only variables available before the next token is "
             "emitted. The two oracle rows are shown for scale, not as candidates: "

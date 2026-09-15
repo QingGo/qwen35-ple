@@ -157,7 +157,6 @@ def test_every_start_keeps_the_window_inside_the_stream():
         assert s + B + 1 <= t.size, "window runs past the end of the stream"
         assert s - 2 >= 0, "row window starts before the stream"
 
-
 # --------------------------------------------------------------------------- #
 # The per-position record: the artifact the band table cannot replace.
 # --------------------------------------------------------------------------- #
@@ -165,96 +164,141 @@ EVAL = _load("scripts/round169_eval_rows.py", "round169_eval_rows")
 
 
 def _record_inputs(n: int = 6):
+    """(score, delta, lf, lt, ln, ctx) for a scored set of ``n`` positions."""
     score = np.arange(100, 100 + n, dtype=np.int64)
-    rowid = np.arange(7, 7 + n, dtype=np.int64)
     delta = np.linspace(-0.5, 0.5, n).astype(np.float32)
     lf = np.full(n, 2.5, dtype=np.float32)
     lt = lf - delta
     ln = np.full(n, 2.7, dtype=np.float32)
     ctx = np.arange(1, n + 1, dtype=np.int64)
-    return score, rowid, delta, lf, lt, ln, ctx
+    return score, delta, lf, lt, ln, ctx
 
 
 def test_the_record_is_parallel_to_the_scored_positions():
-    score, rowid, delta, lf, lt, ln, ctx = _record_inputs()
-    rec = EVAL.per_position_record(score, rowid, delta, lf, lt, ln, ctx)
+    score, delta, lf, lt, ln, ctx = _record_inputs()
+    rec = EVAL.per_position_record(score, delta, lf, lt, ln, ctx)
     assert set(rec) == {
-        "score", "rowid", "delta", "nll_frozen", "nll_trained", "nll_none", "context_count",
+        "score", "delta", "nll_frozen", "nll_trained", "nll_none", "context_count",
     }
     for key, arr in rec.items():
         assert arr.shape == (score.size,), key
     assert np.array_equal(rec["score"], score)
-    assert np.array_equal(rec["rowid"], rowid)
 
 
 def test_the_record_keeps_the_eval_sign_convention():
     # delta = frozen - trained everywhere in this project, and the B1 verdict is
     # read in that convention.  A record that silently flipped it would reverse
     # every conclusion drawn from it.
-    score, rowid, _, lf, lt, ln, ctx = _record_inputs()
+    score, _, lf, lt, ln, ctx = _record_inputs()
     delta = lf - lt
-    rec = EVAL.per_position_record(score, rowid, delta, lf, lt, ln, ctx)
+    rec = EVAL.per_position_record(score, delta, lf, lt, ln, ctx)
     assert np.allclose(rec["delta"], rec["nll_frozen"] - rec["nll_trained"], atol=1e-6)
 
 
 def test_context_count_is_optional_but_checked_when_present():
-    score, rowid, delta, lf, lt, ln, _ = _record_inputs()
-    without = EVAL.per_position_record(score, rowid, delta, lf, lt, ln)
-    assert "context_count" not in without
-    with_ctx = EVAL.per_position_record(score, rowid, delta, lf, lt, ln, np.ones(score.size))
+    score, delta, lf, lt, ln, _ = _record_inputs()
+    assert "context_count" not in EVAL.per_position_record(score, delta, lf, lt, ln)
+    with_ctx = EVAL.per_position_record(score, delta, lf, lt, ln, np.ones(score.size))
     assert "context_count" in with_ctx
 
 
-def test_the_record_carries_every_key_the_interference_join_needs():
-    # "rowid" and "snapshot_index" are different keys on purpose: training moves
-    # the bank by snapshot index, while a position reaches the shard table by row
-    # id.  A record that kept only one of them could not tell "this position's own
-    # trigram was trained" apart from "this position inherited a row it never
-    # voted for", which is the whole question the record exists to answer.
-    score, rowid, delta, lf, lt, ln, ctx = _record_inputs()
+def test_the_record_carries_every_key_the_correction_needs():
+    # snapshot_index joins to trigram-train-count.npy and gives the EXACT count of
+    # the injected trigram; trigram_code identifies that trigram.  Without both,
+    # the published band table cannot be recomputed after the box is gone.
+    score, delta, lf, lt, ln, ctx = _record_inputs()
     snap = np.arange(1000, 1000 + score.size, dtype=np.int64)
     code = np.arange(500, 500 + score.size, dtype=np.int64)
-    rec = EVAL.per_position_record(score, rowid, delta, lf, lt, ln, ctx, snap=snap, code=code)
+    rec = EVAL.per_position_record(score, delta, lf, lt, ln, ctx, snap=snap, code=code)
     assert set(rec) == {
-        "score", "rowid", "snapshot_index", "trigram_code",
+        "score", "snapshot_index", "trigram_code",
         "delta", "nll_frozen", "nll_trained", "nll_none", "context_count",
     }
     assert np.array_equal(rec["snapshot_index"], snap)
     assert np.array_equal(rec["trigram_code"], code)
-    # rowid and snapshot_index must not be silently interchangeable
-    assert not np.array_equal(rec["rowid"], rec["snapshot_index"])
+
+
+def test_rowid_is_not_in_the_record():
+    # rowids_from_tokens returns [T, 16] -- the graft addresses 16 heads and
+    # fetch_e_t concatenates them -- so "the row id" has no scalar meaning, and
+    # storing it would add ~57 MB per arm.  This failed once as a shape error
+    # ("expected 665, got 10640"); the key is gone on purpose, not by accident.
+    score, delta, lf, lt, ln, ctx = _record_inputs()
+    rec = EVAL.per_position_record(score, delta, lf, lt, ln, ctx)
+    assert "rowid" not in rec
 
 
 def test_the_extra_keys_are_optional():
-    score, rowid, delta, lf, lt, ln, _ = _record_inputs()
-    bare = EVAL.per_position_record(score, rowid, delta, lf, lt, ln)
+    score, delta, lf, lt, ln, _ = _record_inputs()
+    bare = EVAL.per_position_record(score, delta, lf, lt, ln)
     assert "snapshot_index" not in bare and "trigram_code" not in bare
-
-
-def test_a_misaligned_optional_field_is_rejected_too():
-    score, rowid, delta, lf, lt, ln, ctx = _record_inputs(n=6)
-    with pytest.raises(ValueError, match="snapshot_index"):
-        EVAL.per_position_record(
-            score, rowid, delta, lf, lt, ln, ctx, snap=np.arange(3, dtype=np.int64)
-        )
 
 
 def test_a_misaligned_field_is_rejected_rather_than_written():
     # The failure mode this guards: a record whose arrays disagree in length
     # still saves, still loads, and silently joins the wrong delta to the wrong
-    # row id -- which is exactly the species of bug that produced this project's
+    # row -- which is exactly the species of bug that produced this project's
     # earlier "19,996/20,000 bound disagreements".
-    score, rowid, delta, lf, lt, ln, ctx = _record_inputs(n=6)
-    with pytest.raises(ValueError, match="expected 6"):
-        EVAL.per_position_record(score, rowid, delta, lf, lt, ln, ctx[:5])
+    score, delta, lf, lt, ln, ctx = _record_inputs(n=6)
+    with pytest.raises(ValueError, match=r"expected \(6,\)"):
+        EVAL.per_position_record(score, delta, lf, lt, ln, ctx[:5])
+
+
+def test_a_two_dimensional_field_is_rejected_not_merely_size_checked():
+    # This is the shape that actually shipped by mistake: all_rowids[score] has
+    # the right leading dimension and 16x the elements.  A leading-axis check
+    # ACCEPTS it; only requiring one value per position names the problem.
+    score, delta, lf, lt, ln, ctx = _record_inputs(n=4)
+    wide = np.zeros((4, 16), dtype=np.int64)
+    with pytest.raises(ValueError, match=r"shape \(4, 16\)"):
+        EVAL.per_position_record(score, delta, lf, lt, ln, ctx, snap=wide)
+
+
+def test_a_misaligned_optional_field_is_rejected_too():
+    score, delta, lf, lt, ln, ctx = _record_inputs(n=6)
+    with pytest.raises(ValueError, match="snapshot_index"):
+        EVAL.per_position_record(
+            score, delta, lf, lt, ln, ctx, snap=np.arange(3, dtype=np.int64)
+        )
 
 
 def test_the_record_round_trips_through_npz(tmp_path):
-    score, rowid, delta, lf, lt, ln, ctx = _record_inputs()
-    rec = EVAL.per_position_record(score, rowid, delta, lf, lt, ln, ctx)
+    score, delta, lf, lt, ln, ctx = _record_inputs()
+    rec = EVAL.per_position_record(score, delta, lf, lt, ln, ctx)
     path = tmp_path / "eval-real-lr3.162e-4.deltas.npz"
     np.savez_compressed(path, **rec)
     back = np.load(path)
     assert sorted(back.files) == sorted(rec)
     for key in rec:
         assert np.array_equal(back[key], rec[key]), key
+
+
+# --------------------------------------------------------------------------- #
+# The t-2 offset: per-trigram arrays versus per-position arrays.
+# --------------------------------------------------------------------------- #
+def test_the_per_trigram_arrays_take_the_t_minus_2_offset():
+    # codes[i] describes the trigram ENDING at i+2, so a scored stream position t
+    # is described by codes[t-2].  Indexing by t directly raises IndexError only
+    # for the last few positions, which is how the first per-position record
+    # failed on every arm while still writing a valid primary JSON.
+    score = np.array([2, 3, 100, 999], dtype=np.int64)
+    idx = EVAL.trigram_index(score, n_trigrams=1000)
+    assert idx.tolist() == [0, 1, 98, 997]
+    assert (score - idx == 2).all()
+
+
+def test_the_offset_helper_rejects_positions_that_would_run_off_the_end():
+    # The exact failure: a stream of 1,152,891 tokens has 1,152,889 trigrams, and
+    # the position 1,152,889 (== n_trigrams) is the first one out of bounds.
+    with pytest.raises(ValueError, match="t-2 offset"):
+        EVAL.trigram_index(np.array([0, 1, 1_152_889], dtype=np.int64), n_trigrams=1_152_889)
+    assert EVAL.trigram_index(np.array([2, 3], dtype=np.int64), 10).tolist() == [0, 1]
+
+
+def test_the_offset_helper_accepts_the_last_representable_position():
+    n = 1_152_889
+    assert EVAL.trigram_index(np.array([n + 1], dtype=np.int64), n).tolist() == [n - 1]
+
+
+def test_the_offset_helper_handles_an_empty_score():
+    assert EVAL.trigram_index(np.empty(0, dtype=np.int64), 10).size == 0

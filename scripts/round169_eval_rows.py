@@ -57,6 +57,33 @@ def resolve_snapshot_index(codes_uniq: np.ndarray, codes: np.ndarray):
     return j, codes_uniq[j] == codes
 
 
+def trigram_index(score: np.ndarray, n_trigrams: int) -> np.ndarray:
+    """Map scored stream positions to indices into the per-trigram arrays.
+
+    ``codes[i]`` describes the trigram ENDING at ``i + 2`` -- that is where
+    ``seen_pos = flatnonzero(hit_all) + 2`` comes from -- so the trigram ending
+    at stream position ``t`` lives at ``codes[t - 2]``.  ``j_all`` is parallel to
+    ``codes`` and takes the same offset, while ``context_counts`` and
+    ``all_rowids`` are indexed by the stream position directly and do NOT.
+
+    Indexing by ``t`` is off by two and fails only for the last few positions.
+    The first version of the per-position record did exactly that, and because
+    the record is written inside a try/except (so that it can never cost the
+    primary result) the failure showed up as an empty ``.deltas.npz`` on every
+    arm rather than as a crash: ``IndexError: index 1152889 is out of bounds for
+    axis 0 with size 1152889``.  The bounds check below turns that class of
+    mistake into a message that names the offset.
+    """
+    idx = np.asarray(score, dtype=np.int64) - 2
+    if idx.size and (idx.min() < 0 or idx.max() >= n_trigrams):
+        raise ValueError(
+            f"scored positions {idx.min() + 2}..{idx.max() + 2} map to trigram "
+            f"indices {idx.min()}..{idx.max()}, outside [0, {n_trigrams}); the "
+            "per-trigram arrays carry the t-2 offset and the per-position ones do not"
+        )
+    return idx
+
+
 def paired_stats(delta: np.ndarray) -> dict:
     """Mean / SE / t of a paired difference."""
     n = int(delta.size)
@@ -69,32 +96,39 @@ def paired_stats(delta: np.ndarray) -> dict:
     return {"n": n, "mean": mean, "se": se, "t": (mean / se if se > 0 else None)}
 
 
-def per_position_record(score, rowid, delta, lf, lt, ln, ctx=None, snap=None, code=None) -> dict:
+def per_position_record(score, delta, lf, lt, ln, ctx=None, snap=None, code=None) -> dict:
     """The per-position record written next to the primary JSON.
 
     A band mean cannot answer the question the band means raised.  At lr=1e-4 the
     1-9 bands come out worse while the >=10 bands come out better, and the ~150k
-    scored positions whose trigram context has a TRAIN count of zero come out
-    worse than either -- yet their own row can still have been moved, because a
-    position reaches a row through the hash of its trigram and not through its
-    own identity.  That is the interference question, and it needs one row per
-    scored position plus every key the join could be made on:
+    scored positions whose context count is zero come out worse than either.
+    Whether that ordering survives a correct frequency variable can only be asked
+    of the per-position record, so it carries every key the join could need:
 
-    ``rowid``  the row id in the shard table (``rowids_from_tokens``);
-    ``snap``   the index into ``E0``/the trained bank -- the embedding row that
-               training actually moved, which is NOT the same key as ``rowid``;
-    ``code``   the trigram hash whose bucket decided whether the position was
-               addressed at all;
-    ``ctx``    the train count of the position's own trigram context, so a
-               position can be split into "its own trigram was trained" vs
-               "it inherited a row it never voted for".
+    ``snapshot_index``
+        the index into ``E0``/the trained bank -- the embedding row training
+        actually moved.  Joined against ``trigram-train-count.npy`` it gives the
+        EXACT training count of the trigram that was injected, which is the
+        variable the published band table should have used.
+    ``trigram_code``
+        the injection code of that trigram, so the band can be recomputed or the
+        trigram decoded without re-deriving the stream.
+    ``context_count``
+        the round-168 margin variable, kept for a side-by-side with the published
+        table.  It is one token behind the row it describes; see
+        docs/round-169-band-variable-off-by-one.md.
+    ``rowid`` is deliberately NOT here.  The graft addresses 16 heads per
+    position and ``fetch_e_t`` concatenates them into the 2560-wide vector, so
+    "the row id" is not a single value -- ``rowids_from_tokens`` returns [T, 16]
+    and storing it would add 57 MB per arm for a key with no scalar meaning.
+    ``snapshot_index`` identifies the row that training moved, which is the row
+    this record is about.
 
     Every field is parallel to ``score``: index ``i`` of any array describes
     stream position ``score[i]``.
     """
     rec = {
         "score": np.asarray(score, dtype=np.int64),
-        "rowid": np.asarray(rowid, dtype=np.int64),
         "delta": np.asarray(delta, dtype=np.float32),
         "nll_frozen": np.asarray(lf, dtype=np.float32),
         "nll_trained": np.asarray(lt, dtype=np.float32),
@@ -106,11 +140,17 @@ def per_position_record(score, rowid, delta, lf, lt, ln, ctx=None, snap=None, co
         rec["snapshot_index"] = np.asarray(snap, dtype=np.int64)
     if code is not None:
         rec["trigram_code"] = np.asarray(code, dtype=np.int64)
-    n = rec["delta"].size
+    n = rec["score"].size
     for key, arr in rec.items():
-        if arr.size != n:
+        # Require EXACTLY one value per position.  A (n, 16) array has the right
+        # leading dimension, and accepting that is how ``all_rowids[score]``
+        # slipped through the first version -- it was only caught later by a size
+        # comparison that reported the confusing "expected 665, got 10640".
+        # Naming the actual shape is the diagnostic.
+        if arr.shape != (n,):
             raise ValueError(
-                f"per-position record field {key!r} has {arr.size} entries, expected {n}"
+                f"per-position record field {key!r} has shape {arr.shape}, expected ({n},): "
+                "every field is one value per scored position"
             )
     return rec
 
@@ -356,9 +396,10 @@ def main() -> int:
     # Written after the primary result and wrapped, so an extra artifact can
     # never cost the thing that took the GPU time.
     try:
+        tri = trigram_index(score, codes.size)
         rec = per_position_record(
-            score, all_rowids[score], delta, lf, lt, ln, ctx,
-            snap=j_all[score], code=codes[score],
+            score, delta, lf, lt, ln, ctx,
+            snap=j_all[tri], code=codes[tri],
         )
         rec_path = out_path.parent / f"{out_path.stem}.deltas.npz"
         np.savez_compressed(rec_path, **rec)

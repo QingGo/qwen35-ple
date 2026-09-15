@@ -96,7 +96,82 @@ def paired_stats(delta: np.ndarray) -> dict:
     return {"n": n, "mean": mean, "se": se, "t": (mean / se if se > 0 else None)}
 
 
-def per_position_record(score, delta, lf, lt, ln, ctx=None, snap=None, code=None) -> dict:
+# Backbone-surprisal bands for the top-1 reading.  Same spirit as the frequency
+# bands: report the tail separately, because an aggregate hides whether anything
+# happened where the injection is supposed to act.
+SURPRISAL_EDGES = [0.0, 0.05, 0.2, 0.5, 1.0, 2.0, 4.0, 8.0, np.inf]
+
+
+def paired_accuracy(surprisal, hit_a, hit_b, edges=None, name_a="a", name_b="b") -> list[dict]:
+    """Top-1 accuracy in backbone-surprisal bands, tested PAIRED.
+
+    Every round in this project has reported mean negative log-likelihood, which
+    is a log quantity: it is dominated by positions where the model was very
+    wrong, so a large NLL gain can coexist with the model emitting exactly the
+    same token.  Top-1 is the first non-log currency here, and it is reported per
+    surprisal band because the injection's NLL gain is concentrated in the tail --
+    if that gain is real it must show up there, and if it does not, the NLL
+    accounting is measuring something that never reaches a decision.
+
+    The arms are paired on the same positions, so the test is on the per-position
+    difference ``hit_b - hit_a``, not on two independent proportions.
+    """
+    surprisal = np.asarray(surprisal, dtype=np.float64)
+    hit_a = np.asarray(hit_a, dtype=np.float64)
+    hit_b = np.asarray(hit_b, dtype=np.float64)
+    if not (surprisal.shape == hit_a.shape == hit_b.shape):
+        raise ValueError("surprisal and both hit arrays must be parallel")
+    edges = list(SURPRISAL_EDGES if edges is None else edges)
+    out = []
+    for i in range(len(edges) - 1):
+        lo, hi = edges[i], edges[i + 1]
+        m = (surprisal >= lo) & (surprisal < hi)
+        n = int(m.sum())
+        entry = {
+            "band": f"[{lo:g},{'+' if np.isinf(hi) else f'{hi:g}'})",
+            "n": n,
+            "acc_a": float(hit_a[m].mean()) if n else None,
+            "acc_b": float(hit_b[m].mean()) if n else None,
+            "delta": None, "se": None, "t": None,
+        }
+        if n >= 2:
+            diff = hit_b[m] - hit_a[m]
+            se = float(diff.std(ddof=1) / np.sqrt(n))
+            entry["delta"] = float(diff.mean())
+            entry["se"] = se
+            entry["t"] = (entry["delta"] / se) if se > 0 else None
+        out.append(entry)
+    return out
+
+
+def top1_summary(surprisal, hits: dict, edges=None) -> dict:
+    """Overall and per-band top-1 accuracy for named arms, with paired deltas.
+
+    ``hits`` maps an arm name to its per-position 0/1 correctness.  The first arm
+    is the reference; every other arm is compared to it, paired.
+    """
+    names = list(hits)
+    if len(names) < 2:
+        raise ValueError("top1_summary needs at least two arms to pair")
+    ref = names[0]
+    per_band = {nm: paired_accuracy(surprisal, hits[ref], hits[nm], edges) for nm in names[1:]}
+    rows = []
+    for i, entry in enumerate(per_band[names[1]]):
+        row = {"band": entry["band"], "n": entry["n"], ref: entry["acc_a"]}
+        for nm in names[1:]:
+            row[nm] = per_band[nm][i]["acc_b"]
+            row[f"{nm}_minus_{ref}"] = per_band[nm][i]["delta"]
+            row[f"{nm}_t"] = per_band[nm][i]["t"]
+        rows.append(row)
+    return {
+        "reference": ref,
+        "overall": {nm: float(np.asarray(hits[nm], dtype=np.float64).mean()) for nm in names},
+        "bands": rows,
+    }
+
+
+def per_position_record(score, delta, lf, lt, ln, ctx=None, snap=None, code=None,
+                        hits=None) -> dict:
     """The per-position record written next to the primary JSON.
 
     A band mean cannot answer the question the band means raised.  At lr=1e-4 the
@@ -140,6 +215,8 @@ def per_position_record(score, delta, lf, lt, ln, ctx=None, snap=None, code=None
         rec["snapshot_index"] = np.asarray(snap, dtype=np.int64)
     if code is not None:
         rec["trigram_code"] = np.asarray(code, dtype=np.int64)
+    for arm_name, arr in (hits or {}).items():
+        rec[f"hit_{arm_name}"] = np.asarray(arr, dtype=np.uint8)
     n = rec["score"].size
     for key, arr in rec.items():
         # Require EXACTLY one value per position.  A (n, 16) array has the right
@@ -260,8 +337,19 @@ def main() -> int:
     E_t = torch.from_numpy(E)
 
     def per_position_nll(use_reader: bool) -> np.ndarray:
-        """Next-token NLL at every stream position, injected on contiguous chunks."""
+        """Next-token NLL and top-1 correctness at every stream position.
+
+        Two currencies per position, because they answer different questions.
+        NLL is the quantity every round so far has reported, and it is a LOG
+        quantity: mean negative log-likelihood is dominated by positions where
+        the model was very wrong, so a large NLL gain can coexist with no change
+        in what the model would actually have emitted.  Top-1 is the first
+        reading in this project that is not a log-loss, and the injection's gain
+        is concentrated exactly where NLL is largest -- so the two can disagree
+        in either direction and the disagreement is the informative part.
+        """
         out = np.full(T, np.nan, dtype=np.float64)
+        hit = np.zeros(T, dtype=np.uint8)
         handle = install_reader_hook(model, args.layer, reader) if use_reader else None
         try:
             starts = list(range(0, T - 1, args.chunk))
@@ -278,17 +366,19 @@ def main() -> int:
                     nll = F.cross_entropy(logits, tgt, reduction="none")
                     lo = s + (args.warmup if s > 0 else 0)
                     out[lo : s + nll.numel()] = nll[lo - s :].double().cpu().numpy()
-                    del logits, nll
+                    correct = (logits.argmax(dim=-1) == tgt).to(torch.uint8)
+                    hit[lo : s + correct.numel()] = correct[lo - s :].cpu().numpy()
+                    del logits, nll, correct
         finally:
             if handle is not None:
                 handle.remove()
                 model._current_ple_e_t = None
-        return out
+        return out, hit
 
     log("arm none: pure backbone (this should reproduce 1.5c's bb_final) ...")
-    nll_none = per_position_nll(False)
+    nll_none, hit_none = per_position_nll(False)
     log("arm frozen: frozen rows injected ...")
-    nll_frozen = per_position_nll(True)
+    nll_frozen, hit_frozen = per_position_nll(True)
     log(f"  ({time.time() - t0:.0f}s)")
 
     # ---- trained arm: substitute ONLY where training could have acted ----- #
@@ -300,15 +390,17 @@ def main() -> int:
     E[sub_pos] = trained[kk[in_keep]]
     E_t = torch.from_numpy(E)
     log(f"arm trained: substituted {sub_pos.size:,} positions that have a trained row")
-    nll_trained = per_position_nll(True)
+    nll_trained, hit_trained = per_position_nll(True)
 
     # ---- the paired quantity, on seen positions only ---------------------- #
     score = positions[np.isin(positions, sub_pos)]
     if score.size == 0:
         raise SystemExit("no scored position has a trained row")
     lf, lt, ln = nll_frozen[score], nll_trained[score], nll_none[score]
+    hf, ht, hn = hit_frozen[score], hit_trained[score], hit_none[score]
     ok = np.isfinite(lf) & np.isfinite(lt) & np.isfinite(ln)
     score, lf, lt, ln = score[ok], lf[ok], lt[ok], ln[ok]
+    hf, ht, hn = hf[ok], ht[ok], hn[ok]
     delta = lf - lt
     result: dict = {
         "n_scored_positions": int(score.size),
@@ -392,6 +484,27 @@ def main() -> int:
             f"{k}: n={v['n']} d={v['mean']:+.5f}" for k, v in by_band.items()
         ))
 
+    # ---- section 4b: top-1, the first non-log currency --------------------- #
+    # Cheap (the argmax is already computed) and it is the reading that decides
+    # whether the NLL accounting above reaches a decision at all.  Written before
+    # the per-position record, for the same reason the primary result is written
+    # before both.
+    try:
+        result["top1"] = top1_summary(ln, {"none": hn, "frozen": hf, "trained": ht})
+        flush()
+        log("top-1 accuracy: " + ", ".join(
+            f"{k}={v:.4f}" for k, v in result["top1"]["overall"].items()
+        ))
+        for row in result["top1"]["bands"]:
+            if row["n"]:
+                log(f"  surprisal {row['band']:<12} n={row['n']:>7,} "
+                    f"none={row['none']:.4f} frozen={row['frozen']:.4f} "
+                    f"delta={row['frozen_minus_none']:+.4f} t={row['frozen_t']:+.2f}")
+    except Exception as exc:  # noqa: BLE001 - optional reading, must not cost the rest
+        result["top1_error"] = f"{type(exc).__name__}: {exc}"
+        flush()
+        log(f"WARNING: could not compute top-1 ({exc})")
+
     # ---- section 5: the per-position record ------------------------------- #
     # Written after the primary result and wrapped, so an extra artifact can
     # never cost the thing that took the GPU time.
@@ -400,6 +513,7 @@ def main() -> int:
         rec = per_position_record(
             score, delta, lf, lt, ln, ctx,
             snap=j_all[tri], code=codes[tri],
+            hits={"none": hn, "frozen": hf, "trained": ht},
         )
         rec_path = out_path.parent / f"{out_path.stem}.deltas.npz"
         np.savez_compressed(rec_path, **rec)

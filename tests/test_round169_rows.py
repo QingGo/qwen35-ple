@@ -262,6 +262,43 @@ def test_a_misaligned_optional_field_is_rejected_too():
         )
 
 
+def test_extra_fields_are_merged_into_the_record():
+    score, delta, lf, lt, ln, ctx = _record_inputs(n=5)
+    rec = EVAL.per_position_record(
+        score, delta, lf, lt, ln, ctx,
+        extra={"ent_none": np.full(5, 1.5), "top1_frozen": np.arange(5)},
+    )
+    assert rec["ent_none"].tolist() == [1.5] * 5
+    assert rec["top1_frozen"].tolist() == [0, 1, 2, 3, 4]
+
+
+def test_an_extra_field_with_the_wrong_shape_is_rejected_by_name():
+    # The `extra` path exists so a SECOND artifact can carry more per-position
+    # quantities through the SAME check.  Merging before the check is the point.
+    score, delta, lf, lt, ln, ctx = _record_inputs(n=5)
+    with pytest.raises(ValueError, match="ent_none"):
+        EVAL.per_position_record(
+            score, delta, lf, lt, ln, ctx, extra={"ent_none": np.zeros((5, 4))}
+        )
+
+
+def test_an_extra_field_may_not_shadow_a_core_field():
+    # A right-shaped overwrite of `score` passes every shape check and corrupts
+    # the record.  Only the name catches it.
+    score, delta, lf, lt, ln, ctx = _record_inputs(n=5)
+    with pytest.raises(ValueError, match="overwrite a core record field"):
+        EVAL.per_position_record(
+            score, delta, lf, lt, ln, ctx, extra={"score": np.zeros(5, dtype=np.int64)}
+        )
+
+
+def test_extra_defaults_to_none_and_adds_nothing():
+    score, delta, lf, lt, ln, ctx = _record_inputs(n=5)
+    bare = EVAL.per_position_record(score, delta, lf, lt, ln, ctx)
+    explicit = EVAL.per_position_record(score, delta, lf, lt, ln, ctx, extra=None)
+    assert sorted(bare) == sorted(explicit)
+
+
 def test_the_record_round_trips_through_npz(tmp_path):
     score, delta, lf, lt, ln, ctx = _record_inputs()
     rec = EVAL.per_position_record(score, delta, lf, lt, ln, ctx)

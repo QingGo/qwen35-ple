@@ -80,6 +80,7 @@ jobs:
           bash -n scripts/run_round169_phase5.sh
           bash -n scripts/run_round169_phase6.sh
           bash -n scripts/run_round169_phase7.sh
+          bash -n scripts/run_round169_phase8.sh
           bash -n scripts/round152_finish.sh
           bash -n scripts/round162_finish.sh
 

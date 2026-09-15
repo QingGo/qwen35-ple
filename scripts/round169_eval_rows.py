@@ -171,7 +171,7 @@ def top1_summary(surprisal, hits: dict, edges=None) -> dict:
 
 
 def per_position_record(score, delta, lf, lt, ln, ctx=None, snap=None, code=None,
-                        hits=None) -> dict:
+                        hits=None, extra=None) -> dict:
     """The per-position record written next to the primary JSON.
 
     A band mean cannot answer the question the band means raised.  At lr=1e-4 the
@@ -217,6 +217,16 @@ def per_position_record(score, delta, lf, lt, ln, ctx=None, snap=None, code=None
         rec["trigram_code"] = np.asarray(code, dtype=np.int64)
     for arm_name, arr in (hits or {}).items():
         rec[f"hit_{arm_name}"] = np.asarray(arr, dtype=np.uint8)
+    # `extra` exists so a second artifact can carry more per-position quantities
+    # through the SAME shape check.  Merging before the check is the point: an
+    # unvalidated extra array is how a (n, 16) row-id matrix slipped through once.
+    for name, arr in (extra or {}).items():
+        if name in rec:
+            # An extra that shadows `score` or `delta` would corrupt the record
+            # silently -- the shape check cannot see it, because the shape is
+            # right.  Only the name gives it away.
+            raise ValueError(f"extra field {name!r} would overwrite a core record field")
+        rec[name] = np.asarray(arr)
     n = rec["score"].size
     for key, arr in rec.items():
         # Require EXACTLY one value per position.  A (n, 16) array has the right
@@ -254,6 +264,11 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--backbone-dtype", default="float32")
+    ap.add_argument("--gate-record", type=Path, default=None,
+                    help="also write a second record over ALL aligned positions, carrying "
+                         "the confidence features and has_train_row. The primary record is "
+                         "unchanged, so every number published before this flag existed "
+                         "stays comparable.")
     args = ap.parse_args()
 
     import torch
@@ -350,6 +365,20 @@ def main() -> int:
         """
         out = np.full(T, np.nan, dtype=np.float64)
         hit = np.zeros(T, dtype=np.uint8)
+        # Confidence features, for a gate that must run BEFORE the answer is known.
+        # `nll` is the surprisal of the realised token and is therefore an oracle:
+        # you cannot compute it without already knowing what happened.  These four
+        # come from the model's own output distribution and are available at the
+        # moment the decision has to be made:
+        #   ent       predictive entropy, -sum p log p, in nats
+        #   maxp      top-1 probability
+        #   logmargin log p(1st) - log p(2nd), in nats
+        #   top1      the argmax id, so two arms can be compared for agreement
+        feats = {
+            k: np.full(T, np.nan, dtype=np.float32)
+            for k in ("ent", "maxp", "logmargin")
+        }
+        feats["top1"] = np.full(T, -1, dtype=np.int32)
         handle = install_reader_hook(model, args.layer, reader) if use_reader else None
         try:
             starts = list(range(0, T - 1, args.chunk))
@@ -363,22 +392,36 @@ def main() -> int:
                         model._current_ple_e_t = E_t[s:e].unsqueeze(0).to(args.device)
                     logits = model(input_ids=win).logits[0, :-1].float()
                     tgt = win[0, 1:]
-                    nll = F.cross_entropy(logits, tgt, reduction="none")
+                    logp = F.log_softmax(logits, dim=-1)
+                    del logits
+                    nll = -logp.gather(1, tgt.unsqueeze(1)).squeeze(1)
                     lo = s + (args.warmup if s > 0 else 0)
-                    out[lo : s + nll.numel()] = nll[lo - s :].double().cpu().numpy()
-                    correct = (logits.argmax(dim=-1) == tgt).to(torch.uint8)
-                    hit[lo : s + correct.numel()] = correct[lo - s :].cpu().numpy()
-                    del logits, nll, correct
+                    n = nll.numel()
+                    out[lo : s + n] = nll[lo - s :].double().cpu().numpy()
+                    correct = (logp.argmax(dim=-1) == tgt).to(torch.uint8)
+                    hit[lo : s + n] = correct[lo - s :].cpu().numpy()
+                    if args.gate_record:
+                        two = logp.topk(2, dim=-1)
+                        p = logp.exp()
+                        ent = -(p * logp).sum(dim=-1)
+                        del p
+                        sl = slice(lo - s, n)
+                        feats["ent"][lo : s + n] = ent[sl].cpu().numpy()
+                        feats["maxp"][lo : s + n] = two.values[sl, 0].exp().cpu().numpy()
+                        feats["logmargin"][lo : s + n] = (two.values[sl, 0] - two.values[sl, 1]).cpu().numpy()
+                        feats["top1"][lo : s + n] = two.indices[sl, 0].to(torch.int32).cpu().numpy()
+                        del two, ent
+                    del logp, nll, correct, tgt
         finally:
             if handle is not None:
                 handle.remove()
                 model._current_ple_e_t = None
-        return out, hit
+        return out, hit, feats
 
     log("arm none: pure backbone (this should reproduce 1.5c's bb_final) ...")
-    nll_none, hit_none = per_position_nll(False)
+    nll_none, hit_none, fe_none = per_position_nll(False)
     log("arm frozen: frozen rows injected ...")
-    nll_frozen, hit_frozen = per_position_nll(True)
+    nll_frozen, hit_frozen, fe_frozen = per_position_nll(True)
     log(f"  ({time.time() - t0:.0f}s)")
 
     # ---- trained arm: substitute ONLY where training could have acted ----- #
@@ -390,7 +433,7 @@ def main() -> int:
     E[sub_pos] = trained[kk[in_keep]]
     E_t = torch.from_numpy(E)
     log(f"arm trained: substituted {sub_pos.size:,} positions that have a trained row")
-    nll_trained, hit_trained = per_position_nll(True)
+    nll_trained, hit_trained, fe_trained = per_position_nll(True)
 
     # ---- the paired quantity, on seen positions only ---------------------- #
     score = positions[np.isin(positions, sub_pos)]
@@ -446,6 +489,7 @@ def main() -> int:
 
     # ---- section 4: the frequency-stratified prediction ------------------- #
     ctx = None
+    ctx_all = None
     if args.counts_npz:
         try:
             c = np.load(args.counts_npz)
@@ -528,6 +572,65 @@ def main() -> int:
         result["per_position_record_error"] = f"{type(exc).__name__}: {exc}"
         flush()
         log(f"WARNING: could not write the per-position record ({exc}); primary result kept")
+
+    # ---- section 6: the gate record, over ALL aligned positions ----------- #
+    # Two questions need a record the primary one cannot give.
+    #
+    # 1. The gate.  Whether to trust the memory is decided BEFORE the token is
+    #    known, so the deciding features must be the model's own confidences, not
+    #    the surprisal of what actually happened.  They are recorded here for
+    #    every arm, so a gate can be trained and scored offline at zero GPU cost.
+    #
+    # 2. The regime this project has never measured.  `score` is restricted to
+    #    positions whose trigram has an E0 row, i.e. that appeared in training --
+    #    39% of the stream.  The other 61% still receive a row fetched from the
+    #    shard table, so the injection acts there, but nothing was ever scored
+    #    there.  Recording all aligned positions makes the unseen-trigram
+    #    injection effect readable for the first time, at no extra forward pass.
+    #
+    # The primary record is deliberately NOT widened: every number published
+    # before this flag existed has to stay comparable.
+    if args.gate_record:
+        try:
+            finite = np.isfinite(nll_none) & np.isfinite(nll_frozen)
+            allpos = positions[finite[positions]]
+            tri = trigram_index(allpos, codes.size)
+            has_row = np.isin(allpos, sub_pos).astype(np.uint8)
+            grec = {
+                "score": allpos,
+                "nll_none": nll_none[allpos].astype(np.float32),
+                "nll_frozen": nll_frozen[allpos].astype(np.float32),
+                "nll_trained": nll_trained[allpos].astype(np.float32),
+                "has_train_row": has_row,
+                "has_snapshot_row": hit_all[tri].astype(np.uint8),
+                "snapshot_index": np.where(hit_all[tri], j_all[tri], -1),
+                "trigram_code": codes[tri],
+            }
+            if ctx_all is not None:
+                grec["context_count"] = ctx_all[allpos]
+            for tag, fe in (("none", fe_none), ("frozen", fe_frozen), ("trained", fe_trained)):
+                for k in ("ent", "maxp", "logmargin", "top1"):
+                    grec[f"{k}_{tag}"] = fe[k][allpos]
+            for key, arr in grec.items():
+                if arr.shape != (allpos.size,):
+                    raise ValueError(f"gate record field {key!r} has shape {arr.shape}")
+            gpath = Path(args.gate_record)
+            gpath.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(gpath, **grec)
+            n_norow = int((has_row == 0).sum())
+            result["gate_record"] = {
+                "path": gpath.name,
+                "fields": sorted(grec),
+                "n": int(allpos.size),
+                "n_without_train_row": n_norow,
+            }
+            flush()
+            log(f"wrote {gpath.name} ({allpos.size:,} aligned positions, "
+                f"{n_norow:,} of them with no trainable row)")
+        except Exception as exc:  # noqa: BLE001 - an extra artifact must never lose the result
+            result["gate_record_error"] = f"{type(exc).__name__}: {exc}"
+            flush()
+            log(f"WARNING: could not write the gate record ({exc}); primary result kept")
 
     flush()
     log(f"final write {out_path}")

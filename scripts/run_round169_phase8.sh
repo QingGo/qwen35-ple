@@ -128,6 +128,10 @@ cd "$REPO" || exit 1
 export PYTHONPATH=src OMP_NUM_THREADS=16 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 mkdir -p "$OUT" "$LOGD"
 rm -f "$DONE_MARK" "$FAIL_MARK" "$FAILFILE" "$STEPSFILE"
+# A re-run must clear the previous run's roll-up.  Phase 10's first attempt
+# failed in 58 s; the retry did not remove PHASE8_ROLLUP.md, and a watcher
+# read the dead run's table as the new result.  Existence is not currency.
+rm -f "$OUT/PHASE8_ROLLUP.md"
 echo "started $(date -Is); gate features + all-position record" > "$START_MARK"
 say "=== phase 8 (deployable gate features + the unseen-trigram regime) starting ==="
 

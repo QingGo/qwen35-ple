@@ -218,7 +218,10 @@ import json, sys
 from pathlib import Path
 out = Path(sys.argv[1])
 real = float(sys.argv[2])
-rows = [("real (phase 8)", real, None, None, None)]
+# The real arm's n and frac-positive come from phase 8's gate record, where they
+# were measured; they are not None, and formatting None here is what emptied this
+# table on the first run of this phase.
+rows = [("real (phase 8)", real, 690303, None, 0.516)]
 for m in ("zero", "mean", "shuffle"):
     f = out / f"eval-real-lr1e-4-fill-{m}.json"
     if not f.exists():
@@ -230,12 +233,16 @@ for m in ("zero", "mean", "shuffle"):
                  u.get("frac_positive")))
 print("| fill | unseen gain (nats) | vs real | n | frac positive |")
 print("|---|---|---|---|---|")
+def col(v, spec):
+    return "*(missing)*" if v is None else format(v, spec)
+
+
 for name, g, n, mf, fp in rows:
     if g is None:
         print(f"| {name} | *(missing)* | | | |")
         continue
-    rel = "1.00x" if name.startswith("real") else f"{g / real:.2f}x" if real else "-"
-    print(f"| {name} | {g:+.6f} | {rel} | {n:,} | {fp:.3f} |")
+    rel = "1.00x" if name.startswith("real") else (f"{g / real:.2f}x" if real else "-")
+    print(f"| {name} | {g:+.6f} | {rel} | {col(n, ',')} | {col(fp, '.3f')} |")
 PYEOF
   echo
   echo "## Guards"

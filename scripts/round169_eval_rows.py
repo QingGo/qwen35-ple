@@ -170,8 +170,8 @@ def top1_summary(surprisal, hits: dict, edges=None) -> dict:
     }
 
 
-def fill_unseen(E: np.ndarray, unseen_pos: np.ndarray, mode: str, *, seed: int = 0) -> None:
-    """Replace, in place, the rows injected at unseen-trigram positions.
+def fill_injection(E: np.ndarray, positions: np.ndarray, mode: str, *, seed: int = 0) -> None:
+    """Replace, in place, the rows injected at the given positions.
 
     The seen block is never touched, so every trained-row result is unaffected by
     this ablation.
@@ -194,28 +194,28 @@ def fill_unseen(E: np.ndarray, unseen_pos: np.ndarray, mode: str, *, seed: int =
     if mode == "real":
         return
     if mode not in ("zero", "mean", "shuffle"):
-        raise ValueError(f"unknown unseen fill {mode!r}")
-    unseen_pos = np.asarray(unseen_pos)
-    if unseen_pos.size == 0:
+        raise ValueError(f"unknown row fill {mode!r}")
+    positions = np.asarray(positions)
+    if positions.size == 0:
         return
     if mode == "zero":
-        E[unseen_pos] = 0.0
+        E[positions] = 0.0
         return
     if mode == "mean":
         acc = np.zeros(E.shape[1], dtype=np.float64)
         cnt = 0
-        for s in range(0, unseen_pos.size, 100_000):
-            e = min(unseen_pos.size, s + 100_000)
-            block = np.asarray(E[unseen_pos[s:e]], dtype=np.float64)
+        for s in range(0, positions.size, 100_000):
+            e = min(positions.size, s + 100_000)
+            block = np.asarray(E[positions[s:e]], dtype=np.float64)
             acc += block.sum(axis=0)
             cnt += block.shape[0]
-        E[unseen_pos] = (acc / max(cnt, 1)).astype(E.dtype)
+        E[positions] = (acc / max(cnt, 1)).astype(E.dtype)
         return
-    block = np.array(E[unseen_pos])
-    perm = np.random.default_rng(seed).permutation(unseen_pos.size)
-    for s in range(0, unseen_pos.size, 50_000):
-        e = min(unseen_pos.size, s + 50_000)
-        E[unseen_pos[s:e]] = block[perm[s:e]]
+    block = np.array(E[positions])
+    perm = np.random.default_rng(seed).permutation(positions.size)
+    for s in range(0, positions.size, 50_000):
+        e = min(positions.size, s + 50_000)
+        E[positions[s:e]] = block[perm[s:e]]
 
 
 def per_position_record(score, delta, lf, lt, ln, ctx=None, snap=None, code=None,
@@ -313,6 +313,11 @@ def main() -> int:
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--backbone-dtype", default="float32")
     ap.add_argument("--unseen-fill-seed", type=int, default=0)
+    ap.add_argument("--fill-scope", choices=("unseen", "all"), default="unseen",
+                    help="'all' extends the fill to the seen block too, which decomposes "
+                         "the HEADLINE injection gain into memory retrieval and the "
+                         "reader acting as an extra layer. The `none` arm has no reader "
+                         "at all, so frozen-minus-none contains both.")
     ap.add_argument("--unseen-fill", choices=("real", "zero", "mean", "shuffle"),
                     default="real",
                     help="what to inject at positions whose trigram has no snapshot row. "
@@ -390,16 +395,30 @@ def main() -> int:
     # Only the unseen block is touched; the seen positions keep exactly the values
     # they had, so the trained-row results are unaffected by this flag.
     if args.unseen_fill != "real" and unseen_pos.size:
-        sample = np.array(E[unseen_pos[:1024]])
+        probe = unseen_pos if args.fill_scope == "unseen" else np.arange(T)
+        sample = np.array(E[probe[:1024]])
         before = float(np.abs(sample).mean())
-        fill_unseen(E, unseen_pos, args.unseen_fill, seed=args.unseen_fill_seed)
-        after_sample = np.asarray(E[unseen_pos[:1024]])
+        if args.fill_scope == "unseen":
+            fill_injection(E, unseen_pos, args.unseen_fill, seed=args.unseen_fill_seed)
+        elif args.unseen_fill == "shuffle":
+            # Permute WITHIN each block separately, so both marginal
+            # distributions survive intact and only the trigram-to-row
+            # correspondence is destroyed.  Pooling the blocks would leak the
+            # unseen rows' distribution into the seen positions.
+            fill_injection(E, seen_pos, "shuffle", seed=args.unseen_fill_seed)
+            fill_injection(E, unseen_pos, "shuffle", seed=args.unseen_fill_seed + 1)
+        elif args.unseen_fill == "mean":
+            fill_injection(E, np.concatenate([seen_pos, unseen_pos]), "mean")
+        else:
+            fill_injection(E, np.concatenate([seen_pos, unseen_pos]), "zero")
+        after_sample = np.asarray(E[probe[:1024]])
         after = float(np.abs(after_sample).mean())
         if args.unseen_fill == "zero" and float(np.abs(after_sample).max()) != 0.0:
             raise SystemExit("the zero fill did not take effect")
         if args.unseen_fill == "shuffle" and np.array_equal(sample, after_sample):
-            raise SystemExit("the shuffle left the unseen block unchanged")
-        log(f"unseen fill '{args.unseen_fill}': {unseen_pos.size:,} positions "
+            raise SystemExit("the shuffle left the block unchanged")
+        log(f"row fill '{args.unseen_fill}' scope '{args.fill_scope}': "
+            f"{unseen_pos.size:,} unseen + {seen_pos.size:,} seen "
             f"(sample |e| {before:.3e} -> {after:.3e})")
     log(f"e_t matrix built ({E.nbytes / 1e9:.1f} GB) in {time.time() - t0:.0f}s")
 
@@ -571,6 +590,7 @@ def main() -> int:
         "consistency": consistency,
         "config": {
             "unseen_fill": args.unseen_fill,
+            "fill_scope": args.fill_scope,
             "trained_bank": str(args.trained_bank), "keep_index": str(args.keep_index),
             "tokens": str(args.tokens), "positions": str(args.positions),
             "reader": str(args.reader), "reader_kind": args.reader_kind,

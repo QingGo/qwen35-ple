@@ -157,15 +157,23 @@ done
 
 # ---- guard B: the none arm cannot depend on the fill -----------------------
 BAD=0
+CHECKED=0
 for m in $MODES; do
   f=$OUT/eval-real-lr1e-4-fillall-$m.json
   [ -s "$f" ] || continue
   v=$("$PY" -c 'import json,sys;print(repr(float(json.load(open(sys.argv[1]))["mean_nll"]["none_pure_backbone"])))' "$f" 2>/dev/null)
   say "  none arm in fillall-$m: $v (reference $REF_NONE)"
+  CHECKED=$((CHECKED + 1))
   close "$v" "$REF_NONE" "$TOL" || BAD=1
 done
-if [ "$BAD" -eq 0 ]; then
-  say "guard B ok: the none arm is identical -- the runs are comparable"
+if [ "$CHECKED" -eq 0 ]; then
+  # A guard that passes vacuously is worse than no guard: on this phase's first
+  # run every arm had already died, the loop body never executed, BAD stayed 0,
+  # and guard B reported "ok: the runs are comparable" about zero runs.
+  say "FAILED guard B: no arm produced a JSON, so nothing was checked"
+  fail "guard-b-checked-nothing"
+elif [ "$BAD" -eq 0 ]; then
+  say "guard B ok ($CHECKED arms checked): the none arm is identical -- the runs are comparable"
   step "none-arm-invariant"
 else
   say "FAILED guard B: the none arm moved between runs"

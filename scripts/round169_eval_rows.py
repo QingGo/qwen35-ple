@@ -394,6 +394,32 @@ def main() -> int:
     #
     # Only the unseen block is touched; the seen positions keep exactly the values
     # they had, so the trained-row results are unaffected by this flag.
+    log(f"e_t matrix built ({E.nbytes / 1e9:.1f} GB) in {time.time() - t0:.0f}s")
+
+    # Consistency: the snapshot's row for a trigram must equal the shard table's
+    # row at a position carrying that trigram.  Without this, "frozen" is a claim.
+    consistency = {"n": 0, "max_abs_diff": None}
+    if args.consistency_sample > 0:
+        pick = np.linspace(0, seen_pos.size - 1, min(args.consistency_sample, seen_pos.size)).astype(np.int64)
+        probe = seen_pos[pick]
+        fetched = fetch_e_t(args.rows_dir, all_rowids[probe], scale=args.scale)
+        diff = float(np.abs(fetched - E[probe]).max())
+        consistency = {"n": int(probe.size), "max_abs_diff": diff}
+        log(f"snapshot-vs-shard consistency: max|diff| = {diff:.3e} over {probe.size} positions")
+        if not np.isfinite(diff) or diff > 1e-3:
+            raise SystemExit(
+                "the snapshot bank does NOT reproduce the shard table for the same "
+                "trigram -- E0 is not the frozen bank and B1 cannot be evaluated"
+            )
+
+    # ---- the row ablation, applied AFTER the construction is verified ---- #
+    # The fill has to come after the snapshot-vs-shard consistency check, not
+    # before it.  That check validates how E was BUILT (E0 really is the frozen
+    # bank); the fill is a deliberate perturbation of a correctly built E.  Run
+    # the fill first and the check compares perturbed rows against the shard
+    # table and aborts -- which is exactly what happened on this phase's first
+    # run, on both arms, in under a minute.  The guard was right; the order was
+    # wrong.
     if args.unseen_fill != "real" and unseen_pos.size:
         probe = unseen_pos if args.fill_scope == "unseen" else np.arange(T)
         sample = np.array(E[probe[:1024]])
@@ -420,24 +446,6 @@ def main() -> int:
         log(f"row fill '{args.unseen_fill}' scope '{args.fill_scope}': "
             f"{unseen_pos.size:,} unseen + {seen_pos.size:,} seen "
             f"(sample |e| {before:.3e} -> {after:.3e})")
-    log(f"e_t matrix built ({E.nbytes / 1e9:.1f} GB) in {time.time() - t0:.0f}s")
-
-    # Consistency: the snapshot's row for a trigram must equal the shard table's
-    # row at a position carrying that trigram.  Without this, "frozen" is a claim.
-    consistency = {"n": 0, "max_abs_diff": None}
-    if args.consistency_sample > 0:
-        pick = np.linspace(0, seen_pos.size - 1, min(args.consistency_sample, seen_pos.size)).astype(np.int64)
-        probe = seen_pos[pick]
-        fetched = fetch_e_t(args.rows_dir, all_rowids[probe], scale=args.scale)
-        diff = float(np.abs(fetched - E[probe]).max())
-        consistency = {"n": int(probe.size), "max_abs_diff": diff}
-        log(f"snapshot-vs-shard consistency: max|diff| = {diff:.3e} over {probe.size} positions")
-        if not np.isfinite(diff) or diff > 1e-3:
-            raise SystemExit(
-                "the snapshot bank does NOT reproduce the shard table for the same "
-                "trigram -- E0 is not the frozen bank and B1 cannot be evaluated"
-            )
-
     # ---- model + reader --------------------------------------------------- #
     scale = resolve_ple_weight_scale(model_dir=args.model, scale=args.scale)
     _tokenizer, model = p0._load_model(args.model, args.device, args.backbone_dtype)

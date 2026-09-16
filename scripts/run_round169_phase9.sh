@@ -171,15 +171,24 @@ done
 # difference between their frozen arms could be attributed to the fill.
 if [ -s "$OUT/eval-real-lr1e-4-fill-zero.json" ]; then
   BAD=0
+  CHECKED=0
   for m in $MODES; do
     f=$OUT/eval-real-lr1e-4-fill-$m.json
     [ -s "$f" ] || continue
     v=$("$PY" -c 'import json,sys;print(repr(float(json.load(open(sys.argv[1]))["mean_nll"]["none_pure_backbone"])))' "$f" 2>/dev/null)
     say "  none arm in fill-$m: $v (reference $REF_NONE)"
+    CHECKED=$((CHECKED + 1))
     close "$v" "$REF_NONE" "$TOL" || BAD=1
   done
-  if [ "$BAD" -eq 0 ]; then
-    say "guard B ok: the none arm is identical in all fills -- the runs are comparable"
+  if [ "$CHECKED" -eq 0 ]; then
+    # A guard that passes vacuously is worse than no guard: when every arm has
+    # already died the loop body never runs, BAD stays 0, and guard B reports
+    # "the runs are comparable" about zero runs.  That is what phase 10's first
+    # attempt did.
+    say "FAILED guard B: no arm produced a JSON, so nothing was checked"
+    fail "guard-b-checked-nothing"
+  elif [ "$BAD" -eq 0 ]; then
+    say "guard B ok ($CHECKED arms checked): the none arm is identical in all fills -- the runs are comparable"
     step "none-arm-invariant"
   else
     say "FAILED guard B: the none arm moved between fills, so the fill is not the only variable"
